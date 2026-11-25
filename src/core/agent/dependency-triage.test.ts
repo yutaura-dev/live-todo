@@ -146,6 +146,25 @@ describe("runDependencyReviews", () => {
       assert.strictEqual(second.recorded.requests[0]?.resumeSessionId, "session-1");
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("調べたときの commit が残っていない調査（commit を残す前に調べたもの）は、merge できるよう調べ直す", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      yield* (yield* Database).insert(agentRuns).values({
+        taskId,
+        kind: "dependency_review",
+        status: "succeeded",
+        subjectFingerprint: "v1",
+        previousStatus: "todo",
+        result: { conclusion: "mergeable" },
+        startedAt: "2026-11-25T00:00:00.000Z",
+      });
+      const agent = withAgent();
+
+      const outcome = yield* agent.provide(run);
+
+      assert.deepStrictEqual(outcome, [{ taskId, succeeded: true }]);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("同じ状態の PR は二度調べない（失敗したものも、PR が変わるまでやり直さない）", () =>
     Effect.gen(function* () {
       yield* dependencyTask();

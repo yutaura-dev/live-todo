@@ -75,12 +75,12 @@ export const runDependencyReviews = (options: DependencyReviewOptions) =>
     for (const row of rows) {
       if (PULL_URL.exec(row.url) === null || !isDependencyBot(row.author)) continue;
       const reviewed = yield* db
-        .select({ id: agentRuns.id })
+        .select({ status: agentRuns.status, subjectSha: agentRuns.subjectSha })
         .from(agentRuns)
         .where(and(eq(agentRuns.taskId, row.taskId), eq(agentRuns.kind, KIND), eq(agentRuns.subjectFingerprint, row.fingerprint)))
-        .limit(1)
         .pipe(Effect.orDie);
-      if (reviewed.length > 0) continue;
+      // 成功したのに commit が残っていない調査は、commit を残す前のもの。merge に使えないので調べ直す
+      if (reviewed.some((run) => !(run.status === "succeeded" && run.subjectSha === null))) continue;
       yield* db
         .insert(agentRuns)
         .values({ taskId: row.taskId, kind: KIND, status: "queued", subjectFingerprint: row.fingerprint, previousStatus: row.status, startedAt: yield* nowIso })
