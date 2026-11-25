@@ -1,0 +1,36 @@
+{
+  "llmProfiles": {
+    "work": {
+      "provider": "azure-openai",
+      "model": "gpt-5"
+    },
+    "personal": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "decisions": {
+        "provider": "openai"
+      }
+    }
+  },
+  "defaultLlmProfile": "work",
+  "accounts": [
+    {
+      "kind": "github",
+      "id": "work",
+      "repositories": {
+        "include": [
+          "acme/*"
+        ],
+        "exclude": [
+          "acme/legacy"
+        ]
+      }
+    },
+    {
+      "kind": "github",
+      "id": "personal",
+      "llmProfile": "personal",
+      "initialLookbackDays": 7
+    }
+  ]
+}

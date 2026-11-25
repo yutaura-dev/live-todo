@@ -129,7 +129,7 @@ describe("makeGitHubPullRequestWatchProvider", () => {
 
   const subjectsWith = (client: GitHubClient["Service"]) =>
     Effect.gen(function* () {
-      const provider = yield* makeGitHubPullRequestWatchProvider;
+      const provider = yield* makeGitHubPullRequestWatchProvider("work");
       return yield* provider.subjects;
     }).pipe(Effect.provideService(GitHubClient, client));
 
@@ -163,7 +163,7 @@ describe("makeGitHubPullRequestWatchProvider", () => {
 
   it.effect("Sync につなぐと、困った状態ごとに Task ができる", () =>
     Effect.gen(function* () {
-      const provider = yield* makeGitHubPullRequestWatchProvider.pipe(
+      const provider = yield* makeGitHubPullRequestWatchProvider("work").pipe(
         Effect.provideService(GitHubClient, clientWith({ pull: conflictedPull })),
       );
       const binding = watchBinding(provider, pullRequestConditions);
@@ -174,7 +174,7 @@ describe("makeGitHubPullRequestWatchProvider", () => {
       const tasks = yield* TaskRepository;
       const titles: string[] = [];
       for (const condition of pullRequestConditions) {
-        const item = yield* items.findItem("github:watch", `${PULL_URL}#${condition.id}`);
+        const item = yield* items.findItem("github:work:watch", `${PULL_URL}#${condition.id}`);
         const task = Option.isSome(item) ? yield* tasks.findTaskByItem(item.value.id) : Option.none();
         if (Option.isSome(task)) titles.push(task.value.title);
       }

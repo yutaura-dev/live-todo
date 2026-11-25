@@ -6,3 +6,6 @@
 
 # 秘匿値（API キー・トークン）
 .env.local
+
+# PC ごとのアプリ設定（アカウント・LLM Profile）
+config.json

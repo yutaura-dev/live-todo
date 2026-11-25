@@ -61,6 +61,16 @@ WatchProvider（対象の一覧）× Condition（holds / clear / unknown）
 | `task_changes` | Task Change。`seen_at` が NULL のものが更新マーク |
 | `sync_cursors` | Source ごとのカーソル |
 
+## 設定と秘密情報
+
+| 種類 | 置き場所 | 読み込み |
+|------|------|------|
+| アカウント・LLM Profile・フィルター | PC ごとの `config.json`（形式は `config.example.json`） | `src/app/config/app-config.ts`。読み込み時に項目同士の整合性まで検証する |
+| トークン・API キー | 今は環境変数 `LIVE_TODO_SECRET_<キー>`（`.env.local`）。Electron に載せるときに safeStorage に差し替える | `src/core/config/secret-store.ts`（`SecretStore`）。値は `Redacted` で持つ |
+
+- アカウントごとに Source 名を分ける（`github:<id>`、見張りは `github:<id>:watch`）
+- アカウントが LLM Profile を省略したら `defaultLlmProfile` を使う。当面は PC 単位の 1 つで運用し、データ構造だけ先にアカウント単位にしてある（charter の前提と制約）
+
 ## 技術スタック
 
 決定の経緯は [ADR-0002](decisions/0002-desktop-app-stack.md) と [ADR-0005](decisions/0005-adopt-effect.md) を参照。

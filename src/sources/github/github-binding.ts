@@ -3,13 +3,14 @@ import { DEFAULT_TODO_THRESHOLDS, makeTodoJudge, type TodoJudgeThresholds } from
 import type { ItemDraft, SourceBinding } from "../../core/sync/sync-source.js";
 import { type GitHubAdapterOptions, type GitHubItem, githubTodoRules, makeGitHubAdapter } from "./github-adapter.js";
 
-export const GITHUB_SOURCE = "github";
+/** アカウントごとに Source 名を分け、カーソルや Item が混ざらないようにする */
+export const githubSourceName = (accountId: string) => `github:${accountId}`;
 
 const GITHUB_TODO_QUESTION = "この GitHub の通知は、自分が対応すべきタスクか？";
 
 const GitHubCursor = Schema.Struct({ since: Schema.String });
 
-export type GitHubBindingOptions = GitHubAdapterOptions & { thresholds?: TodoJudgeThresholds };
+export type GitHubBindingOptions = GitHubAdapterOptions & { accountId: string; thresholds?: TodoJudgeThresholds };
 
 export function githubItemDraft(item: GitHubItem): ItemDraft {
   return {
@@ -44,7 +45,7 @@ export const makeGitHubBinding = Effect.fnUntraced(function* (options: GitHubBin
   });
 
   return {
-    source: GITHUB_SOURCE,
+    source: githubSourceName(options.accountId),
     adapter,
     cursorSchema: GitHubCursor,
     externalIdOf: (item: GitHubItem) => item.externalId,

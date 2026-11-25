@@ -13,7 +13,7 @@ export type RepositoryFilterConfig = {
 type Pattern = { owner: string; repo: string };
 
 const RepositoryPattern = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]+\/([A-Za-z0-9_.-]+|\*)$/));
-const isRepositoryPattern = Schema.is(RepositoryPattern);
+export const isRepositoryPattern = Schema.is(RepositoryPattern);
 
 const parsePattern = (pattern: string): Effect.Effect<Pattern, InvalidRepositoryPatternError> => {
   if (!isRepositoryPattern(pattern)) {

@@ -1,7 +1,7 @@
 import { DateTime, Effect, Option, Schema } from "effect";
 import type { Condition, WatchProvider } from "../../core/watch/watcher.js";
 import { decodeResponse, type GitHubAdapterError, GitHubClient } from "./github-adapter.js";
-import { GITHUB_SOURCE } from "./github-binding.js";
+import { githubSourceName } from "./github-binding.js";
 
 export type CheckRun = { status: string; conclusion: string | null };
 export type PullRequestReview = { login: string; state: string; commitId: string; submittedAt: string };
@@ -50,7 +50,7 @@ const decodeReviews = decodeResponse(ReviewsResponse);
 // 1 回の見張りで GitHub の API レート制限を使い切らないよう、同時に詳細を取りに行く PR の数を絞る。
 const PULL_REQUEST_FETCH_CONCURRENCY = 5;
 
-export const makeGitHubPullRequestWatchProvider = Effect.gen(function* () {
+export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (accountId: string) {
   const client = yield* GitHubClient;
 
   const loadSubject = Effect.fnUntraced(function* (apiUrl: string) {
@@ -93,7 +93,7 @@ export const makeGitHubPullRequestWatchProvider = Effect.gen(function* () {
   });
 
   return {
-    source: GITHUB_SOURCE,
+    source: githubSourceName(accountId),
     subjects,
     subjectId: (subject) => subject.apiUrl,
     subjectUrl: (subject) => subject.htmlUrl,

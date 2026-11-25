@@ -57,6 +57,15 @@ describe("githubItemDraft", () => {
   });
 });
 
+describe("makeGitHubBinding", () => {
+  it.effect("アカウントごとに別の Source 名を使う", () =>
+    Effect.gen(function* () {
+      const binding = yield* makeGitHubBinding({ accountId: "work", initialLookbackDays: 14 });
+
+      assert.strictEqual(binding.source, "github:work");
+    }).pipe(Effect.provideService(GitHubClient, gitHubClientStub())));
+});
+
 describe("GitHub の通知から Task まで", () => {
   const openPull = { ...mergedPull, state: "open", merged: false };
   const openIssue = { ...closedIssue, state: "open", state_reason: null };
@@ -80,7 +89,7 @@ describe("GitHub の通知から Task まで", () => {
     const all = yield* tasks.listTasks;
     const result: Record<string, string> = {};
     for (const externalId of [PULL_URL, ISSUE_URL, "github:thread:1003"]) {
-      const item = yield* items.findItem("github", externalId);
+      const item = yield* items.findItem("github:work", externalId);
       if (Option.isNone(item)) continue;
       const task = yield* tasks.findTaskByItem(item.value.id);
       result[externalId] = Option.match(task, {
@@ -94,7 +103,7 @@ describe("GitHub の通知から Task まで", () => {
   const runSync = (client: GitHubClient["Service"], classifier: StructuredClassifier["Service"], times: number) =>
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse("2026-11-25T00:00:00Z"));
-      const binding = yield* makeGitHubBinding({ initialLookbackDays: 14 });
+      const binding = yield* makeGitHubBinding({ accountId: "work", initialLookbackDays: 14 });
       for (let index = 0; index < times; index++) yield* syncSource(binding);
     }).pipe(Effect.provideService(GitHubClient, client), Effect.provideService(StructuredClassifier, classifier));
 

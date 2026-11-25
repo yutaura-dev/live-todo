@@ -6,6 +6,9 @@ node_modules/
 /result
 /result-*
 
+# local app config（形式は config.example.json）
+/config.json
+
 # env files
 .env
 .env*.local
