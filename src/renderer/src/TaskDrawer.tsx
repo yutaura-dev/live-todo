@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MovableStatus, TaskDetail } from "../../shared/api.js";
 import { api } from "./api.js";
-import { conclusionLabel, describeChange, judgmentText, splitTitle, statusLabel } from "./task-text.js";
+import { conclusionLabel, describeChange, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
 
@@ -55,7 +55,15 @@ export function TaskDrawer(props: {
       <div className="drawer-backdrop" onClick={props.onClose} aria-hidden="true" />
       <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
         <header className="drawer-header">
-          <p className="drawer-status">{detail ? statusLabel(detail.status) : ""}</p>
+          <p className="drawer-status">
+            {detail ? (
+              <>
+                <span className="task-number">{taskNumber(detail.id)}</span> {statusLabel(detail.status)}
+              </>
+            ) : (
+              ""
+            )}
+          </p>
           <button ref={closeButton} type="button" className="quiet-button" onClick={props.onClose}>
             閉じる
           </button>

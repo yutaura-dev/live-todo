@@ -297,6 +297,8 @@ button {
 
 /* 棚のカードは数が多いので、開く操作は文字だけにして高さを抑える */
 .open-link {
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 0;
   border: 0;
   background: none;
@@ -956,6 +958,24 @@ button:disabled {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
   user-select: all;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  margin: 4px 0 0;
+}
+
+.card-meta .card-repository {
+  margin: 0;
+}
+
+.task-number {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .toast {

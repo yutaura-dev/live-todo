@@ -37,6 +37,9 @@ export function splitTitle(title: string): { main: string; repository?: string }
   return match ? { main: match[1]!, repository: match[2]! } : { main: title };
 }
 
+/** Task の番号。作られた順の連番（id）を、GitHub の issue のように #42 と書く */
+export const taskNumber = (id: number) => `#${id}`;
+
 export const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
 const valueText = (field: string | null, value: unknown) => {

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { conclusionLabel, describeChange, judgmentText, statusLabel } from "./task-text.js";
+import { conclusionLabel, describeChange, judgmentText, statusLabel, taskNumber } from "./task-text.js";
 
 const change = (overrides: Partial<Parameters<typeof describeChange>[0]>) => ({
   kind: "field_changed",
@@ -70,6 +70,12 @@ describe("conclusionLabel", () => {
     assert.strictEqual(conclusionLabel("mergeable"), "merge 可能");
     assert.strictEqual(conclusionLabel("mergeable_after_fix"), "修正すれば merge 可能");
     assert.strictEqual(conclusionLabel("not_mergeable"), "merge できない");
+  });
+});
+
+describe("taskNumber", () => {
+  it("Task の番号を GitHub の issue のように # を付けて書く", () => {
+    assert.strictEqual(taskNumber(42), "#42");
   });
 });
 

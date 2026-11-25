@@ -13,7 +13,7 @@ import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot }
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
 import { TaskDrawer } from "./TaskDrawer.js";
-import { splitTitle } from "./task-text.js";
+import { splitTitle, taskNumber } from "./task-text.js";
 
 const REFRESH_INTERVAL_MS = 15_000;
 const UNDO_VISIBLE_MS = 8_000;
@@ -301,7 +301,10 @@ function Card(props: {
           {main}
         </button>
       </h3>
-      {repository && <p className="card-repository">{repository}</p>}
+      <p className="card-meta">
+        <span className="task-number">{taskNumber(card.id)}</span>
+        {repository && <span className="card-repository">{repository}</span>}
+      </p>
       {card.status === "agent_running" && <p className="card-brief card-brief--working">Claude Code が調べています</p>}
       {card.status !== "agent_running" && card.brief && <p className="card-brief">{card.brief}</p>}
       {inTray && card.judgment && <Judgment judgment={card.judgment} />}
