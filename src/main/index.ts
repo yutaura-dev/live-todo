@@ -1,12 +1,14 @@
 import { join } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Cause, Effect, Fiber, Layer, ManagedRuntime, Option, Redacted } from "effect";
+import { Cause, DateTime, Effect, Fiber, Layer, ManagedRuntime, Option, Redacted } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
+import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
+import { tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
@@ -16,7 +18,7 @@ import { runJobs } from "../core/sync/scheduler.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import { GitHubClient, GitHubRequestError } from "../sources/github/github-adapter.js";
 import { GitHubClientLive } from "../sources/github/github-client-live.js";
-import type { Outcome, SecretStatus, SettingsSnapshot } from "../shared/api.js";
+import type { GitHubTokenSummary, Outcome, SecretStatus, SettingsSnapshot } from "../shared/api.js";
 import {
   decodeFilterPreviewRequest,
   decodeMoveRequest,
@@ -42,6 +44,7 @@ const headless = smokeTest || screenshotPath !== undefined;
 if (headless) app.setPath("userData", join(app.getPath("temp"), "live-todo-check"));
 // 開発中もリポジトリの中に置かない理由: 暗号化していても、誤ってコミットする経路を作らないため
 const secretsPath = join(app.getPath("userData"), "secrets.json");
+const tokenInfoPath = join(app.getPath("userData"), "github-tokens.json");
 const LLM_SECRET_KEYS = ["llm.anthropic.api_key", "llm.openai.api_key"] as const;
 
 // safeStorage は app の ready 後でないと使えないので、呼ばれた時点で確かめる
@@ -59,6 +62,9 @@ const AppLayer = Layer.mergeAll(BoardService.layer.pipe(Layer.provideMerge(TaskR
   Layer.provideMerge(Layer.mergeAll(FetchHttpClient.layer, NodeFileSystem.layer)),
 );
 const runtime = ManagedRuntime.make(AppLayer);
+// 使うたびに作る理由: 中身はファイルの読み書きだけで、書くのはトークンを保存・削除したときに限られるため
+const tokenInfoStore = makeTokenInfoStore(tokenInfoPath);
+const accountOfTokenKey = (key: string) => /^github\.(.+)\.token$/.exec(key)?.[1];
 
 let syncFiber: Fiber.Fiber<unknown, unknown> | undefined;
 let syncProblem: string | undefined;
@@ -122,7 +128,13 @@ const settingsSnapshot = Effect.gen(function* () {
   }
 
   const encryptionAvailable = yield* Effect.promise(() => keychainCipher.isAvailable().catch(() => false));
-  return { configPath, config, problems, secrets, encryptionAvailable } satisfies SettingsSnapshot;
+  const now = yield* DateTime.now;
+  const githubTokens: Record<string, GitHubTokenSummary> = {};
+  for (const [accountId, info] of Object.entries(yield* (yield* tokenInfoStore).all)) {
+    const expiryWarning = tokenExpiryWarning(info.expiresAt, now);
+    githubTokens[accountId] = { ...info, ...(expiryWarning === undefined ? {} : { expiryWarning }) };
+  }
+  return { configPath, config, problems, secrets, encryptionAvailable, githubTokens } satisfies SettingsSnapshot;
 });
 
 function registerIpc() {
@@ -160,19 +172,44 @@ function registerIpc() {
     return outcome;
   });
   ipcMain.handle(IPC_CHANNELS.setSecret, async (_event, input: unknown) => {
+    let detail: string | undefined;
     const outcome = await outcomeOf(
       Effect.gen(function* () {
         const { key, value } = yield* decodeSecretInput(input);
-        yield* (yield* SecretVault).set(key, Redacted.make(value));
+        const secret = Redacted.make(value);
+        // GitHub のトークンは、同期に使えると確かめてから保存する（使えないトークンで同期を失敗させ続けないため）
+        if (key.startsWith("github.")) {
+          const http = yield* HttpClient.HttpClient;
+          const info = yield* Effect.gen(function* () {
+            return yield* verifyGitHubToken(yield* GitHubClient);
+          }).pipe(Effect.provide(GitHubClientLive({ token: secret })), Effect.provideService(HttpClient.HttpClient, http));
+          yield* (yield* SecretVault).set(key, secret);
+          const accountId = accountOfTokenKey(key);
+          if (accountId !== undefined) {
+            const { expiresAt, ...rest } = info;
+            yield* (yield* tokenInfoStore).save(accountId, {
+              ...rest,
+              ...(expiresAt === undefined ? {} : { expiresAt }),
+              verifiedAt: DateTime.formatIso(yield* DateTime.now),
+            });
+          }
+          detail = `${info.login} のトークンとして確認しました`;
+          return;
+        }
+        yield* (yield* SecretVault).set(key, secret);
       }),
     );
-    if (outcome.ok) await restartSync();
-    return outcome;
+    if (!outcome.ok) return outcome;
+    await restartSync();
+    return detail === undefined ? outcome : { ...outcome, detail };
   });
   ipcMain.handle(IPC_CHANNELS.removeSecret, async (_event, input: unknown) => {
     const outcome = await outcomeOf(
       Effect.gen(function* () {
-        yield* (yield* SecretVault).remove(yield* decodeSecretKey(input));
+        const key = yield* decodeSecretKey(input);
+        yield* (yield* SecretVault).remove(key);
+        const accountId = accountOfTokenKey(key);
+        if (accountId !== undefined) yield* (yield* tokenInfoStore).remove(accountId);
       }),
     );
     if (outcome.ok) await restartSync();
@@ -206,7 +243,7 @@ function createWindow() {
     height: 900,
     minWidth: 960,
     title: "live-todo",
-    backgroundColor: "#E8EDF1",
+    backgroundColor: "#141826",
     // 確認用の起動では透明にし、フォーカスを奪わずに表示する。隠したまま（show: false）だと
     // macOS ではページの読み込みが進まないため
     show: !headless,

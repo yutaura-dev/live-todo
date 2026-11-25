@@ -47,6 +47,15 @@ export const mockApi: LiveTodoApi = {
     problems: [],
     secrets: { "github.personal.token": "saved", "llm.anthropic.api_key": "env", "llm.openai.api_key": "missing" },
     encryptionAvailable: true,
+    githubTokens: {
+      personal: {
+        login: "octocat",
+        scopes: ["repo", "read:org"],
+        expiresAt: new Date(now + 5 * 24 * 60 * 60_000).toISOString(),
+        verifiedAt: ago(60 * 24 * 80),
+        expiryWarning: { daysLeft: 5 },
+      },
+    },
   }),
   saveConfig: async (next) => {
     config = next;

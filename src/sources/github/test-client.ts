@@ -12,6 +12,7 @@ export const gitHubClientStub = (overrides: Partial<GitHubClient["Service"]> = {
     listReviews: () => Effect.succeed<unknown>([]),
     getComment: () => Effect.succeed(Option.none()),
     getViewer: Effect.succeed<unknown>({ login: "me" }),
+    inspectToken: Effect.succeed({ viewer: { login: "me" }, scopes: ["repo"], expiresAt: undefined }),
     listMyRepositories: Effect.succeed({ repositories: [], truncated: false }),
     ...overrides,
   });

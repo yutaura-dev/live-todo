@@ -193,6 +193,28 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
             ),
           ),
         ),
+        inspectToken: Effect.gen(function* () {
+          const url = yield* resolveUrl("/user");
+          const response = yield* send(url);
+          if (Option.isNone(response)) {
+            return yield* new GitHubRequestError({ message: "自分のアカウントを取得できない: GET /user", status: 404 });
+          }
+          const header = (name: string) => Option.getOrUndefined(Headers.get(response.value.headers, name));
+          const scopesHeader = header("x-oauth-scopes");
+          // 形式は "2026-12-01 09:00:00 UTC"。ISO 8601 に直してから読む
+          const expirationHeader = header("github-authentication-token-expiration");
+          const expiresAt =
+            expirationHeader === undefined
+              ? undefined
+              : Option.getOrUndefined(
+                  Option.map(DateTime.make(expirationHeader.replace(" UTC", "Z").replace(" ", "T")), DateTime.formatIso),
+                );
+          return {
+            viewer: yield* jsonOf(url)(response.value),
+            scopes: scopesHeader === undefined ? undefined : scopesHeader.split(",").map((scope) => scope.trim()).filter((scope) => scope !== ""),
+            expiresAt,
+          };
+        }),
         searchMyOpenPullRequests: resolveUrl("/search/issues", {
           q: "is:pr is:open author:@me archived:false",
           per_page: PER_PAGE,

@@ -3,6 +3,7 @@ import type {
   AccountFilterPreview,
   ConfigDocument,
   FilterReason,
+  GitHubTokenSummary,
   LlmProvider,
   SecretStatus,
   SettingsSnapshot,
@@ -99,6 +100,7 @@ export function Settings() {
               profiles={Object.keys(draft.llmProfiles)}
               defaultProfile={draft.defaultLlmProfile}
               tokenStatus={snapshot.secrets[`github.${account.id}.token`] ?? "missing"}
+              tokenSummary={snapshot.githubTokens[account.id]}
               onChange={(next) => updateAccount(index, next)}
               onRemove={() => setDraft((current) => ({ ...current, accounts: current.accounts.filter((_, at) => at !== index) }))}
               onSecretChanged={reload}
@@ -140,6 +142,7 @@ function AccountEditor(props: {
   profiles: string[];
   defaultProfile: string;
   tokenStatus: SecretStatus;
+  tokenSummary: GitHubTokenSummary | undefined;
   onChange: (next: Account) => void;
   onRemove: () => void;
   onSecretChanged: () => Promise<unknown>;
@@ -175,6 +178,10 @@ function AccountEditor(props: {
       </header>
 
       <SecretField label="トークン" secretKey={`github.${account.id}.token`} status={props.tokenStatus} onChanged={props.onSecretChanged} />
+      {props.tokenStatus === "saved" && props.tokenSummary && <TokenSummary summary={props.tokenSummary} />}
+      {props.tokenStatus === "env" && (
+        <p className="token-summary">環境変数のトークンは確かめていません。ここに貼り付けて保存すると、権限と有効期限を確かめます。</p>
+      )}
 
       <div className="field-row">
         <label className="field">
@@ -230,6 +237,25 @@ function AccountEditor(props: {
 
       {preview !== null && <FilterPreview preview={preview} />}
     </article>
+  );
+}
+
+const dateOf = (iso: string) => new Date(iso).toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+
+function TokenSummary({ summary }: { summary: GitHubTokenSummary }) {
+  return (
+    <div className="token-summary">
+      <p>
+        {summary.login} のトークン。権限: {summary.scopes.join(", ")}。有効期限: {summary.expiresAt === undefined ? "なし" : dateOf(summary.expiresAt)}
+      </p>
+      {summary.expiryWarning && (
+        <p className="expiry-warning" role="alert">
+          {summary.expiryWarning.daysLeft === 0
+            ? "有効期限が切れています。同期が止まるので、新しいトークンを貼り付けて保存してください。"
+            : `あと ${summary.expiryWarning.daysLeft} 日で有効期限が切れます。新しいトークンを貼り付けて保存してください。`}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -426,13 +452,26 @@ function LlmEditor(props: { draft: ConfigDocument; onChange: (next: ConfigDocume
 function SecretField(props: { label: string; secretKey: string; status: SecretStatus; onChanged: () => Promise<unknown> }) {
   const [value, setValue] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const id = useId();
+  const verifies = props.secretKey.startsWith("github.");
 
   const save = async () => {
-    const outcome = await api.setSecret(props.secretKey, value);
-    setValue("");
-    setMessage(outcome.ok ? "保存しました" : `保存できませんでした: ${outcome.message}`);
-    await props.onChanged();
+    setSaving(true);
+    setMessage(verifies ? "GitHub で確かめています" : null);
+    try {
+      const outcome = await api.setSecret(props.secretKey, value);
+      if (outcome.ok) {
+        setValue("");
+        setMessage(outcome.detail === undefined ? "保存しました" : `${outcome.detail}。保存しました`);
+      } else {
+        // 失敗したときは入力を残す（打ち直さずに権限を直したトークンと見比べられるように）
+        setMessage(`保存しませんでした: ${outcome.message}`);
+      }
+      await props.onChanged();
+    } finally {
+      setSaving(false);
+    }
   };
   const remove = async () => {
     const outcome = await api.removeSecret(props.secretKey);
@@ -454,8 +493,8 @@ function SecretField(props: { label: string; secretKey: string; status: SecretSt
         onChange={(event) => setValue(event.target.value)}
         placeholder={props.status === "missing" ? "貼り付けて保存" : "新しい値で置き換える"}
       />
-      <button type="button" className="quiet-button" disabled={value.trim() === ""} onClick={() => void save()}>
-        保存
+      <button type="button" className="quiet-button" disabled={value.trim() === "" || saving} onClick={() => void save()}>
+        {verifies ? "確かめて保存" : "保存"}
       </button>
       {props.status === "saved" && (
         <button type="button" className="dismiss-button" onClick={() => void remove()}>

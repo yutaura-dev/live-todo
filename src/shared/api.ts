@@ -34,9 +34,20 @@ export type SettingsSnapshot = {
   secrets: Record<string, SecretStatus>;
   /** OS の暗号化（キーチェーン）が使えるか。使えなければ秘密情報を保存できない */
   encryptionAvailable: boolean;
+  /** アカウントごとの、保存したときに確かめた GitHub トークンの情報 */
+  githubTokens: Record<string, GitHubTokenSummary>;
 };
 
-export type Outcome = { ok: true } | { ok: false; message: string };
+export type GitHubTokenSummary = {
+  login: string;
+  scopes: readonly string[];
+  expiresAt?: string;
+  verifiedAt: string;
+  /** 期限が近い（または過ぎた）ときだけ、残りの日数 */
+  expiryWarning?: { daysLeft: number };
+};
+
+export type Outcome = { ok: true; detail?: string } | { ok: false; message: string };
 
 export type FilterPreviewRequest = {
   accountId: string;

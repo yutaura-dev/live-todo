@@ -174,6 +174,27 @@ describe("GitHubClientLive", () => {
       assert.isTrue(Option.isNone(missing));
     }));
 
+  it.effect("トークンの持ち主・権限・有効期限を /user の応答ヘッダーから読む", () =>
+    Effect.gen(function* () {
+      const { layer } = fakeGitHub(() => ({
+        body: { login: "octocat" },
+        headers: { "x-oauth-scopes": "repo, read:org", "github-authentication-token-expiration": "2026-12-01 09:00:00 UTC" },
+      }));
+
+      const result = yield* withClient(layer, (client) => client.inspectToken);
+
+      assert.deepStrictEqual(result, { viewer: { login: "octocat" }, scopes: ["repo", "read:org"], expiresAt: "2026-12-01T09:00:00.000Z" });
+    }));
+
+  it.effect("権限や有効期限のヘッダーがなければ、それぞれ undefined にする（fine-grained token や期限なしのトークン）", () =>
+    Effect.gen(function* () {
+      const { layer } = fakeGitHub(() => ({ body: { login: "octocat" } }));
+
+      const result = yield* withClient(layer, (client) => client.inspectToken);
+
+      assert.deepStrictEqual(result, { viewer: { login: "octocat" }, scopes: undefined, expiresAt: undefined });
+    }));
+
   it.effect("自分のアカウントは /user から取得する", () =>
     Effect.gen(function* () {
       const { requests, layer } = fakeGitHub(() => ({ body: { login: "YutaUra" } }));

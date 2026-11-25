@@ -9,7 +9,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { useCallback, useEffect, useState } from "react";
-import type { Board, BoardCard, BoardColumnId, MovableStatus } from "../../shared/api.js";
+import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot } from "../../shared/api.js";
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
 
@@ -31,8 +31,10 @@ export function App() {
   const [board, setBoard] = useState<Board | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [expiringTokens, setExpiringTokens] = useState<{ accountId: string; daysLeft: number }[]>([]);
 
   const load = useCallback(async () => {
+    void api.settings().then((snapshot) => setExpiringTokens(expiringTokensOf(snapshot)));
     try {
       setBoard(await api.board());
       setLoadedAt(new Date().toISOString());
@@ -113,6 +115,15 @@ export function App() {
           </button>
         )}
       </header>
+      {view === "board" &&
+        expiringTokens.map(({ accountId, daysLeft }) => (
+          <p key={accountId} className="expiry-banner" role="alert">
+            {daysLeft === 0 ? `${accountId} の GitHub トークンの有効期限が切れています。` : `${accountId} の GitHub トークンは、あと ${daysLeft} 日で有効期限が切れます。`}
+            <button type="button" className="quiet-button" onClick={() => setView("settings")}>
+              設定で新しいトークンを入れる
+            </button>
+          </p>
+        ))}
       {problem && (
         <p className="problem" role="alert">
           {problem}
@@ -133,6 +144,12 @@ export function App() {
         </DndContext>
       )}
     </div>
+  );
+}
+
+function expiringTokensOf(snapshot: SettingsSnapshot) {
+  return Object.entries(snapshot.githubTokens).flatMap(([accountId, token]) =>
+    token.expiryWarning === undefined ? [] : [{ accountId, daysLeft: token.expiryWarning.daysLeft }],
   );
 }
 
