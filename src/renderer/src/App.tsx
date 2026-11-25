@@ -13,15 +13,10 @@ import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot }
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
 import { TaskDrawer } from "./TaskDrawer.js";
+import { splitTitle } from "./task-text.js";
 
 const REFRESH_INTERVAL_MS = 15_000;
 const UNDO_VISIBLE_MS = 8_000;
-
-/** "タイトル（owner/repo）" をタイトルとリポジトリに分ける */
-function splitTitle(title: string): { main: string; repository?: string } {
-  const match = /^(.*)（([^（）\s]+\/[^（）\s]+)）$/.exec(title);
-  return match ? { main: match[1]!, repository: match[2]! } : { main: title };
-}
 
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
 

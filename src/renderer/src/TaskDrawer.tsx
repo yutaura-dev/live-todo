@@ -1,18 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { MovableStatus, TaskDetail } from "../../shared/api.js";
 import { api } from "./api.js";
-import { describeChange, judgmentText, statusLabel } from "./task-text.js";
+import { describeChange, judgmentText, splitTitle, statusLabel } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
 
 const dateTimeOf = (iso: string) =>
   new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-/** "タイトル（owner/repo）" をタイトルとリポジトリに分ける */
-function splitTitle(title: string): { main: string; repository?: string } {
-  const match = /^(.*)（([^（）\s]+\/[^（）\s]+)）$/.exec(title);
-  return match ? { main: match[1]!, repository: match[2]! } : { main: title };
-}
 
 export function TaskDrawer(props: {
   taskId: number;

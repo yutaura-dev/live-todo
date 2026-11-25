@@ -22,6 +22,12 @@ export function judgmentText(judgment: CardJudgment): string {
   return method;
 }
 
+/** "タイトル（owner/repo）" をタイトルとリポジトリに分ける */
+export function splitTitle(title: string): { main: string; repository?: string } {
+  const match = /^(.*)（([^（）\s]+\/[^（）\s]+)）$/.exec(title);
+  return match ? { main: match[1]!, repository: match[2]! } : { main: title };
+}
+
 export const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
 const valueText = (field: string | null, value: unknown) => {
