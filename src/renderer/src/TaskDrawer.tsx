@@ -18,6 +18,8 @@ export function TaskDrawer(props: {
   onDelete: (taskId: number) => Promise<void>;
   /** merge などで Task が外から変わったあとに、カンバンを読み直す */
   onChanged: () => Promise<void>;
+  /** merge を始めたあとなど、ドロワーを閉じてカンバンで進み具合を見せたいとき */
+  onStarted: () => Promise<void>;
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -103,7 +105,7 @@ export function TaskDrawer(props: {
 
             {detail.brief && <p className="drawer-brief">{detail.brief}</p>}
 
-            <NextAction detail={detail} onMerged={props.onChanged} />
+            <NextAction detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />
             {detail.agentRun && <AgentRunSection run={detail.agentRun} problem={detail.agentRunProblem} taskId={detail.id} onRequested={props.onChanged} />}
 
             <section className="drawer-section" aria-labelledby="drawer-items">
@@ -218,7 +220,7 @@ function ReviewField({ label, text }: { label: string; text: string | undefined 
 const METHOD_LABELS: Record<string, string> = { squash: "squash", merge: "merge commit", rebase: "rebase" };
 
 /** Task の「次にやること」。手順の並びを表示し、いま着手できる手順を操作できるようにする */
-function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => Promise<void> }) {
+function NextAction({ detail, onMerged, onStarted }: { detail: TaskDetail; onMerged: () => Promise<void>; onStarted: () => Promise<void> }) {
   const plan = detail.nextActions;
   if (plan === undefined || detail.status === "done" || detail.status === "dismissed") return null;
   const current = new Set(detail.currentStepIds ?? []);
@@ -227,12 +229,18 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
       <h3 id="drawer-next" className="drawer-section-title">
         次にやること
       </h3>
-      <StepList steps={plan.steps} current={current} detail={detail} onChanged={onMerged} />
+      <StepList steps={plan.steps} current={current} detail={detail} onChanged={onMerged} onStarted={onStarted} />
     </section>
   );
 }
 
-function StepList(props: { steps: ReadonlyArray<Step>; current: Set<string>; detail: TaskDetail; onChanged: () => Promise<void> }) {
+function StepList(props: {
+  steps: ReadonlyArray<Step>;
+  current: Set<string>;
+  detail: TaskDetail;
+  onChanged: () => Promise<void>;
+  onStarted: () => Promise<void>;
+}) {
   return (
     <ol className="step-list">
       {props.steps.map((step, index) => (
@@ -242,7 +250,14 @@ function StepList(props: { steps: ReadonlyArray<Step>; current: Set<string>; det
   );
 }
 
-function StepItem(props: { step: Step; parallel: boolean; current: Set<string>; detail: TaskDetail; onChanged: () => Promise<void> }) {
+function StepItem(props: {
+  step: Step;
+  parallel: boolean;
+  current: Set<string>;
+  detail: TaskDetail;
+  onChanged: () => Promise<void>;
+  onStarted: () => Promise<void>;
+}) {
   const { step, detail } = props;
   const isCurrent = props.current.has(step.id);
   const [problem, setProblem] = useState<string | null>(null);
@@ -261,7 +276,7 @@ function StepItem(props: { step: Step; parallel: boolean; current: Set<string>; 
         {props.parallel && <span className="field-hint">前と並行してできる</span>}
         {step.status === "done" && <span className="step-done">済み</span>}
       </div>
-      {isCurrent && step.kind === "merge_pull_request" && <MergeFlow detail={detail} onMerged={props.onChanged} />}
+      {isCurrent && step.kind === "merge_pull_request" && <MergeFlow detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />}
       {isCurrent && step.kind === "decision" && (
         <div className="step-actions">
           {step.options.map((option) => (
@@ -283,7 +298,7 @@ function StepItem(props: { step: Step; parallel: boolean; current: Set<string>; 
       {chosen && (
         <div className="step-branch">
           <span className="field-hint">選んだ: {chosen.label}</span>
-          <StepList steps={chosen.steps} current={props.current} detail={detail} onChanged={props.onChanged} />
+          <StepList steps={chosen.steps} current={props.current} detail={detail} onChanged={props.onChanged} onStarted={props.onStarted} />
         </div>
       )}
     </li>
@@ -291,7 +306,7 @@ function StepItem(props: { step: Step; parallel: boolean; current: Set<string>; 
 }
 
 /** merge の確認と実行。確認で承認した方法と commit だけで merge する */
-function MergeFlow({ detail, onMerged }: { detail: TaskDetail; onMerged: () => Promise<void> }) {
+function MergeFlow({ detail, onMerged, onStarted }: { detail: TaskDetail; onMerged: () => Promise<void>; onStarted: () => Promise<void> }) {
   const [plan, setPlan] = useState<MergePlanView | null>(null);
   const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "merged" } | { kind: "failed"; message: string }>({ kind: "idle" });
   const review = (detail.agentRun?.status === "succeeded" ? (detail.agentRun.result ?? {}) : {}) as ReviewResult;
@@ -310,11 +325,9 @@ function MergeFlow({ detail, onMerged }: { detail: TaskDetail; onMerged: () => P
     if (plan === null) return;
     setState({ kind: "busy" });
     const outcome = await api.merge(detail.id, { method: plan.method, sha: plan.sha });
-    if (outcome.ok) {
-      setState({ kind: "merged" });
-      setPlan(null);
-      await onMerged();
-    } else setState({ kind: "failed", message: outcome.message });
+    // 始められたらドロワーを閉じ、処理中のレーンで merge の進み具合を見せる
+    if (outcome.ok) await onStarted();
+    else setState({ kind: "failed", message: outcome.message });
   };
 
   return (

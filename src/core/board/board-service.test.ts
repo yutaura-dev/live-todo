@@ -242,9 +242,9 @@ describe("AI の調査", () => {
         const cards = board.columns.find((column) => column.id === "agent_running")?.cards ?? [];
         const stateOf = (id: number) => cards.find((card) => card.id === id)?.agent;
 
-        assert.deepStrictEqual(stateOf(running.id), { state: "running" });
-        assert.deepStrictEqual(stateOf(waitingFirst.id), { state: "queued", position: 1 });
-        assert.deepStrictEqual(stateOf(waitingSecond.id), { state: "queued", position: 2 });
+        assert.deepStrictEqual(stateOf(running.id), { state: "running", kind: "dependency_review" });
+        assert.deepStrictEqual(stateOf(waitingFirst.id), { state: "queued", kind: "dependency_review", position: 1 });
+        assert.deepStrictEqual(stateOf(waitingSecond.id), { state: "queued", kind: "dependency_review", position: 2 });
       }),
     ));
 

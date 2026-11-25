@@ -72,7 +72,7 @@ export interface LiveTodoApi {
   taskDetail(taskId: number): Promise<TaskDetail>;
   /** merge の確認に出す内容（merge 先・方法と理由・調べたときの commit） */
   mergePlan(taskId: number): Promise<MergePlanView | { error: string }>;
-  /** 確認で承認した内容（方法と commit）で merge する。外部への書き込み */
+  /** 確認で承認した内容（方法と commit）で merge を始める。外部への書き込み。merge は裏で進む */
   merge(taskId: number, approved: { method: MergeMethod; sha: string }): Promise<Outcome>;
   /** AI にもう一度調べてもらう（調査待ちに入れ直す） */
   requestReview(taskId: number): Promise<Outcome>;

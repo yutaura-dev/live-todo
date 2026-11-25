@@ -4,6 +4,7 @@ import { chooseMergeMethod, type MergeMethod } from "../core/agent/merge-method.
 import { Database } from "../core/db/database.js";
 import { agentRuns, approvals, sourceItems, taskLinks } from "../core/db/schema.js";
 import { TaskRepository } from "../core/task/task-repository.js";
+import type { TaskStatus } from "../core/task/task.js";
 import type { GitHubClient } from "../sources/github/github-adapter.js";
 
 export class MergeNotAllowedError extends Schema.TaggedError<MergeNotAllowedError>()("MergeNotAllowedError", {
@@ -17,6 +18,7 @@ export class MergeFailedError extends Schema.TaggedError<MergeFailedError>()("Me
 export type MergePlan = { repository: string; number: number; sha: string; method: MergeMethod; reason: string };
 export type ClientFor<E, R> = (accountId: string) => Effect.Effect<GitHubClient["Service"], E, R>;
 
+const MERGE_KIND = "merge_pull_request";
 const PULL_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/(\d+)/;
 const SOURCE = /^github:([a-z0-9][a-z0-9-]*)(?::watch)?$/;
 const Review = Schema.Struct({ conclusion: Schema.String, canMergeAsIs: Schema.optional(Schema.Boolean) });
@@ -74,20 +76,45 @@ export const mergePlan = Effect.fnUntraced(function* <E, R>(taskId: number, clie
 });
 
 /**
- * ユーザーが確認画面で承認した内容（方法と commit）で merge する。承認と結果を approvals に残す。
- * 確認したあとに調べ直して commit が変わっていたら、承認した内容と違うので merge しない。
+ * merge を始める。確認画面で承認した内容（方法と commit）を今の調査と照らし、合っていれば Task を処理中のレーンに移す。
+ * 実際の merge は finishMerge で裏で行う（画面を待たせないため）。確認したあとに調べ直して commit が変わっていたら始めない。
  */
-export const approveAndMerge = Effect.fnUntraced(function* <E, R>(
-  taskId: number,
-  approved: { method: MergeMethod; sha: string },
-  clientFor: ClientFor<E, R>,
-) {
+export const startMerge = Effect.fnUntraced(function* (taskId: number, approved: { method: MergeMethod; sha: string }) {
   const db = yield* Database;
   const tasks = yield* TaskRepository;
   const target = yield* reviewedPull(taskId);
   if (target.sha !== approved.sha) {
     return yield* new MergeNotAllowedError({ message: "確認したあとに PR が調べ直された。もう一度確認してください" });
   }
+  const task = Option.getOrThrow(yield* tasks.findTask(taskId));
+  const [run] = yield* db
+    .insert(agentRuns)
+    .values({
+      taskId,
+      kind: MERGE_KIND,
+      status: "running",
+      subjectFingerprint: "",
+      subjectSha: approved.sha,
+      previousStatus: task.status,
+      startedAt: DateTime.formatIso(yield* DateTime.now),
+    })
+    .returning({ id: agentRuns.id })
+    .pipe(Effect.orDie);
+  if (task.status !== "agent_running") {
+    yield* tasks.updateTask(taskId, { status: "agent_running" });
+    yield* tasks.recordChange(taskId, { kind: "field_changed", field: "status", before: task.status, after: "agent_running", unread: false, actor: "user" });
+  }
+  return run!.id;
+});
+
+const executeMerge = Effect.fnUntraced(function* <E, R>(runId: number, approved: { method: MergeMethod; sha: string }, clientFor: ClientFor<E, R>) {
+  const db = yield* Database;
+  const tasks = yield* TaskRepository;
+  const [run] = yield* db.select().from(agentRuns).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
+  if (run === undefined) return yield* new MergeNotAllowedError({ message: "merge の記録が見つからない" });
+  const taskId = run.taskId;
+  const previousStatus = run.previousStatus as TaskStatus;
+  const target = yield* reviewedPull(taskId);
   const client = yield* clientFor(target.accountId);
   const approvedAt = DateTime.formatIso(yield* DateTime.now);
   const record = { taskId, action: "merge_pull_request", target: `${target.repository}#${target.number}`, payload: approved, approvedAt };
@@ -96,18 +123,45 @@ export const approveAndMerge = Effect.fnUntraced(function* <E, R>(
     .mergePullRequest({ repository: target.repository, number: target.number, sha: approved.sha, method: approved.method })
     .pipe(Effect.result);
   const executedAt = DateTime.formatIso(yield* DateTime.now);
+  const current = Option.getOrThrow(yield* tasks.findTask(taskId)).status;
   if (result._tag === "Failure") {
+    const message = explainMergeFailure(result.failure.message, "status" in result.failure ? result.failure.status : undefined);
     yield* db.insert(approvals).values({ ...record, status: "failed", error: result.failure.message, executedAt }).pipe(Effect.orDie);
-    return yield* new MergeFailedError({
-      message: explainMergeFailure(result.failure.message, "status" in result.failure ? result.failure.status : undefined),
-    });
+    yield* db.update(agentRuns).set({ status: "failed", error: result.failure.message, finishedAt: executedAt }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
+    if (current === "agent_running") {
+      yield* tasks.updateTask(taskId, { status: previousStatus });
+      yield* tasks.recordChange(taskId, { kind: "field_changed", field: "status", before: current, after: previousStatus, unread: false, actor: "agent" });
+    }
+    // 裏で失敗したことに気づけるよう、更新マークを付ける
+    yield* tasks.recordChange(taskId, { kind: "field_changed", field: "merge", before: null, after: message, unread: true, actor: "agent" });
+    return yield* new MergeFailedError({ message });
   }
   yield* db.insert(approvals).values({ ...record, status: "executed", executedAt }).pipe(Effect.orDie);
-
-  const task = Option.getOrThrow(yield* tasks.findTask(taskId));
-  if (task.status !== "done") {
+  yield* db.update(agentRuns).set({ status: "succeeded", finishedAt: executedAt }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
+  if (current !== "done") {
     yield* tasks.updateTask(taskId, { status: "done" });
-    yield* tasks.recordChange(taskId, { kind: "field_changed", field: "status", before: task.status, after: "done", unread: false, actor: "user" });
+    yield* tasks.recordChange(taskId, { kind: "field_changed", field: "status", before: current, after: "done", unread: false, actor: "user" });
   }
   return result.success;
+});
+
+/** 裏で merge する。結果（成功・失敗）は Task と記録に残すので、ここでは失敗を返さない */
+export const finishMerge = <E, R>(runId: number, approved: { method: MergeMethod; sha: string }, clientFor: ClientFor<E, R>) =>
+  executeMerge(runId, approved, clientFor).pipe(
+    Effect.catch((error: unknown) =>
+      Effect.logWarning("merge できなかった").pipe(
+        Effect.annotateLogs({ runId, reason: typeof error === "object" && error !== null && "message" in error ? String(error.message) : String(error) }),
+      ),
+    ),
+    Effect.asVoid,
+  );
+
+/** merge を始めて、終わるまで待つ */
+export const approveAndMerge = Effect.fnUntraced(function* <E, R>(
+  taskId: number,
+  approved: { method: MergeMethod; sha: string },
+  clientFor: ClientFor<E, R>,
+) {
+  const runId = yield* startMerge(taskId, approved);
+  return yield* executeMerge(runId, approved, clientFor);
 });

@@ -12,7 +12,7 @@ export class TaskNotFoundError extends Schema.TaggedError<TaskNotFoundError>()("
 
 export const BOARD_COLUMNS = [
   { id: "needs_review", title: "要確認" },
-  { id: "agent_running", title: "AI が調査中" },
+  { id: "agent_running", title: "処理中" },
   { id: "todo", title: "Todo" },
   { id: "in_progress", title: "進行中" },
   { id: "done", title: "完了" },
@@ -35,7 +35,7 @@ export type BoardCard = {
   /** いま着手できる次にやることと、その手間 */
   nextActions?: ReadonlyArray<{ title: string; effort: Effort }>;
   /** AI が調査中のレーンにあるとき、調べている最中か、調査待ちの何番目か */
-  agent?: { state: "running" } | { state: "queued"; position: number };
+  agent?: { state: "running"; kind: string } | { state: "queued"; kind: string; position: number };
   /** tracks で紐づいた元の項目（PR / issue など）。手動で追加した Task にはない */
   url?: string;
   source?: string;
@@ -135,7 +135,7 @@ export class BoardService extends Context.Service<BoardService, {
         .pipe(Effect.orDie);
 
       const activeRuns = db
-        .select({ taskId: agentRuns.taskId, status: agentRuns.status })
+        .select({ taskId: agentRuns.taskId, status: agentRuns.status, kind: agentRuns.kind })
         .from(agentRuns)
         .where(inArray(agentRuns.status, ["queued", "running"]))
         .orderBy(asc(agentRuns.id))
@@ -146,7 +146,7 @@ export class BoardService extends Context.Service<BoardService, {
         const agentOf = new Map<number, NonNullable<BoardCard["agent"]>>();
         let position = 0;
         for (const run of yield* activeRuns) {
-          agentOf.set(run.taskId, run.status === "running" ? { state: "running" } : { state: "queued", position: ++position });
+          agentOf.set(run.taskId, run.status === "running" ? { state: "running", kind: run.kind } : { state: "queued", kind: run.kind, position: ++position });
         }
         const itemOf = new Map<number, { url: string; source: string; judgment: unknown }>();
         for (const row of yield* trackedItems) {

@@ -8,7 +8,7 @@ import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
-import { approveAndMerge, mergePlan } from "../app/merge-approval.js";
+import { finishMerge, mergePlan, startMerge } from "../app/merge-approval.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
@@ -380,12 +380,15 @@ function registerMerge() {
       }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
     ),
   );
-  // 外部への書き込み。renderer で確認を出し、ユーザーが承認した方法と commit だけを受け取って実行する
+  // 外部への書き込み。renderer で確認を出し、ユーザーが承認した方法と commit だけを受け取って実行する。
+  // 始められたかだけを返し、merge は裏で進める（Task は処理中のレーンに移り、終われば完了か元のレーンに戻る）
   ipcMain.handle(IPC_CHANNELS.merge, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {
         const request = yield* decodeMergeRequest(input);
-        yield* approveAndMerge(request.taskId, { method: request.method, sha: request.sha }, githubClientFor);
+        const approved = { method: request.method, sha: request.sha };
+        const runId = yield* startMerge(request.taskId, approved);
+        runtime.runFork(finishMerge(runId, approved, githubClientFor));
       }),
     ),
   );

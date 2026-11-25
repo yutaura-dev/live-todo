@@ -1223,6 +1223,19 @@ button:disabled {
   border-inline-start: 2px solid var(--rule);
 }
 
+::view-transition-group(*) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
+  }
+}
+
 .toast {
   position: fixed;
   inset-block-end: 20px;

@@ -9,6 +9,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot } from "../../shared/api.js";
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
@@ -35,7 +36,8 @@ export function App() {
   const load = useCallback(async () => {
     void api.settings().then((snapshot) => setExpiringTokens(expiringTokensOf(snapshot)));
     try {
-      setBoard(await api.board());
+      const next = await api.board();
+      withTransition(() => setBoard(next));
       setLoadedAt(new Date().toISOString());
     } catch {
       setProblem("Task を読み込めませんでした。同期の設定を確かめてから、再読み込みしてください。");
@@ -56,7 +58,7 @@ export function App() {
     async (card: BoardCard, status: MovableStatus) => {
       if (card.status === status) return;
       // 先に画面を動かしてから保存する。保存に失敗したら読み込み直して元に戻す
-      setBoard((current) => current && moveLocally(current, card.id, status));
+      withTransition(() => setBoard((current) => current && moveLocally(current, card.id, status)));
       try {
         await api.moveTask(card.id, status);
         setProblem(null);
@@ -174,6 +176,10 @@ export function App() {
           revision={loadedAt}
           onClose={() => setOpenTaskId(null)}
           onChanged={load}
+          onStarted={async () => {
+            setOpenTaskId(null);
+            await load();
+          }}
           onMove={async (taskId, status) => {
             const card = board?.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === taskId);
             if (card) await move(card, status);
@@ -203,6 +209,31 @@ export function App() {
   );
 }
 
+const AGENT_LABELS: Record<string, string> = {
+  merge_pull_request: "merge 中",
+  dependency_review: "Claude Code が調べています",
+  next_actions: "次にやることを考えています",
+};
+
+function agentLabel(agent: BoardCard["agent"]) {
+  if (agent === undefined) return "処理しています";
+  if (agent.state === "queued") return `処理待ち（${agent.position} 番目）`;
+  return AGENT_LABELS[agent.kind] ?? "処理しています";
+}
+
+/**
+ * カンバンを更新するときに、レーンを移ったカードが動いて見えるようにする（View Transitions）。
+ * 動きを減らす設定のときや、使えない環境では、そのまま更新する。
+ */
+function withTransition(update: () => void) {
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce || typeof document.startViewTransition !== "function") {
+    update();
+    return;
+  }
+  document.startViewTransition(() => flushSync(update));
+}
+
 function expiringTokensOf(snapshot: SettingsSnapshot) {
   return Object.entries(snapshot.githubTokens).flatMap(([accountId, token]) =>
     token.expiryWarning === undefined ? [] : [{ accountId, daysLeft: token.expiryWarning.daysLeft }],
@@ -225,7 +256,7 @@ function moveLocally(board: Board, taskId: number, status: MovableStatus): Board
 
 const EMPTY_MESSAGES: Record<BoardColumnId, string> = {
   needs_review: "仕分ける通知はありません。新しい通知は、同期のたびにここに入ります。",
-  agent_running: "AI が調べている Task はありません。依存更新の bot の PR は、自動でここに入って調べられます。",
+  agent_running: "処理している Task はありません。AI の調査や merge のあいだ、ここに入ります。",
   todo: "やることはありません。",
   in_progress: "手を付けている Task はありません。カードをここに移すと進行中になります。",
   done: "完了した Task はまだありません。",
@@ -262,7 +293,10 @@ function Card(props: {
   const { card, inTray } = props;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.id, data: { card } });
   const { main, repository } = splitTitle(card.title);
-  const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined;
+  // ドラッグ中は dnd-kit の動きに任せ、それ以外はカードごとの名前で、レーンを移るときに動いて見えるようにする
+  const style = transform
+    ? { transform: `translate(${transform.x}px, ${transform.y}px)` }
+    : { viewTransitionName: `card-${card.id}` };
 
   return (
     <article
@@ -308,7 +342,7 @@ function Card(props: {
       </p>
       {card.status === "agent_running" && (
         <p className={`card-brief ${card.agent?.state === "queued" ? "card-brief--waiting" : "card-brief--working"}`}>
-          {card.agent?.state === "queued" ? `調査待ち（${card.agent.position} 番目）` : "Claude Code が調べています"}
+          {agentLabel(card.agent)}
         </p>
       )}
       {card.status !== "agent_running" && card.nextActions && card.nextActions.length > 0 ? (

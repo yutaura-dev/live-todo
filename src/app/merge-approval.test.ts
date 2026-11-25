@@ -8,7 +8,7 @@ import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import { GitHubRequestError, type GitHubClient } from "../sources/github/github-adapter.js";
 import { gitHubClientStub } from "../sources/github/test-client.js";
-import { approveAndMerge, mergePlan } from "./merge-approval.js";
+import { approveAndMerge, finishMerge, mergePlan, startMerge } from "./merge-approval.js";
 
 const reviewedTask = (options: { conclusion?: string; subjectSha?: string | null; canMergeAsIs?: boolean } = {}) =>
   Effect.gen(function* () {
@@ -108,6 +108,54 @@ describe("mergePlan", () => {
       const error = yield* Effect.flip(mergePlan(taskId, clientFor(squashRepo)));
 
       assert.strictEqual(error._tag, "MergeNotAllowedError");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("startMerge / finishMerge（裏で merge する）", () => {
+  it.effect("merge を始めると、Task を処理中のレーンに移して merge 中の記録を作り、終わったら完了にする", () =>
+    Effect.gen(function* () {
+      const taskId = yield* reviewedTask();
+      const tasks = yield* TaskRepository;
+
+      const runId = yield* startMerge(taskId, { method: "squash", sha: "head-sha" });
+
+      assert.strictEqual(Option.getOrThrow(yield* tasks.findTask(taskId)).status, "agent_running");
+      const [running] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.id, runId));
+      assert.deepInclude(running, { kind: "merge_pull_request", status: "running", previousStatus: "todo" });
+
+      yield* finishMerge(runId, { method: "squash", sha: "head-sha" }, clientFor(gitHubClientStub()));
+
+      assert.strictEqual(Option.getOrThrow(yield* tasks.findTask(taskId)).status, "done");
+      const [finished] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.id, runId));
+      assert.strictEqual(finished?.status, "succeeded");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("確認した内容が今の調査と違えば、始める前にエラーにする（レーンは動かさない）", () =>
+    Effect.gen(function* () {
+      const taskId = yield* reviewedTask({ subjectSha: "newer-sha" });
+
+      const error = yield* Effect.flip(startMerge(taskId, { method: "squash", sha: "head-sha" }));
+
+      assert.strictEqual(error._tag, "MergeNotAllowedError");
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("merge に失敗したら、元のレーンに戻して理由を残し、更新マークで知らせる", () =>
+    Effect.gen(function* () {
+      const taskId = yield* reviewedTask();
+      const runId = yield* startMerge(taskId, { method: "squash", sha: "head-sha" });
+      const client = gitHubClientStub({
+        mergePullRequest: () => Effect.fail(new GitHubRequestError({ message: "Head branch was modified", status: 409 })),
+      });
+
+      yield* finishMerge(runId, { method: "squash", sha: "head-sha" }, clientFor(client));
+
+      const tasks = yield* TaskRepository;
+      assert.strictEqual(Option.getOrThrow(yield* tasks.findTask(taskId)).status, "todo");
+      const [failed] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.id, runId));
+      assert.deepInclude(failed, { status: "failed", error: "Head branch was modified" });
+      const changes = yield* tasks.listChanges(taskId);
+      assert.isTrue(changes.some((change) => change.field === "merge" && change.seenAt === null));
     }).pipe(Effect.provide(TestDatabase)));
 });
 
