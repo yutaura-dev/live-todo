@@ -8,6 +8,8 @@ import {
   isDependencyBot,
 } from "./dependency-review.js";
 
+const NONE = { kind: "none" as const, repository: "", query: "", pullUrl: "" };
+
 describe("isDependencyBot", () => {
   it.each(["renovate[bot]", "dependabot[bot]", "renovate-bot", "app/renovate", "app/dependabot", "Renovate[bot]"])(
     "依存更新の bot と見なす: %s",
@@ -31,7 +33,7 @@ describe("decodeDependencyReview", () => {
     canMergeAsIs: true,
     mergeAsIsNote: "fork からの PR を受け付けないなら、修正せずに merge してよい",
     fixEffort: "normal",
-    nextActions: [{ title: "修正する", type: "fix_and_push", effort: "normal", mode: "serial", options: [] }],
+    nextActions: [{ title: "修正する", type: "fix_and_push", until: NONE, effort: "normal", mode: "serial", options: [] }],
   };
 
   it.effect("3 つの結論のどれかと、影響範囲・修正・理由・設定の直し方を受け取る", () =>
@@ -94,6 +96,11 @@ describe("dependencyReviewPrompt", () => {
   it("リポジトリで開いている PR と Dependency Dashboard を見て、待つべきか・先にやることがあるかを考えるよう伝える", () => {
     assert.include(prompt, "/work/task-1/context/open-prs.json");
     assert.include(prompt, "/work/task-1/context/dependency-dashboard.md");
+  });
+
+  it("待つ手順には、アプリが見張れるよう何を待つか（出るのを待つ PR の検索語など）を書かせる", () => {
+    assert.include(prompt, "until");
+    assert.include(prompt, "pull_request_opened");
   });
 
   it("先に要る更新の PR がまだなければ、今すぐ作らせるか schedule を待つかを選べる分かれ道にするよう伝える", () => {

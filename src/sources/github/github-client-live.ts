@@ -10,6 +10,7 @@ const MAX_PAGES = 10;
 
 const ArrayBody = Schema.Array(Schema.Unknown);
 const SearchBody = Schema.Struct({ items: ArrayBody });
+const SearchCountBody = Schema.Struct({ total_count: Schema.Number, items: Schema.Array(Schema.Struct({ html_url: Schema.String })) });
 const CheckRunsBody = Schema.Struct({ check_runs: ArrayBody });
 const ErrorBody = Schema.Struct({ message: Schema.String });
 const RepositoryBody = Schema.Struct({
@@ -278,6 +279,15 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
           Effect.flatMap((url) => collectPages(url, arrayItems)),
           Effect.map(({ items, truncated }) => ({ repositories: items, truncated })),
         ),
+        searchOpenPullRequests: (repository, query) =>
+          Effect.gen(function* () {
+            // 1 件で足りる理由: 出たかどうかと、どれが出たかを示せればよいため
+            const url = yield* resolveUrl("/search/issues", { q: `repo:${repository} is:pr is:open ${query}`, per_page: "1" });
+            const response = yield* send(url);
+            if (Option.isNone(response)) return { count: 0, firstUrl: undefined };
+            const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(SearchCountBody, url)));
+            return { count: body.total_count, firstUrl: body.items[0]?.html_url };
+          }),
         listReviews: (pullApiUrl) =>
           resolveUrl(`${pullApiUrl}/reviews`, { per_page: PER_PAGE }).pipe(
             Effect.flatMap((url) => collectPages(url, arrayItems)),

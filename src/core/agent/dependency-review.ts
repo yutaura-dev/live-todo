@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { ProposedWaitConditionSchema, WAIT_CONDITION_JSON_SCHEMA, WAIT_CONDITION_PROMPT } from "./wait-condition-schema.js";
 
 export const DEPENDENCY_BOT_LOGINS = ["renovate[bot]", "renovate-bot", "app/renovate", "dependabot[bot]", "app/dependabot"] as const;
 const DEPENDENCY_BOTS = new Set<string>(DEPENDENCY_BOT_LOGINS);
@@ -12,6 +13,7 @@ const ReviewStepFields = {
   type: Schema.Literals(["manual", "wait", "merge_pull_request", "fix_and_push"]),
   effort: Schema.Literals(["easy", "normal", "hard", "tedious"]),
   mode: Schema.Literals(["serial", "parallel"]),
+  until: ProposedWaitConditionSchema,
 };
 const ReviewStep = Schema.Struct({
   ...ReviewStepFields,
@@ -49,6 +51,7 @@ const REVIEW_STEP_PROPERTIES = {
     description: "手間。easy: 10 秒で終わる / normal: 5 分あれば終わる / hard: 15 分あれば終わる / tedious: それ以上かかる。wait は easy にする",
   },
   mode: { type: "string", enum: ["serial", "parallel"], description: "serial: 前の手順が済んでから / parallel: 前の手順と並行してできる" },
+  until: WAIT_CONDITION_JSON_SCHEMA,
 } as const;
 
 /** claude -p の --json-schema に渡す形。DependencyReview と項目をそろえる（テストで確かめている） */
@@ -95,7 +98,7 @@ export const DEPENDENCY_REVIEW_JSON_SCHEMA = {
                 steps: {
                   type: "array",
                   minItems: 1,
-                  items: { type: "object", properties: REVIEW_STEP_PROPERTIES, required: ["title", "type", "effort", "mode"], additionalProperties: false },
+                  items: { type: "object", properties: REVIEW_STEP_PROPERTIES, required: ["title", "type", "effort", "mode", "until"], additionalProperties: false },
                 },
               },
               required: ["label", "steps"],
@@ -103,7 +106,7 @@ export const DEPENDENCY_REVIEW_JSON_SCHEMA = {
             },
           },
         },
-        required: ["title", "type", "effort", "mode", "options"],
+        required: ["title", "type", "effort", "mode", "until", "options"],
         additionalProperties: false,
       },
     },
@@ -149,6 +152,7 @@ export function dependencyReviewPrompt(subject: { url: string; repository: strin
       "まだ開いていなければ、どちらにするかはユーザーが決めるので、options を持つ分かれ道にする: " +
       "「今すぐ作らせる」（Dependency Dashboard（dependency-dashboard.md）でチェックを入れる manual と、PR が出るのを待つ wait）と、" +
       "「renovate の schedule を待つ」（wait）。そのあとの手順は分かれ道の後ろに続ける",
+    WAIT_CONDITION_PROMPT,
     "",
     "書き込みはしないでください（コメント・承認・push・ファイルの編集など）。調べて答えるだけにしてください。",
     "日本語で、根拠となるファイル名やリリースノートの記述を添えて答えてください。",

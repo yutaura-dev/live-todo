@@ -115,7 +115,7 @@ export function App() {
     const card = event.active.data.current?.["card"] as BoardCard | undefined;
     const target = event.over?.id as BoardColumnId | undefined;
     // AI が調査中のレーンは、自動トリアージだけが出し入れする
-    if (card !== undefined && target !== undefined && target !== "agent_running") void move(card, target);
+    if (card !== undefined && target !== undefined && target !== "agent_running" && target !== "waiting") void move(card, target);
   };
 
   return (
@@ -267,12 +267,14 @@ const EMPTY_MESSAGES: Record<BoardColumnId, string> = {
   needs_review: "仕分ける通知はありません。新しい通知は、同期のたびにここに入ります。",
   agent_running: "処理している Task はありません。AI の調査や merge のあいだ、ここに入ります。",
   todo: "やることはありません。",
+  waiting: "待っている Task はありません。レビューや依存の PR などを待つしかない Task が、ここに入ります。",
   in_progress: "手を付けている Task はありません。カードをここに移すと進行中になります。",
   done: "完了した Task はまだありません。",
 };
 
 function Column(props: { id: BoardColumnId; title: string; cards: readonly BoardCard[]; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: props.id, disabled: props.id === "agent_running" });
+  // 処理中と待ちは、アプリが手順や裏の処理から出し分ける列なので、ドラッグでは入れない
+  const { setNodeRef, isOver } = useDroppable({ id: props.id, disabled: props.id === "agent_running" || props.id === "waiting" });
   return (
     <section
       ref={setNodeRef}

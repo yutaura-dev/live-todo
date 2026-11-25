@@ -11,7 +11,9 @@ import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
 import { runNextActionPlanning } from "./next-action-runner.js";
 
-const PROPOSAL = { steps: [{ title: "Slack で状況を聞く", type: "manual", effort: "easy", mode: "serial", options: [] }] };
+const NONE = { kind: "none" as const, repository: "", query: "", pullUrl: "" };
+
+const PROPOSAL = { steps: [{ title: "Slack で状況を聞く", type: "manual", until: NONE, effort: "easy", mode: "serial", options: [] }] };
 
 const task = (options: { status?: TaskStatus; author?: string; source?: string; url?: string; nextActions?: unknown } = {}) =>
   Effect.gen(function* () {

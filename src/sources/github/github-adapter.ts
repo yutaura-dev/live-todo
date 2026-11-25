@@ -47,6 +47,8 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   mergePullRequest(params: { repository: string; number: number; sha: string; method: "squash" | "merge" | "rebase" }): Effect.Effect<{ sha: string }, GitHubClientError>;
   /** 既定のブランチの最近の commit（merge の慣習を読み取るため）。タイトルと親の数だけ */
   listRecentCommits(repository: string): Effect.Effect<ReadonlyArray<{ title: string; parents: number }>, GitHubClientError>;
+  /** リポジトリで、検索語に合う開いた PR の件数と先頭の URL（待つ手順の「PR が出るのを待つ」を確かめるため） */
+  searchOpenPullRequests(repository: string, query: string): Effect.Effect<{ count: number; firstUrl: string | undefined }, GitHubClientError>;
   /** 自分が見られるリポジトリ（設定画面でフィルタの効き方を見せるため）。truncated: ページ数の上限で打ち切った */
   readonly listMyRepositories: Effect.Effect<{ repositories: unknown; truncated: boolean }, GitHubClientError>;
 }>()("live-todo/sources/github/GitHubClient") {}

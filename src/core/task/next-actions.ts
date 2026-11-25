@@ -8,8 +8,13 @@ export const EFFORTS = ["easy", "normal", "hard", "tedious"] as const;
 export type Effort = (typeof EFFORTS)[number];
 
 type StepBase = { id: string; title: string; effort: Effort; mode: "serial" | "parallel"; status: "todo" | "done" };
+/** アプリが GitHub を見て、成り立ったら待つ手順を済ませる条件 */
+export type WaitCondition =
+  | { kind: "pull_request_opened"; repository: string; query: string }
+  | { kind: "review_submitted"; pullUrl: string; since?: string }
+  | { kind: "merged"; pullUrl: string };
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
-export type ActionStep = StepBase & { kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" };
+export type ActionStep = StepBase & { kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push"; until?: WaitCondition };
 export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push"] as const;
 export type DecisionStep = StepBase & {
   kind: "decision";
@@ -56,6 +61,12 @@ export function taskEffort(plan: NextActionPlan): Effort | undefined {
   return efforts.length === 0 ? undefined : EFFORTS[Math.min(...efforts)];
 }
 
+/** いま着手できるのが待つ手順だけか（待ちのレーンに出す） */
+export function isWaitingOnly(plan: NextActionPlan): boolean {
+  const current = currentSteps(plan);
+  return current.length > 0 && current.every((step) => step.kind === "wait");
+}
+
 export const completeStep = (plan: NextActionPlan, id: string): NextActionPlan => ({
   steps: mapSteps(plan.steps, (step) => (step.id === id ? { ...step, status: "done" } : step)),
 });
@@ -74,21 +85,56 @@ export const chooseOption = (plan: NextActionPlan, id: string, key: string): Nex
   steps: mapSteps(plan.steps, (step) => (step.id === id && step.kind === "decision" ? { ...step, chosen: key, status: "done" } : step)),
 });
 
+/** AI が返す待つ条件。JSON Schema の都合で項目は平らに持ち、kind に要らない項目は空文字 */
+export type ProposedWaitCondition = { kind: WaitCondition["kind"] | "none"; repository: string; query: string; pullUrl: string };
+
 /** AI が考えた手順。type がなければ手作業 */
 export type ProposedStep = {
   title: string;
   effort: Effort;
   mode: "serial" | "parallel";
   type?: ActionStep["kind"] | undefined;
+  until?: ProposedWaitCondition | undefined;
   options?: ReadonlyArray<{ label: string; steps: ReadonlyArray<Omit<ProposedStep, "options">> }> | undefined;
 };
 
-/** AI が考えた手順の並びを、手順の並びに変える。id は位置から決める */
-export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>): NextActionPlan {
+const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const PULL_URL_PATTERN = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/;
+
+/** AI が返した条件のうち、アプリが確かめられる形のものだけを残す（形が崩れていれば、手で済ませる待つ手順になる） */
+function waitConditionOf(proposed: ProposedWaitCondition | undefined, now: string | undefined): WaitCondition | undefined {
+  if (proposed === undefined) return undefined;
+  switch (proposed.kind) {
+    case "pull_request_opened":
+      return REPOSITORY_PATTERN.test(proposed.repository) && proposed.query.trim() !== ""
+        ? { kind: "pull_request_opened", repository: proposed.repository, query: proposed.query.trim() }
+        : undefined;
+    case "review_submitted":
+      if (!PULL_URL_PATTERN.test(proposed.pullUrl)) return undefined;
+      return now === undefined ? { kind: "review_submitted", pullUrl: proposed.pullUrl } : { kind: "review_submitted", pullUrl: proposed.pullUrl, since: now };
+    case "merged":
+      return PULL_URL_PATTERN.test(proposed.pullUrl) ? { kind: "merged", pullUrl: proposed.pullUrl } : undefined;
+    case "none":
+      return undefined;
+  }
+}
+
+function actionStepOf(
+  base: StepBase,
+  step: { type?: ActionStep["kind"] | undefined; until?: ProposedWaitCondition | undefined },
+  now: string | undefined,
+): ActionStep {
+  const kind = step.type ?? "manual";
+  const until = kind === "wait" ? waitConditionOf(step.until, now) : undefined;
+  return until === undefined ? { ...base, kind } : { ...base, kind, until };
+}
+
+/** AI が考えた手順の並びを、手順の並びに変える。id は位置から決める。now はレビューを待ち始めた時刻 */
+export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>, now?: string): NextActionPlan {
   const steps = proposed.map((step, index): Step => {
     const id = `s${index + 1}`;
     const base = { id, title: step.title, effort: step.effort, mode: step.mode, status: "todo" as const };
-    if (step.options === undefined || step.options.length === 0) return { ...base, kind: step.type ?? "manual" };
+    if (step.options === undefined || step.options.length === 0) return actionStepOf(base, step, now);
     return {
       ...base,
       kind: "decision",
@@ -97,14 +143,13 @@ export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>): Ne
         return {
           key,
           label: option.label,
-          steps: option.steps.map((child, childIndex) => ({
-            id: `${id}.${key}.s${childIndex + 1}`,
-            kind: child.type ?? ("manual" as const),
-            title: child.title,
-            effort: child.effort,
-            mode: child.mode,
-            status: "todo" as const,
-          })),
+          steps: option.steps.map((child, childIndex) =>
+            actionStepOf(
+              { id: `${id}.${key}.s${childIndex + 1}`, title: child.title, effort: child.effort, mode: child.mode, status: "todo" },
+              child,
+              now,
+            ),
+          ),
         };
       }),
     };
@@ -116,13 +161,16 @@ export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>): Ne
  * 依存更新の PR の調査から、次にやることを決める。AI が考えた手順があればそれを使い、
  * なければ（その項目を足す前の調査）結論から決まった型で作る。
  */
-export function planFromDependencyReview(review: {
-  conclusion: "mergeable" | "mergeable_after_fix" | "not_mergeable";
-  canMergeAsIs: boolean;
-  fixEffort?: Effort | undefined;
-  nextActions?: ReadonlyArray<ProposedStep> | undefined;
-}): NextActionPlan {
-  if (review.nextActions !== undefined && review.nextActions.length > 0) return planFromProposedSteps(review.nextActions);
+export function planFromDependencyReview(
+  review: {
+    conclusion: "mergeable" | "mergeable_after_fix" | "not_mergeable";
+    canMergeAsIs: boolean;
+    fixEffort?: Effort | undefined;
+    nextActions?: ReadonlyArray<ProposedStep> | undefined;
+  },
+  now?: string,
+): NextActionPlan {
+  if (review.nextActions !== undefined && review.nextActions.length > 0) return planFromProposedSteps(review.nextActions, now);
   const merge = (prefix: string): ActionStep => ({
     id: `${prefix}merge`,
     kind: "merge_pull_request",
@@ -174,7 +222,12 @@ const StepBaseSchema = {
   mode: Schema.Literals(["serial", "parallel"]),
   status: Schema.Literals(["todo", "done"]),
 };
-const ActionStepSchema = Schema.Struct({ ...StepBaseSchema, kind: Schema.Literals(ACTION_KINDS) });
+const WaitConditionSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("pull_request_opened"), repository: Schema.String, query: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("review_submitted"), pullUrl: Schema.String, since: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal("merged"), pullUrl: Schema.String }),
+]);
+const ActionStepSchema = Schema.Struct({ ...StepBaseSchema, kind: Schema.Literals(ACTION_KINDS), until: Schema.optionalKey(WaitConditionSchema) });
 interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchema> {
   readonly kind: "decision";
   readonly options: ReadonlyArray<{ readonly key: string; readonly label: string; readonly steps: ReadonlyArray<StepEncoded> }>;

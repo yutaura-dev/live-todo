@@ -2,7 +2,7 @@ import type { Board } from "../core/board/board-service.js";
 import type { AccountFilterPreview } from "../app/settings/filter-preview.js";
 
 export type { Board, BoardCard, BoardColumnId, CardJudgment, TaskDetail, TaskDetailChange, TaskDetailItem } from "../core/board/board-service.js";
-export type { Effort, NextActionPlan, Step } from "../core/task/next-actions.js";
+export type { Effort, NextActionPlan, Step, WaitCondition } from "../core/task/next-actions.js";
 import type { TaskDetail } from "../core/board/board-service.js";
 export type { AccountFilterPreview, TargetCheck } from "../app/settings/filter-preview.js";
 export type { FilterReason } from "../sources/github/repository-filter.js";

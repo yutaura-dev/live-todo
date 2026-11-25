@@ -47,7 +47,7 @@ describe("BoardService.board", () => {
 
         const board = yield* (yield* BoardService).board;
 
-        assert.deepStrictEqual(columnTitles(board), { needs_review: ["a"], agent_running: ["g"], todo: ["b"], in_progress: ["c"], done: ["d"] });
+        assert.deepStrictEqual(columnTitles(board), { needs_review: ["a"], agent_running: ["g"], todo: ["b"], waiting: [], in_progress: ["c"], done: ["d"] });
       }),
     ));
 
@@ -293,6 +293,32 @@ describe("次にやること", () => {
         assert.deepStrictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.nextActions, [
           { title: "修正を行い、PR に push する", effort: "normal", kind: "fix_and_push" },
         ]);
+      }),
+    ));
+
+  it.effect("いま着手できるのが待つ手順だけの Task は、待ちのレーンに出す（待ちが終われば元のレーンに戻る）", () =>
+    run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskRepository;
+        const waiting = yield* taskWithItem("waiting", "todo");
+        yield* tasks.updateTask(waiting.id, {
+          nextActions: {
+            steps: [
+              { id: "w", kind: "wait", title: "PR が出るのを待つ", effort: "easy", mode: "serial", status: "todo" },
+              { id: "m", kind: "manual", title: "移行する", effort: "tedious", mode: "serial", status: "todo" },
+            ],
+          },
+        });
+        const service = yield* BoardService;
+
+        const before = yield* service.board;
+        assert.deepStrictEqual(before.columns.find((column) => column.id === "waiting")?.cards.map((card) => card.title), ["waiting"]);
+        assert.lengthOf(before.columns.find((column) => column.id === "todo")?.cards ?? [], 0);
+
+        yield* service.completeStep(waiting.id, "w");
+
+        const after = yield* service.board;
+        assert.deepStrictEqual(after.columns.find((column) => column.id === "todo")?.cards.map((card) => card.title), ["waiting"]);
       }),
     ));
 

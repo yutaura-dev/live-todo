@@ -1,5 +1,16 @@
 import { assert, describe, it } from "@effect/vitest";
-import { chooseOption, completeStep, currentSteps, type NextActionPlan, planFromDependencyReview, reopenStep, taskEffort } from "./next-actions.js";
+import { Option } from "effect";
+import {
+  chooseOption,
+  completeStep,
+  currentSteps,
+  decodePlan,
+  type NextActionPlan,
+  planFromDependencyReview,
+  planFromProposedSteps,
+  reopenStep,
+  taskEffort,
+} from "./next-actions.js";
 
 const review = (overrides: Record<string, unknown> = {}) => ({
   conclusion: "mergeable" as const,
@@ -72,6 +83,43 @@ describe("AI が考えた次にやること（依存更新の PR）", () => {
     );
 
     assert.strictEqual(currentSteps(plan)[0]?.kind, "merge_pull_request");
+  });
+});
+
+describe("待つ条件", () => {
+  it("AI が返した待つ条件を、アプリが確かめられる形で手順に持たせる（条件がなければ持たせない）", () => {
+    const plan = planFromProposedSteps(
+      [
+        {
+          title: "CLI v3 の PR が出るのを待つ",
+          type: "wait",
+          effort: "easy",
+          mode: "serial",
+          until: { kind: "pull_request_opened", repository: "acme/app", query: "@changesets/cli v3", pullUrl: "" },
+        },
+        { title: "レビューを待つ", type: "wait", effort: "easy", mode: "serial", until: { kind: "review_submitted", repository: "", query: "", pullUrl: "https://github.com/acme/app/pull/1" } },
+        { title: "返事を待つ", type: "wait", effort: "easy", mode: "serial", until: { kind: "none", repository: "", query: "", pullUrl: "" } },
+      ],
+      "2026-11-25T00:00:00.000Z",
+    );
+
+    assert.deepStrictEqual(
+      plan.steps.map((step) => (step.kind === "wait" ? step.until : undefined)),
+      [
+        { kind: "pull_request_opened", repository: "acme/app", query: "@changesets/cli v3" },
+        { kind: "review_submitted", pullUrl: "https://github.com/acme/app/pull/1", since: "2026-11-25T00:00:00.000Z" },
+        undefined,
+      ],
+    );
+  });
+
+  it("待つ条件を持つ手順も、保存して読み直せる", () => {
+    const plan = planFromProposedSteps(
+      [{ title: "merge を待つ", type: "wait", effort: "easy", mode: "serial", until: { kind: "merged", repository: "", query: "", pullUrl: "https://github.com/acme/app/pull/1" } }],
+      "2026-11-25T00:00:00.000Z",
+    );
+
+    assert.deepStrictEqual(decodePlan(JSON.parse(JSON.stringify(plan))), Option.some(plan));
   });
 });
 

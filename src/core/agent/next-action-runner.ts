@@ -128,7 +128,7 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
       const proposal = yield* decodeProposedPlan(result.structured).pipe(
         Effect.mapError((error) => ({ message: `claude の回答の形が想定と違う: ${error.message}` })),
       );
-      return { result, plan: planFromProposal(proposal) };
+      return { result, plan: planFromProposal(proposal, yield* nowIso) };
     }).pipe(Effect.result);
 
     const finishedAt = yield* nowIso;

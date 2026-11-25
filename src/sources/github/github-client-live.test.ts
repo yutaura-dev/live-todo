@@ -253,6 +253,17 @@ describe("GitHubClientLive", () => {
       assert.strictEqual(requests.length, 1, "1 ページだけ読む");
     }));
 
+  it.effect("リポジトリで条件に合う開いた PR を検索し、件数と先頭の URL を返す", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({ body: { total_count: 1, items: [{ html_url: "https://github.com/acme/app/pull/9" }] } }));
+
+      const result = yield* withClient(layer, (client) => client.searchOpenPullRequests("acme/app", "@changesets/cli v3"));
+
+      assert.deepStrictEqual(result, { count: 1, firstUrl: "https://github.com/acme/app/pull/9" });
+      assert.strictEqual(requests[0]?.url.pathname, "/search/issues");
+      assert.strictEqual(requests[0]?.url.searchParams.get("q"), "repo:acme/app is:pr is:open @changesets/cli v3");
+    }));
+
   it.effect("自分のアカウントは /user から取得する", () =>
     Effect.gen(function* () {
       const { requests, layer } = fakeGitHub(() => ({ body: { login: "YutaUra" } }));

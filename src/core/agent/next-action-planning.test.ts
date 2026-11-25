@@ -2,13 +2,15 @@ import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { NEXT_ACTION_PLAN_JSON_SCHEMA, decodeProposedPlan, nextActionPrompt, planFromProposal } from "./next-action-planning.js";
 
+const NONE = { kind: "none" as const, repository: "", query: "", pullUrl: "" };
+
 describe("planFromProposal", () => {
   it("AI が返した手順を、手順の並び（id・未着手）に変える", () => {
     const plan = planFromProposal({
       steps: [
-        { title: "Slack で状況を聞く", type: "manual", effort: "easy", mode: "serial", options: [] },
-        { title: "PR をレビューする", type: "manual", effort: "hard", mode: "parallel", options: [] },
-        { title: "レビューを待つ", type: "wait", effort: "easy", mode: "serial", options: [] },
+        { title: "Slack で状況を聞く", type: "manual", until: NONE, effort: "easy", mode: "serial", options: [] },
+        { title: "PR をレビューする", type: "manual", until: NONE, effort: "hard", mode: "parallel", options: [] },
+        { title: "レビューを待つ", type: "wait", until: NONE, effort: "easy", mode: "serial", options: [] },
       ],
     });
 
@@ -25,11 +27,12 @@ describe("planFromProposal", () => {
         {
           title: "対応するか決める",
           type: "manual",
+          until: NONE,
           effort: "easy",
           mode: "serial",
           options: [
-            { label: "対応する", steps: [{ title: "直す", type: "manual", effort: "normal", mode: "serial" }] },
-            { label: "断る", steps: [{ title: "返信する", type: "manual", effort: "easy", mode: "serial" }] },
+            { label: "対応する", steps: [{ title: "直す", type: "manual", until: NONE, effort: "normal", mode: "serial" }] },
+            { label: "断る", steps: [{ title: "返信する", type: "manual", until: NONE, effort: "easy", mode: "serial" }] },
           ],
         },
       ],
@@ -54,7 +57,7 @@ describe("decodeProposedPlan", () => {
 
   it.effect("知らない手間はエラーにする", () =>
     Effect.gen(function* () {
-      const error = yield* Effect.flip(decodeProposedPlan({ steps: [{ title: "x", type: "manual", effort: "quick", mode: "serial", options: [] }] }));
+      const error = yield* Effect.flip(decodeProposedPlan({ steps: [{ title: "x", type: "manual", until: NONE, effort: "quick", mode: "serial", options: [] }] }));
       assert.strictEqual(error._tag, "SchemaError");
     }));
 });
@@ -65,6 +68,11 @@ describe("nextActionPrompt", () => {
   it("Task のタイトルと、集めた情報のファイルを伝える", () => {
     assert.include(prompt, "障害の調査依頼（acme/app）");
     assert.include(prompt, "/work/task-1/context/task.json");
+  });
+
+  it("待つ手順には、アプリが見張れるよう何を待つか（レビュー・merge）を書かせる", () => {
+    assert.include(prompt, "review_submitted");
+    assert.include(prompt, "merged");
   });
 
   it("アプリが集めた PR の状態で分かることを、確認する手順にしないよう伝え、相手待ちは待つ手順にさせる", () => {
@@ -83,7 +91,13 @@ describe("nextActionPrompt", () => {
 describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
   it("手順は 1 つ以上で、内容・種類（手作業か待つか）・手間・直列か並列か・選択肢を持つ", () => {
     assert.strictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.minItems, 1);
-    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.required, ["title", "type", "effort", "mode", "options"]);
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.required, ["title", "type", "until", "effort", "mode", "options"]);
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.until.properties.kind.enum, [
+      "pull_request_opened",
+      "review_submitted",
+      "merged",
+      "none",
+    ]);
     assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait"]);
   });
 });

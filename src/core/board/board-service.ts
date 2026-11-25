@@ -4,7 +4,7 @@ import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks } from "../db/schema.js";
 import { TaskRepository, type TaskWithUnread } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
-import { chooseOption, completeStep, currentSteps, reopenStep, decodePlan, EFFORTS, type Effort, type NextActionPlan, taskEffort } from "../task/next-actions.js";
+import { chooseOption, completeStep, currentSteps, isWaitingOnly, reopenStep, decodePlan, EFFORTS, type Effort, type NextActionPlan, taskEffort } from "../task/next-actions.js";
 
 export class TaskNotFoundError extends Schema.TaggedError<TaskNotFoundError>()("TaskNotFoundError", {
   taskId: Schema.Number,
@@ -14,9 +14,11 @@ export const BOARD_COLUMNS = [
   { id: "needs_review", title: "要確認" },
   { id: "agent_running", title: "処理中" },
   { id: "todo", title: "Todo" },
+  // Task の状態ではなく、いま着手できるのが待つ手順だけの Task（Todo・進行中）を出し分ける列
+  { id: "waiting", title: "待ち" },
   { id: "in_progress", title: "進行中" },
   { id: "done", title: "完了" },
-] as const satisfies ReadonlyArray<{ id: TaskStatus; title: string }>;
+] as const satisfies ReadonlyArray<{ id: TaskStatus | "waiting"; title: string }>;
 
 export type BoardColumnId = (typeof BOARD_COLUMNS)[number]["id"];
 
@@ -192,7 +194,10 @@ export class BoardService extends Context.Service<BoardService, {
 
         return {
           columns: BOARD_COLUMNS.map((column) => {
-            const cards = all.filter((task) => task.status === column.id).toSorted(byAttention).map(toCard);
+            const isWaiting = (task: TaskWithUnread) =>
+              (task.status === "todo" || task.status === "in_progress") && Option.match(decodePlan(task.nextActions), { onNone: () => false, onSome: isWaitingOnly });
+            const inColumn = (task: TaskWithUnread) => (column.id === "waiting" ? isWaiting(task) : task.status === column.id && !isWaiting(task));
+            const cards = all.filter(inColumn).toSorted(byAttention).map(toCard);
             // Todo は、すぐ片付くものから手を付けられるよう、難易度の低い順に並べる（次にやることがないものは最後）
             if (column.id === "todo") cards.sort((a, b) => effortRank(a) - effortRank(b));
             return { ...column, cards: column.id === "done" ? cards.slice(0, DONE_COLUMN_LIMIT) : cards };

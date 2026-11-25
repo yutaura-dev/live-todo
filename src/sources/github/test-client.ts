@@ -17,5 +17,6 @@ export const gitHubClientStub = (overrides: Partial<GitHubClient["Service"]> = {
     mergePullRequest: () => Effect.succeed({ sha: "merged" }),
     listRecentCommits: () => Effect.succeed([]),
     listMyRepositories: Effect.succeed({ repositories: [], truncated: false }),
+    searchOpenPullRequests: () => Effect.succeed({ count: 0, firstUrl: undefined }),
     ...overrides,
   });

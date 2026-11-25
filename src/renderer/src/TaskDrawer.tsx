@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MergePlanView, MovableStatus, Step, TaskDetail } from "../../shared/api.js";
+import type { MergePlanView, MovableStatus, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
 import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
@@ -250,6 +250,17 @@ function StepList(props: {
   );
 }
 
+function waitHint(until: WaitCondition): string {
+  switch (until.kind) {
+    case "pull_request_opened":
+      return `${until.repository} で「${until.query}」の PR が出たら、アプリが自動で済ませます`;
+    case "review_submitted":
+      return "レビューが付いたら、アプリが自動で済ませます";
+    case "merged":
+      return "merge されたら、アプリが自動で済ませます";
+  }
+}
+
 function StepItem(props: {
   step: Step;
   parallel: boolean;
@@ -300,6 +311,7 @@ function StepItem(props: {
       {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push" || step.kind === "wait") && (
         <div className="step-actions">
           {step.kind === "fix_and_push" && <span className="field-hint">アプリからの修正はまだできません。修正して push したら「済んだ」を押してください</span>}
+          {step.kind === "wait" && step.until !== undefined && <span className="field-hint">{waitHint(step.until)}</span>}
           <button type="button" className="quiet-button" onClick={() => void run(api.completeStep(detail.id, step.id))}>
             {step.kind === "wait" ? "待ち終わった" : "済んだ"}
           </button>
