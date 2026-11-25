@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import { REVIEW_CONTEXT_DIR } from "./pull-request-context.js";
 
 export const DEPENDENCY_BOT_LOGINS = ["renovate[bot]", "renovate-bot", "app/renovate", "dependabot[bot]", "app/dependabot"] as const;
 const DEPENDENCY_BOTS = new Set<string>(DEPENDENCY_BOT_LOGINS);
@@ -49,7 +48,7 @@ export const DEPENDENCY_REVIEW_JSON_SCHEMA = {
  */
 export const DEPENDENCY_REVIEW_TOOLS: ReadonlyArray<string> = ["Read", "Grep", "Glob"];
 
-export function dependencyReviewPrompt(subject: { url: string; repository: string; title: string }): string {
+export function dependencyReviewPrompt(subject: { url: string; repository: string; title: string; contextDir: string }): string {
   return [
     "依存関係を更新する bot の PR を調べ、merge してよいかを判断してください。",
     "",
@@ -58,8 +57,8 @@ export function dependencyReviewPrompt(subject: { url: string; repository: strin
     `タイトル: ${subject.title}`,
     "",
     "調べ方:",
-    `- ${REVIEW_CONTEXT_DIR}/pr.json に PR の本文（リリースノートを含む）・変更したファイル・CI の結果がある`,
-    `- ${REVIEW_CONTEXT_DIR}/pr.diff に PR の差分がある`,
+    `- ${subject.contextDir}/pr.json に PR の本文（リリースノートを含む）・変更したファイル・CI の結果がある`,
+    `- ${subject.contextDir}/pr.diff に PR の差分がある`,
     "- 本文のリリースノートで、破壊的変更を確かめる",
     "- 作業ディレクトリのコードを Grep / Read して、そのパッケージを使っている箇所と影響を確かめる",
     "",

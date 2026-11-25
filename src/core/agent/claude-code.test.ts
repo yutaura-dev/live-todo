@@ -39,6 +39,13 @@ describe("claudeArgs", () => {
     assert.deepStrictEqual(args.slice(args.indexOf("--tools") + 1, args.indexOf("--tools") + 3), ["Read", "Bash"]);
   });
 
+  it("作業ディレクトリのほかに読ませるフォルダを --add-dir で渡す", () => {
+    const args = claudeArgs({ ...request, addDirs: ["/work/task-1/context"] });
+
+    assert.strictEqual(args[args.indexOf("--add-dir") + 1], "/work/task-1/context");
+    assert.notInclude(claudeArgs(request), "--add-dir");
+  });
+
   it("プロンプトは引数に入れない（--allowedTools が後ろの引数をツール名として読むため、標準入力で渡す）", () => {
     assert.notInclude(claudeArgs(request), "調べて");
   });

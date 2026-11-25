@@ -12,6 +12,8 @@ export type ClaudeRequest = {
   /** Claude Code の session は作業ディレクトリに結び付く。続けるときは同じ場所を渡す */
   cwd: string;
   resumeSessionId?: string | undefined;
+  /** 作業ディレクトリのほかに読ませるフォルダ（アプリが書き出した PR の情報など） */
+  addDirs?: ReadonlyArray<string> | undefined;
   jsonSchema: object;
   allowedTools: ReadonlyArray<string>;
   model?: string | undefined;
@@ -43,6 +45,7 @@ export function claudeArgs(request: ClaudeRequest): string[] {
     "--tools",
     ...toolNamesOf(request.allowedTools),
     ...(request.resumeSessionId === undefined ? [] : ["--resume", request.resumeSessionId]),
+    ...(request.addDirs ?? []).flatMap((dir) => ["--add-dir", dir]),
     ...(request.model === undefined ? [] : ["--model", request.model]),
     ...(request.maxBudgetUsd === undefined ? [] : ["--max-budget-usd", String(request.maxBudgetUsd)]),
     // 可変長の引数なので最後に置く。プロンプトは標準入力で渡す

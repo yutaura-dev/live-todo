@@ -50,7 +50,12 @@ describe("DEPENDENCY_REVIEW_JSON_SCHEMA", () => {
 });
 
 describe("dependencyReviewPrompt", () => {
-  const prompt = dependencyReviewPrompt({ url: "https://github.com/acme/app/pull/42", repository: "acme/app", title: "Update dependency effect to v4" });
+  const prompt = dependencyReviewPrompt({
+    url: "https://github.com/acme/app/pull/42",
+    repository: "acme/app",
+    title: "Update dependency effect to v4",
+    contextDir: "/work/task-1/context",
+  });
 
   it("対象の PR とリポジトリを伝える", () => {
     assert.include(prompt, "https://github.com/acme/app/pull/42");
@@ -62,8 +67,8 @@ describe("dependencyReviewPrompt", () => {
   });
 
   it("アプリが集めておいた PR の情報（本文・CI・差分）を読むよう伝える", () => {
-    assert.include(prompt, ".live-todo-review/pr.json");
-    assert.include(prompt, ".live-todo-review/pr.diff");
+    assert.include(prompt, "/work/task-1/context/pr.json");
+    assert.include(prompt, "/work/task-1/context/pr.diff");
   });
 });
 

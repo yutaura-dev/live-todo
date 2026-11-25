@@ -64,7 +64,9 @@ const withAgent = (options: { fail?: string; sessionId?: string; onRun?: Effect.
       });
       return yield* effect.pipe(
         Effect.provideService(ClaudeCode, claude),
-        Effect.provideService(AgentWorkspace, AgentWorkspace.of({ prepare: (repository, taskId) => Effect.succeed(`/work/${taskId}/${repository}`) })),
+        Effect.provideService(AgentWorkspace, AgentWorkspace.of({
+            prepare: (repository, taskId) => Effect.succeed({ cwd: `/work/${taskId}/repo/${repository}`, contextDir: `/work/${taskId}/context` }),
+          })),
       );
     });
   return { recorded, provide };
@@ -84,7 +86,9 @@ describe("runNextDependencyReview", () => {
       assert.deepStrictEqual(outcome, Option.some({ taskId, succeeded: true }));
       assert.deepStrictEqual(agent.recorded.statusDuringRun, ["agent_running"]);
       const request = agent.recorded.requests[0]!;
-      assert.strictEqual(request.cwd, `/work/${taskId}/acme/app`);
+      assert.strictEqual(request.cwd, `/work/${taskId}/repo/acme/app`);
+      assert.deepStrictEqual(request.addDirs, [`/work/${taskId}/context`]);
+      assert.include(request.prompt, `/work/${taskId}/context/pr.json`);
       assert.include(request.prompt, "https://github.com/acme/app/pull/42");
       assert.isUndefined(request.resumeSessionId);
       assert.strictEqual(request.model, "sonnet");
@@ -109,7 +113,7 @@ describe("runNextDependencyReview", () => {
       assert.deepInclude(runRow, { status: "succeeded", sessionId: "session-1", previousStatus: "needs_review" });
       assert.deepStrictEqual(runRow?.result, REVIEW);
       const [thread] = yield* db.select().from(agentThreads).where(eq(agentThreads.taskId, taskId));
-      assert.deepInclude(thread, { provider: "claude-code", sessionId: "session-1", workspace: `/work/${taskId}/acme/app` });
+      assert.deepInclude(thread, { provider: "claude-code", sessionId: "session-1", workspace: `/work/${taskId}/repo/acme/app` });
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("PR が更新されたら調べ直し、前回の session を続ける", () =>

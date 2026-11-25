@@ -101,11 +101,12 @@ export const runNextDependencyReview = (options: DependencyReviewOptions) =>
     yield* moveTask(target.taskId, target.status, "agent_running");
 
     const outcome = yield* Effect.gen(function* () {
-      const cwd = yield* workspace.prepare(target.repository, target.taskId, target.url);
+      const { cwd, contextDir } = yield* workspace.prepare(target.repository, target.taskId, target.url);
       const [thread] = yield* db.select().from(agentThreads).where(eq(agentThreads.taskId, target.taskId)).pipe(Effect.orDie);
       const result = yield* claude.run({
-        prompt: dependencyReviewPrompt({ url: target.url, repository: target.repository, title: target.title }),
+        prompt: dependencyReviewPrompt({ url: target.url, repository: target.repository, title: target.title, contextDir }),
         cwd,
+        addDirs: [contextDir],
         // session は作業ディレクトリに結び付くので、同じ場所のときだけ続ける
         resumeSessionId: thread !== undefined && thread.workspace === cwd ? thread.sessionId : undefined,
         jsonSchema: DEPENDENCY_REVIEW_JSON_SCHEMA,
