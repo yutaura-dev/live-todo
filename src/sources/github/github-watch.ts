@@ -21,7 +21,14 @@ export type GitHubPullRequestSubject = {
 };
 
 const SearchResult = Schema.Struct({
-  items: Schema.Array(Schema.Struct({ repository_url: Schema.String, pull_request: Schema.Struct({ url: Schema.String }) })),
+  items: Schema.Array(
+    Schema.Struct({
+      repository_url: Schema.String,
+      html_url: Schema.String,
+      updated_at: Schema.String,
+      pull_request: Schema.Struct({ url: Schema.String }),
+    }),
+  ),
 });
 
 /** "https://api.github.com/repos/acme/app" → "acme/app" */
@@ -84,21 +91,35 @@ export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (a
     });
   });
 
-  const subjects = Effect.gen(function* () {
-    const search = yield* client.searchMyOpenPullRequests.pipe(Effect.flatMap(decodeSearchResult));
-    // 詳細を取りに行く前に外す理由: 見張りは PR ごとに 3 回 API を呼ぶので、対象外の PR を先に除けば呼び出しが減る。
-    const targets = search.items.filter((item) => isTargetRepository(repositoryOf(item.repository_url)));
-    const loaded = yield* Effect.forEach(targets, (item) => loadSubject(item.pull_request.url));
-    return loaded.flatMap((subject) => (Option.isSome(subject) ? [subject.value] : []));
-  });
+  const listSubjects = client.searchMyOpenPullRequests.pipe(
+    Effect.flatMap(decodeSearchResult),
+    // 一覧の段階で外す理由: 見張りは PR ごとに 3 回 API を呼ぶので、対象外の PR を先に除けば呼び出しが減る。
+    Effect.map((search) =>
+      search.items
+        .filter((item) => isTargetRepository(repositoryOf(item.repository_url)))
+        .map((item) => ({ id: item.pull_request.url, url: item.html_url, revision: item.updated_at })),
+    ),
+  );
 
   return {
     source: githubSourceName(accountId),
-    subjects,
-    subjectId: (subject) => subject.apiUrl,
-    subjectUrl: (subject) => subject.htmlUrl,
+    listSubjects,
+    loadSubject: (ref) => loadSubject(ref.id),
+    fingerprint: pullRequestFingerprint,
   } satisfies WatchProvider<GitHubPullRequestSubject, GitHubAdapterError>;
 });
+
+/**
+ * 条件の判定に効く値だけを並べる。説明文の編集のように判定に効かない変化では、見張る間隔を戻さない。
+ * conflict はベースブランチが進んで起きることが多く PR の updated_at は変わらないため、mergeable も含める。
+ */
+export const pullRequestFingerprint = (subject: GitHubPullRequestSubject) =>
+  JSON.stringify([
+    subject.headSha,
+    subject.mergeable,
+    subject.checkRuns.map((run) => `${run.status}:${run.conclusion}`).toSorted(),
+    subject.reviews.map((review) => `${review.login}:${review.state}:${review.commitId}`).toSorted(),
+  ]);
 
 const label = (subject: GitHubPullRequestSubject) => `PR #${subject.number}`;
 

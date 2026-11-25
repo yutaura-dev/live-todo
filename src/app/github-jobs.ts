@@ -37,7 +37,8 @@ export const makeGitHubJobs = Effect.fnUntraced(function* (account: ResolvedAcco
   const watchProvider = yield* makeGitHubPullRequestWatchProvider(account.id, repositoryFilter).pipe(
     Effect.provideService(GitHubClient, client),
   );
-  const watch = watchBinding(watchProvider, pullRequestConditions);
+  // 見張りの最初の間隔をジョブの間隔にそろえる理由: 最初の間隔より短く回しても、確認する時刻が来ていない対象は飛ばされるだけなので。
+  const watch = watchBinding(watchProvider, pullRequestConditions, { initial: WATCH_SYNC_INTERVAL, max: "1 day" });
 
   return [
     { name: notifications.source, interval: NOTIFICATION_SYNC_INTERVAL, run: syncSource(notifications), backoffUntil: githubBackoffUntil },

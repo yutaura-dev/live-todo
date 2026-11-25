@@ -10,7 +10,8 @@
       "pull_request": {
         "url": "https://api.github.com/repos/acme/app/pulls/42",
         "html_url": "https://github.com/acme/app/pull/42"
-      }
+      },
+      "updated_at": "2026-11-24T10:00:00Z"
     }
   ]
 }

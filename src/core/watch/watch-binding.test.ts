@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option, Ref } from "effect";
+import { TestClock } from "effect/testing";
 import { TestDatabase } from "../db/test-database.js";
 import { SourceItemRepository } from "../source/source-item-repository.js";
 import { syncSource } from "../sync/sync-source.js";
@@ -19,9 +20,9 @@ const setup = Effect.gen(function* () {
   const subjects = yield* Ref.make<Subject[]>([]);
   const provider: WatchProvider<Subject, never> = {
     source: "test",
-    subjects: Ref.get(subjects),
-    subjectId: (value) => value.id,
-    subjectUrl: (value) => `https://example.com/${value.id}`,
+    listSubjects: Ref.get(subjects).pipe(Effect.map((all) => all.map((value) => ({ id: value.id, url: `https://example.com/${value.id}` })))),
+    loadSubject: (ref) => Ref.get(subjects).pipe(Effect.map((all) => Option.fromNullishOr(all.find((value) => value.id === ref.id)))),
+    fingerprint: (value) => String(value.broken),
   };
   return { subjects, binding: watchBinding(provider, [broken]) };
 });
@@ -65,9 +66,11 @@ describe("watchBinding", () => {
       yield* Ref.set(subjects, [{ id: "s1", broken: true }]);
       yield* syncSource(binding);
       yield* Ref.set(subjects, [{ id: "s1", broken: false }]);
+      yield* TestClock.adjust("5 minutes");
       yield* syncSource(binding);
       const afterResolved = yield* conditionTask(binding);
       yield* Ref.set(subjects, [{ id: "s1", broken: true }]);
+      yield* TestClock.adjust("5 minutes");
       yield* syncSource(binding);
 
       assert.strictEqual(afterResolved?.status, "done");

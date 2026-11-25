@@ -32,7 +32,7 @@ function fakeGitHub() {
       const body = url.pathname === "/notifications"
         ? []
         : url.pathname === "/search/issues"
-          ? { items: [1, 2].map((number) => ({ repository_url: "https://api.github.com/repos/acme/app", pull_request: { url: `https://api.github.com/repos/acme/app/pulls/${number}` } })) }
+          ? { items: [1, 2].map((number) => ({ repository_url: "https://api.github.com/repos/acme/app", html_url: `https://github.com/acme/app/pull/${number}`, updated_at: "2026-11-24T10:00:00Z", pull_request: { url: `https://api.github.com/repos/acme/app/pulls/${number}` } })) }
           : url.pathname.endsWith("/check-runs")
             ? { check_runs: [] }
             : url.pathname.endsWith("/reviews")

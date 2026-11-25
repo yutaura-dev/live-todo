@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0008](decisions/0008-watchers.md)
+> **直近の変更 ADR**: [ADR-0009](decisions/0009-adaptive-watch-frequency.md)
 
 # Architecture — live-todo
 
@@ -47,9 +47,13 @@ Source Item ──(Link: tracks / context)──▶ Task
 経緯は [ADR-0008](decisions/0008-watchers.md)。`src/core/watch/` が Source を知らない共通部分、Source 側は WatchProvider（見張る対象の一覧）と固有の Condition を持つ。
 
 ```
-WatchProvider（対象の一覧）× Condition（holds / clear / unknown）
-  → Watcher が前回の結果（カーソル）と比べて Condition Item を作る
+WatchProvider（listSubjects: 一覧 / loadSubject: 詳細 / fingerprint）× Condition（holds / clear / unknown）
+  → Watcher が対象ごとの確認の予定を見て、確認する時刻が来た対象だけ詳細を取る
+  → 前回の結果（カーソル）と比べて Condition Item を作る
   → watchBinding で "<source>:watch" として既存の Sync に流す
+
+確認の間隔（ADR-0009）: 初めて見た・状態が変わった → 5 分 / 変わらなければ倍々に延ばし最大 1 日 /
+revision が変わった → すぐ確認 / unknown が残る → 延ばさない / 時間の条件 → revisitAt より遅らせない
 ```
 
 | テーブル | 中身 |
@@ -140,6 +144,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 - [ADR-0006: DB アクセスに Drizzle ORM（Effect 版）を使う](decisions/0006-drizzle-on-effect-sql.md)
 - [ADR-0007: Source Item と Task を別の概念として分ける](decisions/0007-separate-source-items-from-tasks.md)
 - [ADR-0008: 見張り（Watcher）を Source 共通の仕組みにする](decisions/0008-watchers.md)
+- [ADR-0009: 見張る頻度を、対象の状態の変化に合わせて下げる](decisions/0009-adaptive-watch-frequency.md)
 - 設計の方針
   - Source ごとの差異は Source Adapter に閉じ込め、Task・UI は Source に依存させない
   - 外部への書き込みは Approval を必ず通す。Adapter の書き込みメソッドは、承認済みの操作しか受け付けない形にする

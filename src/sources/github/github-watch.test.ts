@@ -17,6 +17,7 @@ import {
   pullRequestChecksFailing,
   pullRequestConflict,
   pullRequestConditions,
+  pullRequestFingerprint,
 } from "./github-watch.js";
 import { gitHubClientStub } from "./test-client.js";
 
@@ -118,6 +119,16 @@ describe("pullRequestChangesRequested", () => {
   });
 });
 
+describe("pullRequestFingerprint", () => {
+  it("mergeable が変わると fingerprint が変わる（ベースブランチが進んで conflict したときに気づける）", () => {
+    assert.notStrictEqual(pullRequestFingerprint(subject({ mergeable: true })), pullRequestFingerprint(subject({ mergeable: false })));
+  });
+
+  it("判定に効く値が同じなら、タイトルが変わっても fingerprint は同じ", () => {
+    assert.strictEqual(pullRequestFingerprint(subject()), pullRequestFingerprint(subject({ title: "renamed" })));
+  });
+});
+
 describe("makeGitHubPullRequestWatchProvider", () => {
   const clientWith = (responses: { pull?: unknown; search?: unknown }) =>
     gitHubClientStub({
@@ -130,8 +141,20 @@ describe("makeGitHubPullRequestWatchProvider", () => {
   const subjectsWith = (client: GitHubClient["Service"]) =>
     Effect.gen(function* () {
       const provider = yield* makeGitHubPullRequestWatchProvider("work");
-      return yield* provider.subjects;
+      const refs = yield* provider.listSubjects;
+      const loaded = yield* Effect.forEach(refs, provider.loadSubject);
+      return loaded.flatMap((value) => Option.toArray(value));
     }).pipe(Effect.provideService(GitHubClient, client));
+
+  it.effect("一覧には、PR の API の URL・Web の URL・更新時刻（revision）を入れる", () =>
+    Effect.gen(function* () {
+      const refs = yield* Effect.gen(function* () {
+        const provider = yield* makeGitHubPullRequestWatchProvider("work");
+        return yield* provider.listSubjects;
+      }).pipe(Effect.provideService(GitHubClient, clientWith({ pull: conflictedPull })));
+
+      assert.deepStrictEqual(refs, [{ id: PULL_URL, url: "https://github.com/acme/app/pull/42", revision: "2026-11-24T10:00:00Z" }]);
+    }));
 
   it.effect("自分の open な PR を、マージ可否・check・レビュー付きの見張る対象にする", () =>
     Effect.gen(function* () {
@@ -155,9 +178,11 @@ describe("makeGitHubPullRequestWatchProvider", () => {
       const client = gitHubClientStub({
         searchMyOpenPullRequests: Effect.succeed<unknown>({
           items: [
-            { repository_url: "https://api.github.com/repos/acme/app", pull_request: { url: PULL_URL } },
+            { repository_url: "https://api.github.com/repos/acme/app", html_url: "h", updated_at: "u", pull_request: { url: PULL_URL } },
             {
               repository_url: "https://api.github.com/repos/old-contest/app",
+              html_url: "h",
+              updated_at: "u",
               pull_request: { url: "https://api.github.com/repos/old-contest/app/pulls/1" },
             },
           ],
@@ -172,7 +197,8 @@ describe("makeGitHubPullRequestWatchProvider", () => {
 
       const subjects = yield* Effect.gen(function* () {
         const provider = yield* makeGitHubPullRequestWatchProvider("work", { repositoryFilter: { exclude: ["old-contest/*"] } });
-        return yield* provider.subjects;
+        const refs = yield* provider.listSubjects;
+        return (yield* Effect.forEach(refs, provider.loadSubject)).flatMap((value) => Option.toArray(value));
       }).pipe(Effect.provideService(GitHubClient, client));
 
       assert.deepStrictEqual(subjects.map((subject) => subject.apiUrl), [PULL_URL]);
