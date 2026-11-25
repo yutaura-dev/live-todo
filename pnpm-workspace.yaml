@@ -10,3 +10,6 @@ autoDedupe: true               # 全範囲を満たす版が 1 つあれば全�
 saveTypes: true                # pnpm add 時に @types/* を devDependencies へ自動追加
 lockfile:
   includeResolutionSettings: true  # autoDedupe 等を lockfile に記録し、他マシンでも再解決させない
+permissions:
+  drizzle-kit:
+    skills: true
