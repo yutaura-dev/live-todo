@@ -1,6 +1,6 @@
 # ADR-0005: 実装の基盤に Effect を採用する
 
-- **Status**: Accepted
+- **Status**: Accepted（DB アクセスは [ADR-0006](0006-drizzle-on-effect-sql.md) で Drizzle を載せる形に置き換え）
 - **Date**: 2026-11-25
 - **Deciders**: YutaUra
 

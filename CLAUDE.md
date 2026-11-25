@@ -50,6 +50,7 @@
 ## 触れてほしくない領域
 
 - `.env.local` — API キー・トークンの置き場所。読まない、出力しない
+- `drizzle/` — drizzle-kit が生成するマイグレーション。手で編集せず、`src/core/task/schema.ts` を直して `pnpm db:generate` で作り直す
 - ローカル DB ファイル（場所は実装時に追記）— 実データが入っているため直接編集しない
 
 ## 開発環境
@@ -70,4 +71,4 @@ TBD（次回更新時に決定）
 - データはローカル保存、推論は外部の LLM API（プロバイダは切り替え可能）
 - Source ごとの差異は Source Adapter で吸収し、Task 側は Source に依存しない
 - macOS 向けの Electron + TypeScript。Sync・Adapter・Agent・秘匿情報は main プロセスに置き、renderer には API キーもトークンも渡さない（[ADR-0002](docs/decisions/0002-desktop-app-stack.md)）
-- 実装は Effect 4。LLM は `effect/ai`、DB は `effect/sql` を使う（[ADR-0005](docs/decisions/0005-adopt-effect.md)）
+- 実装は Effect 4。LLM は `effect/ai`、DB は Drizzle ORM の Effect 版を使う（[ADR-0005](docs/decisions/0005-adopt-effect.md)、[ADR-0006](docs/decisions/0006-drizzle-on-effect-sql.md)）

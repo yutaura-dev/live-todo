@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0005](decisions/0005-adopt-effect.md)
+> **直近の変更 ADR**: [ADR-0006](decisions/0006-drizzle-on-effect-sql.md)
 
 # Architecture — live-todo
 
@@ -35,7 +35,7 @@ macOS 向けの Electron アプリ。main プロセスがポーリングして S
 | 実装の基盤 | Effect 4（`effect`） | エラーの型付け・依存の注入・Schema による検証・スケジュール。[ADR-0005](decisions/0005-adopt-effect.md) |
 | UI | React + Vite | |
 | カンバン | dnd-kit | |
-| データストア | SQLite（`effect/sql` + `@effect/sql-sqlite-node`） | ローカル完結。[ADR-0005](decisions/0005-adopt-effect.md) |
+| データストア | SQLite（`@effect/sql-sqlite-node`）+ Drizzle ORM 1.0 rc（`drizzle-orm/effect-sqlite-node`） | ローカル完結。テーブル定義から型を導く。[ADR-0006](decisions/0006-drizzle-on-effect-sql.md) |
 | LLM 抽象 | `effect/ai`（`LanguageModel`）+ `@effect/ai-*` | 複数プロバイダと tool calling を共通 API で扱える。Decisions provider は `effect/http` で自前実装 |
 | 秘匿情報 | Electron `safeStorage`（macOS Keychain） | トークンを平文の設定ファイルに置かない |
 | テスト | Vitest + `@effect/vitest`（UI の E2E は必要に応じて Playwright） | |
@@ -71,6 +71,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 - [ADR-0003: 同期と判定のパイプライン](decisions/0003-sync-and-judge-pipeline.md)
 - [ADR-0004: Epic とカスタムラベルを導入する](decisions/0004-epic-and-custom-labels.md)
 - [ADR-0005: 実装の基盤に Effect を採用する](decisions/0005-adopt-effect.md)
+- [ADR-0006: DB アクセスに Drizzle ORM（Effect 版）を使う](decisions/0006-drizzle-on-effect-sql.md)
 - 設計の方針
   - Source ごとの差異は Source Adapter に閉じ込め、Task・UI は Source に依存させない
   - 外部への書き込みは Approval を必ず通す。Adapter の書き込みメソッドは、承認済みの操作しか受け付けない形にする
@@ -97,6 +98,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 | Notion API | ページ・メンション・割り当ての取得 | インテグレーションへのページ共有が必要 |
 | Microsoft Graph | Outlook（Mail・Calendar）・Teams の取得 | 会社テナントでのアプリ同意が必要な場合がある |
 | LLM API（Claude / OpenAI / Gemini / Azure OpenAI / Bedrock） | fallback の判定、Epic の名前付け、Agent、Pre-work | 従量課金のコスト、会社ポリシー上の利用可否 |
+| Drizzle ORM / drizzle-kit 1.0 rc | クエリとマイグレーション | rc のため正式版までに API が変わる可能性がある |
 | `node:sqlite`（`@effect/sql-sqlite-node` の土台） | ローカル DB | Node 24 時点で experimental。API が変わる可能性がある。代わりにネイティブモジュールのリビルドが不要 |
 | Decisions provider（Jev / OpenAI Decisions / Gemini Decisions） | todo 判定・ラベル・優先度・カスタムラベル・Epic への振り分け | Gemini Decisions は発表直後で API が変わる可能性がある |
 

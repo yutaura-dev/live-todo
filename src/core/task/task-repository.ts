@@ -1,6 +1,9 @@
-import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
-import { SqlClient, SqlSchema } from "effect/sql";
-import { type NewTask, Task, type TaskChangeInput, type TaskPatch, TaskWithUnread } from "./task.js";
+import { and, eq, getColumns, isNull, sql } from "drizzle-orm";
+import { Context, DateTime, Effect, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
+import { Database } from "../db/database.js";
+import { syncCursors, taskChanges, tasks } from "./schema.js";
+import type { NewTask, Task, TaskChangeInput, TaskPatch, TaskWithUnread } from "./task.js";
 
 export class TaskRepository extends Context.Service<TaskRepository, {
   findBySource(source: string, externalId: string): Effect.Effect<Option.Option<Task>>;
@@ -16,100 +19,98 @@ export class TaskRepository extends Context.Service<TaskRepository, {
   static readonly layer = Layer.effect(
     TaskRepository,
     Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
+      const db = yield* Database;
+      const sqlClient = yield* SqlClient.SqlClient;
       const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-      const findTaskById = SqlSchema.findOne({
-        Request: Schema.Int,
-        Result: Task,
-        execute: (id) => sql`SELECT * FROM task_rows WHERE id = ${id}`,
-      });
-
-      const findTaskBySource = SqlSchema.findOneOption({
-        Request: Schema.Struct({ source: Schema.String, externalId: Schema.String }),
-        Result: Task,
-        execute: ({ source, externalId }) =>
-          sql`SELECT * FROM task_rows WHERE source = ${source} AND externalId = ${externalId}`,
-      });
-
-      const listAll = SqlSchema.findAll({
-        Request: Schema.Void,
-        Result: TaskWithUnread,
-        execute: () => sql`SELECT * FROM task_rows ORDER BY id`,
-      });
-
-      const findCursor = SqlSchema.findOneOption({
-        Request: Schema.String,
-        Result: Schema.Struct({ cursor: Schema.fromJsonString(Schema.Unknown) }),
-        execute: (source) => sql`SELECT cursor FROM sync_cursors WHERE source = ${source}`,
-      });
+      const returnedRow = <A>(rows: ReadonlyArray<A>): Effect.Effect<A> =>
+        Option.match(Option.fromNullishOr(rows[0]), {
+          onNone: () => Effect.die(new Error("RETURNING が行を返さなかった")),
+          onSome: Effect.succeed,
+        });
 
       // DB の失敗を型のエラーにしない理由: ローカルの SQLite が失敗するのは
       // ディスク故障などの想定外の事態で、呼び出し側に回復手段がないため defect として扱う。
+      const findBySource = Effect.fn("TaskRepository.findBySource")(function* (source: string, externalId: string) {
+        const rows = yield* db
+          .select()
+          .from(tasks)
+          .where(and(eq(tasks.source, source), eq(tasks.externalId, externalId)))
+          .limit(1);
+        return Option.fromNullishOr(rows[0]);
+      }, Effect.orDie);
+
       const insert = Effect.fn("TaskRepository.insert")(function* (task: NewTask) {
         const now = yield* nowIso;
-        const rows = yield* sql<{ id: number }>`
-          INSERT INTO tasks ${sql.insert({
-            source: task.source,
-            external_id: task.externalId,
-            title: task.title,
-            url: task.url,
-            status: task.status,
-            fingerprint: task.fingerprint,
-            created_at: now,
-            updated_at: now,
-          })} RETURNING id
-        `;
-        return yield* findTaskById(rows[0]!.id);
+        const rows = yield* db.insert(tasks).values({ ...task, createdAt: now, updatedAt: now }).returning();
+        return yield* returnedRow(rows);
       }, Effect.orDie);
 
       const update = Effect.fn("TaskRepository.update")(function* (id: number, patch: TaskPatch) {
-        const values = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
-        yield* sql`UPDATE tasks SET ${sql.update({ ...values, updated_at: yield* nowIso })} WHERE id = ${id}`;
-        return yield* findTaskById(id);
+        const rows = yield* db
+          .update(tasks)
+          .set({ ...patch, updatedAt: yield* nowIso })
+          .where(eq(tasks.id, id))
+          .returning();
+        return yield* returnedRow(rows);
       }, Effect.orDie);
 
       const recordChange = Effect.fn("TaskRepository.recordChange")(function* (taskId: number, change: TaskChangeInput) {
         const now = yield* nowIso;
-        yield* sql`
-          INSERT INTO task_changes ${sql.insert({
-            task_id: taskId,
-            kind: change.kind,
-            detail: change.detail === undefined ? null : JSON.stringify(change.detail),
-            occurred_at: now,
-            seen_at: change.unread ? null : now,
-          })}
-        `;
+        yield* db.insert(taskChanges).values({
+          taskId,
+          kind: change.kind,
+          detail: change.detail ?? null,
+          occurredAt: now,
+          seenAt: change.unread ? null : now,
+        });
       }, Effect.orDie);
 
       const markChangesSeen = Effect.fn("TaskRepository.markChangesSeen")(function* (taskId: number) {
-        yield* sql`UPDATE task_changes SET seen_at = ${yield* nowIso} WHERE task_id = ${taskId} AND seen_at IS NULL`;
+        yield* db
+          .update(taskChanges)
+          .set({ seenAt: yield* nowIso })
+          .where(and(eq(taskChanges.taskId, taskId), isNull(taskChanges.seenAt)));
       }, Effect.orDie);
 
+      const listTasks = db
+        .select({
+          ...getColumns(tasks),
+          unreadChanges: sql<number>`(
+            SELECT COUNT(*) FROM ${taskChanges}
+            WHERE ${taskChanges.taskId} = ${tasks.id} AND ${taskChanges.seenAt} IS NULL
+          )`.mapWith(Number),
+        })
+        .from(tasks)
+        .orderBy(tasks.id)
+        .pipe(Effect.orDie, Effect.withSpan("TaskRepository.listTasks"));
+
       const loadCursor = Effect.fn("TaskRepository.loadCursor")(function* (source: string) {
-        const row = yield* findCursor(source);
-        return Option.map(row, ({ cursor }) => cursor);
+        const rows = yield* db.select({ cursor: syncCursors.cursor }).from(syncCursors).where(eq(syncCursors.source, source));
+        return Option.map(Option.fromNullishOr(rows[0]), (row) => row.cursor);
       }, Effect.orDie);
 
       const saveCursor = Effect.fn("TaskRepository.saveCursor")(function* (source: string, cursor: unknown) {
         const now = yield* nowIso;
-        yield* sql`
-          INSERT INTO sync_cursors (source, cursor, updated_at) VALUES (${source}, ${JSON.stringify(cursor)}, ${now})
-          ON CONFLICT (source) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
-        `;
+        yield* db
+          .insert(syncCursors)
+          .values({ source, cursor, updatedAt: now })
+          .onConflictDoUpdate({ target: syncCursors.source, set: { cursor, updatedAt: now } });
       }, Effect.orDie);
 
       return TaskRepository.of({
-        findBySource: (source, externalId) =>
-          findTaskBySource({ source, externalId }).pipe(Effect.orDie, Effect.withSpan("TaskRepository.findBySource")),
+        findBySource,
         insert,
         update,
         recordChange,
         markChangesSeen,
-        listTasks: listAll(undefined).pipe(Effect.orDie, Effect.withSpan("TaskRepository.listTasks")),
+        listTasks,
         loadCursor,
         saveCursor,
-        withTransaction: (effect) => sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", Effect.die)),
+        // db.transaction ではなく SqlClient.withTransaction を使う理由: 呼び出し側の Effect は tx ではなく db を
+        // 使って書かれている。Drizzle の Effect 版も内部で SqlClient.withTransaction を使い、トランザクションは
+        // fiber 単位で引き継がれるため、db 経由のクエリも同じトランザクションに入る。
+        withTransaction: (effect) => sqlClient.withTransaction(effect).pipe(Effect.catchTag("SqlError", Effect.die)),
       });
     }),
   );
