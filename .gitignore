@@ -6,8 +6,9 @@ node_modules/
 /result
 /result-*
 
-# local app config（形式は config.example.json）
+# local app config（形式は config.example.json）とローカル DB
 /config.json
+/live-todo.db*
 
 # env files
 .env

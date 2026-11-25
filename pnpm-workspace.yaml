@@ -3,7 +3,7 @@ minimumReleaseAge: 1440        # 公開から 24 時間経っていない版は�
 trustPolicy: no-downgrade      # 過去版より信頼性（trusted publisher / provenance）が下がった版を拒否
 blockExoticSubdeps: true       # 推移的依存の git / tarball URL を拒否
 strictDepBuilds: true          # 未承認のビルドスクリプトがあれば install を失敗させる
-allowBuilds: {}                # ビルドを許可するパッケージ。pnpm approve-builds で追記される
+allowBuilds: {}                # ビルドを許可するパッケージ。pnpm 12.23 の approve-builds は permissions.<pkg>.build に記録する
 
 # --- 依存の衛生 ---
 autoDedupe: true               # 全範囲を満たす版が 1 つあれば全体でそれに揃える
@@ -13,3 +13,5 @@ lockfile:
 permissions:
   drizzle-kit:
     skills: true
+  esbuild:
+    build: true
