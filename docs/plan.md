@@ -1,6 +1,6 @@
 > **Stability**: 🌀 evolving
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0002](decisions/0002-desktop-app-stack.md)
+> **直近の変更 ADR**: [ADR-0004](decisions/0004-epic-and-custom-labels.md)
 
 # Plan — live-todo
 
@@ -10,7 +10,7 @@
 
 **Phase 0: 立ち上げ**
 
-charter・計画の整備と技術スタックの決定は完了（[ADR-0002](decisions/0002-desktop-app-stack.md)）。残りは Source Adapter の共通インターフェースの初版。
+charter・計画の整備と技術スタックの決定は完了（[ADR-0002](decisions/0002-desktop-app-stack.md)）。同期と判定の設計も決定済み（[ADR-0003](decisions/0003-sync-and-judge-pipeline.md)、[ADR-0004](decisions/0004-epic-and-custom-labels.md)）。残りは Source Adapter の共通インターフェースの実装。
 
 ## MVP 定義
 
@@ -19,6 +19,8 @@ charter・計画の整備と技術スタックの決定は完了（[ADR-0002](de
 完了条件:
 - [ ] GitHub・Slack・Gmail の 3 つから自分の todo を自動で取得できる
 - [ ] 取得した Task にラベルと優先度が付き、カンバンに表示される
+- [ ] Task が Epic に自動で振り分けられ、まとまる未分類 Task から Epic が自動で作られる
+- [ ] カスタムラベルのルール（条件ルール・自然文ルール）を設定できる
 - [ ] 元のツール側の状態変化（PR のマージ、スレッドの解決、メールの返信など）で Task が自動で更新される
 - [ ] Task を手動で追加できる
 - [ ] 作者自身が 2 週間、毎日使い続けられる
@@ -31,7 +33,8 @@ charter・計画の整備と技術スタックの決定は完了（[ADR-0002](de
 
 **完了条件 (Definition of Done)**:
 - [x] GUI の形態と主要な技術スタックを ADR で決定する（[ADR-0002](decisions/0002-desktop-app-stack.md)）
-- [ ] Source Adapter の共通インターフェースの初版を決める
+- [x] 同期と判定の方針を ADR で決定する（ADR-0003 / ADR-0004）
+- [ ] Source Adapter の共通インターフェースと `SnapshotDiffer` を実装する
 
 ### Phase 1 (MVP): 自動収集とカンバン
 

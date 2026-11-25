@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0002](decisions/0002-desktop-app-stack.md)
+> **直近の変更 ADR**: [ADR-0004](decisions/0004-epic-and-custom-labels.md)
 
 # Architecture — live-todo
 
@@ -67,10 +67,23 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 
 - [ADR-0001: アーキテクチャ判断記録方式の採用](decisions/0001-record-architecture-decisions.md)
 - [ADR-0002: アプリ基盤に Electron + TypeScript を採用する](decisions/0002-desktop-app-stack.md)
+- [ADR-0003: 同期と判定のパイプライン](decisions/0003-sync-and-judge-pipeline.md)
+- [ADR-0004: Epic とカスタムラベルを導入する](decisions/0004-epic-and-custom-labels.md)
 - 設計の方針
   - Source ごとの差異は Source Adapter に閉じ込め、Task・UI は Source に依存させない
   - 外部への書き込みは Approval を必ず通す。Adapter の書き込みメソッドは、承認済みの操作しか受け付けない形にする
   - 設定は最初から `Account → LLM Profile` の構造で持ち、当面は PC 単位の既定値だけを使う（Phase 4 で作り直しにならないように）
+
+## 判定の閾値（初期値）
+
+運用しながら調整する。経緯は [ADR-0003](decisions/0003-sync-and-judge-pipeline.md)。
+
+| 判定 | 閾値 | 結果 |
+|------|------|------|
+| todo 判定（predicate） | 0.8 以上 / 0.4 以上 0.8 未満 / 0.4 未満 | todo / 要確認 / 対象外 |
+| カスタムラベル（自然文ルール） | 0.8 以上 | 付与 |
+| 未分類 Task とのまとまり（predicate） | 0.8 以上の Task が 1 件以上 | Epic を作る |
+| refusal・想定外の応答 | — | 要確認 |
 
 ## 外部依存
 
@@ -81,7 +94,8 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 | GitHub API | Issue / PR / レビュー依頼 / 通知の取得 | レート制限 |
 | Notion API | ページ・メンション・割り当ての取得 | インテグレーションへのページ共有が必要 |
 | Microsoft Graph | Outlook（Mail・Calendar）・Teams の取得 | 会社テナントでのアプリ同意が必要な場合がある |
-| LLM API（Claude / OpenAI / Gemini / Azure OpenAI / Bedrock） | ラベリング・優先度付け・Agent・Pre-work | 従量課金のコスト、会社ポリシー上の利用可否 |
+| LLM API（Claude / OpenAI / Gemini / Azure OpenAI / Bedrock） | fallback の判定、Epic の名前付け、Agent、Pre-work | 従量課金のコスト、会社ポリシー上の利用可否 |
+| Decisions provider（Jev / OpenAI Decisions / Gemini Decisions） | todo 判定・ラベル・優先度・カスタムラベル・Epic への振り分け | Gemini Decisions は発表直後で API が変わる可能性がある |
 
 ## 非機能要件
 

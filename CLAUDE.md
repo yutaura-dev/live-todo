@@ -25,6 +25,12 @@
 | Pre-work | AI がユーザーの依頼を待たずに先回りして進める作業 |
 | Approval | 外部への書き込み（返信、コメント、送信など）をユーザーが承認する手続き |
 | LLM Profile | 使う LLM プロバイダ・モデル・認証情報の組み合わせ。当面は PC 単位で 1 つ |
+| Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる |
+| 未分類 | どの Epic にも入っていない Task |
+| 更新マーク | 未読の TaskChange（状態や内容の変化）がある Task に付く目印 |
+| Decisions provider | 確率付きの判定 API（Jev / OpenAI Decisions / Gemini Decisions） |
+| 要確認 | 判定の確率が閾値の中間、または refusal だった Task の置き場 |
+| SnapshotDiffer | 全件取得の結果を前回の fingerprint と比べて SourceChange に変換する共通処理 |
 
 ## AI 協働ルール
 
@@ -32,6 +38,8 @@
 - 会社アカウントのデータを別の LLM Profile に送る経路を作らない（[charter の前提と制約](docs/charter.md#前提と制約) を参照）
 - Source Item の本文やトークンをログに出さない
 - テストのない変更を入れない。新しい Source Adapter は実 API ではなくフィクスチャでテストする
+- 判定の refusal や想定外の応答は「要確認」に倒す（fail closed）。否定判定として扱わない
+- 実 LLM / Decisions API はテストから呼ばない（課金されるため）。provider はテストダブルに差し替える
 
 ## 触れてほしくない領域
 
