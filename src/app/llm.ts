@@ -5,7 +5,7 @@ import { SecretStore } from "../core/config/secret-store.js";
 import { ConservativeClassifier } from "../core/judge/conservative-classifier.js";
 import { LlmStructuredClassifier } from "../core/judge/llm-classifier.js";
 import { DecisionModelDecisionsProvider } from "../core/judge/decision-model-provider.js";
-import { DecisionsProvider, StructuredClassifier } from "../core/judge/todo-judge.js";
+import { DecisionsProvider, StructuredClassifier, type TodoJudgeThresholds } from "../core/judge/todo-judge.js";
 import type { LlmProfile } from "./config/app-config.js";
 
 // 判定は verdict と 1 文の理由だけなので、出力トークンに上限を付けて料金の上振れを防ぐ。
@@ -85,3 +85,13 @@ export const makeDecisionsProvider = Effect.fnUntraced(function* (profile: LlmPr
       return yield* new UnsupportedLlmProviderError({ provider: profile.decisions.provider });
   }
 });
+
+/**
+ * Decisions の閾値の既定値。対象外にするのは確率 0.05 未満だけにする。
+ * 本物で試したとき、Haiku が todo と判定した自分の PR に Decisions が 0.2 前後の確率を付けた。確率の当たり具合を
+ * 仕分けの結果で確かめるまでは、黙って隠さず要確認に回す（docs/architecture.md の「判定の閾値」）。
+ */
+export const DEFAULT_DECISIONS_THRESHOLDS: TodoJudgeThresholds = { todo: 0.8, review: 0.05 };
+
+export const judgeThresholdsFor = (profile: LlmProfile): TodoJudgeThresholds =>
+  profile.decisions?.thresholds ?? DEFAULT_DECISIONS_THRESHOLDS;

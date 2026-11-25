@@ -83,6 +83,26 @@ describe("decodeAppConfig", () => {
     }));
 });
 
+describe("Decisions の閾値", () => {
+  it.effect("decisions に閾値を書ける", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig({
+        ...validConfig,
+        llmProfiles: { ...validConfig.llmProfiles, work: { provider: "none", model: "-", decisions: { provider: "openai", thresholds: { todo: 0.7, review: 0.2 } } } },
+      });
+
+      assert.deepStrictEqual(config.llmProfiles["work"]?.decisions?.thresholds, { todo: 0.7, review: 0.2 });
+    }));
+
+  it.effect("閾値が 0 から 1 の範囲外ならエラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({
+        ...validConfig,
+        llmProfiles: { ...validConfig.llmProfiles, work: { provider: "none", model: "-", decisions: { provider: "openai", thresholds: { todo: 1.5, review: 0.2 } } } },
+      });
+    }));
+});
+
 describe("アカウントの LLM Profile", () => {
   it.effect("アカウントが LLM Profile を指定していればそれを使う", () =>
     Effect.gen(function* () {

@@ -8,7 +8,7 @@ import { makeGitHubBinding } from "../sources/github/github-binding.js";
 import { GitHubClientLive } from "../sources/github/github-client-live.js";
 import { makeGitHubPullRequestWatchProvider, pullRequestConditions } from "../sources/github/github-watch.js";
 import { DecisionsProvider, type JudgeRequestError, StructuredClassifier } from "../core/judge/todo-judge.js";
-import { makeDecisionsProvider, makeStructuredClassifier } from "./llm.js";
+import { judgeThresholdsFor, makeDecisionsProvider, makeStructuredClassifier } from "./llm.js";
 import type { ResolvedAccount } from "./config/app-config.js";
 
 export const NOTIFICATION_SYNC_INTERVAL = "1 minute";
@@ -33,6 +33,7 @@ export const makeGitHubJobs = Effect.fnUntraced(function* (account: ResolvedAcco
   const notifications = yield* makeGitHubBinding({
     accountId: account.id,
     initialLookbackDays: account.initialLookbackDays,
+    thresholds: judgeThresholdsFor(account.resolvedLlmProfile),
     ...repositoryFilter,
   }).pipe(Effect.provideService(GitHubClient, client));
   const watchProvider = yield* makeGitHubPullRequestWatchProvider(account.id, repositoryFilter).pipe(

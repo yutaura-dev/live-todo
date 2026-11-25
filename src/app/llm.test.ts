@@ -3,7 +3,7 @@ import { ConfigProvider, Effect, Layer } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { EnvSecretStore, MissingSecretError } from "../core/config/secret-store.js";
 import { Option } from "effect";
-import { makeDecisionsProvider, makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
+import { judgeThresholdsFor, makeDecisionsProvider, makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
 
 const withEnv = (env: Record<string, string>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -113,4 +113,17 @@ describe("makeDecisionsProvider", () => {
       assert.instanceOf(error, UnsupportedLlmProviderError);
       assert.strictEqual(error.provider, "jev");
     }).pipe(withEnv({})));
+});
+
+describe("judgeThresholdsFor", () => {
+  it("Decisions の閾値を設定していなければ、対象外にするのは確率 0.05 未満だけにする（確率の当たり具合を確かめる前に黙って隠さない）", () => {
+    assert.deepStrictEqual(judgeThresholdsFor({ provider: "none", model: "-", decisions: { provider: "openai" } }), { todo: 0.8, review: 0.05 });
+  });
+
+  it("設定した閾値があればそれを使う", () => {
+    assert.deepStrictEqual(
+      judgeThresholdsFor({ provider: "none", model: "-", decisions: { provider: "openai", thresholds: { todo: 0.7, review: 0.3 } } }),
+      { todo: 0.7, review: 0.3 },
+    );
+  });
 });

@@ -8,6 +8,8 @@ export class InvalidAppConfigError extends Schema.TaggedError<InvalidAppConfigEr
 // id を Source 名（"github:<id>:watch"）の一部に使うため、区切り文字の ":" や空白を含められないようにする。
 const AccountId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/));
 
+const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
+
 const LlmProfile = Schema.Struct({
   // none: LLM を使わない（規則で決まらないものはすべて要確認）。API キーがまだない環境でも動かせるようにするため。
   provider: Schema.Literals(["none", "anthropic", "openai", "gemini", "azure-openai", "bedrock"]),
@@ -16,6 +18,7 @@ const LlmProfile = Schema.Struct({
     Schema.Struct({
       provider: Schema.Literals(["jev", "openai", "gemini"]),
       model: Schema.optional(Schema.String),
+      thresholds: Schema.optional(Schema.Struct({ todo: Probability, review: Probability })),
     }),
   ),
 });
