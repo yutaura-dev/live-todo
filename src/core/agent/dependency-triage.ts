@@ -16,6 +16,8 @@ import {
 } from "./dependency-review.js";
 
 const KIND = "dependency_review";
+// 失敗を繰り返して使用量を使い切らないよう、失敗してから調べ直すまでの間
+const RETRY_FAILED_AFTER_MILLIS = 60 * 60 * 1000;
 const hasCurrentReviewShape = (result: unknown) => typeof result === "object" && result !== null && "canMergeAsIs" in result;
 const PROVIDER = "claude-code";
 // 自分で手を付けた（進行中）ものや終わったものには割り込まない
@@ -76,12 +78,19 @@ export const runDependencyReviews = (options: DependencyReviewOptions) =>
     for (const row of rows) {
       if (PULL_URL.exec(row.url) === null || !isDependencyBot(row.author)) continue;
       const reviewed = yield* db
-        .select({ status: agentRuns.status, subjectSha: agentRuns.subjectSha, result: agentRuns.result })
+        .select({ status: agentRuns.status, subjectSha: agentRuns.subjectSha, result: agentRuns.result, finishedAt: agentRuns.finishedAt })
         .from(agentRuns)
         .where(and(eq(agentRuns.taskId, row.taskId), eq(agentRuns.kind, KIND), eq(agentRuns.subjectFingerprint, row.fingerprint)))
         .pipe(Effect.orDie);
       // 成功したのに commit が残っていない・回答に後から足した項目がない調査は、それより前のもの。merge に使えないので調べ直す
-      if (reviewed.some((run) => !(run.status === "succeeded" && (run.subjectSha === null || !hasCurrentReviewShape(run.result))))) continue;
+      const now = DateTime.toEpochMillis(yield* DateTime.now);
+      const blocks = (run: (typeof reviewed)[number]) => {
+        if (run.status === "succeeded") return run.subjectSha !== null && hasCurrentReviewShape(run.result);
+        // 失敗は、作業場所の取得のように PR のせいでないこともあるので、間を空けて調べ直す
+        if (run.status === "failed") return run.finishedAt === null || now - Date.parse(run.finishedAt) < RETRY_FAILED_AFTER_MILLIS;
+        return true;
+      };
+      if (reviewed.some(blocks)) continue;
       yield* db
         .insert(agentRuns)
         .values({ taskId: row.taskId, kind: KIND, status: "queued", subjectFingerprint: row.fingerprint, previousStatus: row.status, startedAt: yield* nowIso })

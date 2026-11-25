@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { eq } from "drizzle-orm";
 import { Database } from "../db/database.js";
 import { agentRuns, agentThreads } from "../db/schema.js";
@@ -182,6 +183,18 @@ describe("runDependencyReviews", () => {
       });
 
       assert.lengthOf(yield* withAgent().provide(run), 1);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("失敗してから 1 時間たったら、PR が変わっていなくても調べ直す（作業場所の取得の失敗など、PR のせいでない失敗もあるため）", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      yield* withAgent({ fail: "落ちた" }).provide(run);
+
+      yield* TestClock.adjust("59 minutes");
+      assert.lengthOf(yield* withAgent().provide(run), 0);
+
+      yield* TestClock.adjust("2 minutes");
+      assert.deepStrictEqual(yield* withAgent().provide(run), [{ taskId, succeeded: true }]);
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("同じ状態の PR は二度調べない（失敗したものも、PR が変わるまでやり直さない）", () =>

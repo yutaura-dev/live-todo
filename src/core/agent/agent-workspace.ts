@@ -6,6 +6,16 @@ export class AgentWorkspaceError extends Schema.TaggedError<AgentWorkspaceError>
   message: Schema.String,
 }) {}
 
+/** 作業場所を用意するコマンド。2 回目からは pull ではなく、最新の commit だけを取り直して合わせる（浅い clone の pull は失敗しやすい） */
+export function workspaceCommands(options: { exists: boolean; repository: string; dir: string }): Array<[string, string[]]> {
+  if (!options.exists) return [["gh", ["repo", "clone", options.repository, options.dir, "--", "--depth", "1"]]];
+  return [
+    ["git", ["-C", options.dir, "fetch", "--depth", "1", "origin", "HEAD"]],
+    // 作業場所は AI が読むためだけのもので誰も書き換えないので、取り直した状態で上書きしてよい
+    ["git", ["-C", options.dir, "reset", "--hard", "FETCH_HEAD"]],
+  ];
+}
+
 const RepositoryName = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** AI に調べさせる作業場所。リポジトリを Task ごとのフォルダに clone して渡す */
@@ -38,15 +48,13 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
           const taskRoot = `${root}/task-${taskId}`;
           const dir = `${taskRoot}/repo/${repository}`;
           const exists = yield* fs.exists(`${dir}/.git`).pipe(Effect.orElseSucceed(() => false));
-          const command = exists
-            ? ChildProcess.make("git", ["-C", dir, "pull", "--ff-only", "--depth", "1"])
-            : ChildProcess.make("gh", ["repo", "clone", repository, dir, "--", "--depth", "1"]);
           if (!exists) yield* fs.makeDirectory(`${taskRoot}/repo`, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
-          const exitCode = yield* spawner.exitCode(command).pipe(Effect.mapError(fail(`${repository} を取得できない`)));
-          if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
-            return yield* new AgentWorkspaceError({ message: `${repository} を取得できない（終了コード ${exitCode}）` });
+          for (const [command, args] of workspaceCommands({ exists, repository, dir })) {
+            const exitCode = yield* spawner.exitCode(ChildProcess.make(command, args)).pipe(Effect.mapError(fail(`${repository} を取得できない`)));
+            if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
+              return yield* new AgentWorkspaceError({ message: `${repository} を取得できない（${command} ${args[args.indexOf(dir) + 1] ?? args[0]} が終了コード ${exitCode}）` });
+            }
           }
-
           const commands = pullRequestCommands(pullUrl);
           const view = yield* spawner.string(ChildProcess.make("gh", commands.view)).pipe(Effect.mapError(fail("PR の情報を取れない")));
           const diff = yield* spawner.string(ChildProcess.make("gh", commands.diff)).pipe(Effect.mapError(fail("PR の差分を取れない")));
