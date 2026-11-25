@@ -27,6 +27,7 @@ export class TaskRepository extends Context.Service<TaskRepository, {
   createTask(task: NewTask): Effect.Effect<Task>;
   linkItem(taskId: number, sourceItemId: number, role: LinkRole): Effect.Effect<void>;
   findTaskByItem(sourceItemId: number): Effect.Effect<Option.Option<Task>>;
+  findTask(id: number): Effect.Effect<Option.Option<Task>>;
   trackedItemStates(taskId: number): Effect.Effect<ReadonlyArray<ItemState>>;
   updateTask(id: number, patch: TaskPatch): Effect.Effect<Task>;
   recordChange(taskId: number, change: TaskChangeInput): Effect.Effect<void>;
@@ -58,6 +59,11 @@ export class TaskRepository extends Context.Service<TaskRepository, {
           .innerJoin(tasks, eq(taskLinks.taskId, tasks.id))
           .where(eq(taskLinks.sourceItemId, sourceItemId))
           .limit(1);
+        return Option.fromNullishOr(rows[0]);
+      }, Effect.orDie);
+
+      const findTask = Effect.fn("TaskRepository.findTask")(function* (id: number) {
+        const rows = yield* db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
         return Option.fromNullishOr(rows[0]);
       }, Effect.orDie);
 
@@ -120,6 +126,7 @@ export class TaskRepository extends Context.Service<TaskRepository, {
         createTask,
         linkItem,
         findTaskByItem,
+        findTask,
         trackedItemStates,
         updateTask,
         recordChange,
