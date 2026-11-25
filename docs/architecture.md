@@ -97,6 +97,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 | Notion API | ページ・メンション・割り当ての取得 | インテグレーションへのページ共有が必要 |
 | Microsoft Graph | Outlook（Mail・Calendar）・Teams の取得 | 会社テナントでのアプリ同意が必要な場合がある |
 | LLM API（Claude / OpenAI / Gemini / Azure OpenAI / Bedrock） | fallback の判定、Epic の名前付け、Agent、Pre-work | 従量課金のコスト、会社ポリシー上の利用可否 |
+| `node:sqlite`（`@effect/sql-sqlite-node` の土台） | ローカル DB | Node 24 時点で experimental。API が変わる可能性がある。代わりにネイティブモジュールのリビルドが不要 |
 | Decisions provider（Jev / OpenAI Decisions / Gemini Decisions） | todo 判定・ラベル・優先度・カスタムラベル・Epic への振り分け | Gemini Decisions は発表直後で API が変わる可能性がある |
 
 ## 非機能要件

@@ -189,6 +189,9 @@ importers:
 
   .:
     dependencies:
+      '@effect/sql-sqlite-node':
+        specifier: 4.1.5
+        version: 4.1.5(effect@4.1.5)
       effect:
         specifier: 4.1.5
         version: 4.1.5
@@ -207,6 +210,11 @@ importers:
         version: 5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6))
 
 packages:
+
+  '@effect/sql-sqlite-node@4.1.5':
+    resolution: {integrity: sha512-eo+1W3lX/2cT3ATzjqhya/WvnhEByjG7DWfmWSPcENG04jjywV5p0eZ+COr+4nsXTMSoA9H2TdaqYWTnXNM9Qw==}
+    peerDependencies:
+      effect: ^4.1.5
 
   '@effect/vitest@4.1.5':
     resolution: {integrity: sha512-18u1013wkJtSelk1ZYLc/5aUnluTQyDfi2hAemkJW1GQ9qXw4mtPSiSf0AXZPhesmGCvG1Dk2C4JYD2sz+R72w==}
@@ -757,6 +765,10 @@ packages:
     hasBin: true
 
 snapshots:
+
+  '@effect/sql-sqlite-node@4.1.5(effect@4.1.5)':
+    dependencies:
+      effect: 4.1.5
 
   '@effect/vitest@4.1.5(effect@4.1.5)(vitest@5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)))':
     dependencies:

@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@effect/sql-sqlite-node": "4.1.5",
     "effect": "4.1.5"
   }
 }
