@@ -16,6 +16,9 @@ export function workspaceCommands(options: { exists: boolean; repository: string
   ];
 }
 
+// 読み取りだけの gh pr view で取る項目
+const PULL_STATE_FIELDS = "url,author,state,isDraft,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,mergeable,mergeStateStatus";
+
 const RepositoryName = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** AI に調べさせる作業場所。リポジトリを Task ごとのフォルダに clone して渡す */
@@ -30,6 +33,8 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
     taskId: number,
     pullUrl: string,
   ): Effect.Effect<{ cwd: string; contextDir: string; headSha: string | undefined }, AgentWorkspaceError>;
+  /** PR の今の状態と、自分のアカウント（JSON）。次にやることを考えるときに、確認の手順を作らせないため */
+  pullRequestState(pullUrl: string): Effect.Effect<string, AgentWorkspaceError>;
   /** Task の情報をファイルに書き出す（リポジトリの要らない調査のため）。書き出したフォルダのパスを返す */
   writeContext(taskId: number, files: Readonly<Record<string, string>>): Effect.Effect<string, AgentWorkspaceError>;
 }>()("live-todo/core/agent/AgentWorkspace") {
@@ -105,7 +110,14 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
           return contextDir;
         });
 
-        return AgentWorkspace.of({ prepare, writeContext });
+        const pullRequestState = Effect.fn("AgentWorkspace.pullRequestState")(function* (pullUrl: string) {
+          const read = (args: string[]) => spawner.string(ChildProcess.make("gh", args)).pipe(Effect.mapError(fail("PR の状態を取れない")));
+          const state = yield* read(["pr", "view", pullUrl, "--json", PULL_STATE_FIELDS]);
+          const viewer = yield* read(["api", "user", "--jq", ".login"]);
+          return JSON.stringify({ viewer: viewer.trim(), pullRequest: JSON.parse(state) as unknown }, null, 2);
+        });
+
+        return AgentWorkspace.of({ prepare, writeContext, pullRequestState });
       }),
     );
 }

@@ -110,7 +110,13 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
     };
 
     const outcome = yield* Effect.gen(function* () {
-      const contextDir = yield* workspace.writeContext(run.taskId, { "task.json": JSON.stringify(context, null, 2) });
+      const pull = items.find((item) => item.role === "tracks" && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(item.url));
+      const prState =
+        pull === undefined ? undefined : yield* workspace.pullRequestState(pull.url).pipe(Effect.orElseSucceed(() => "（取得できなかった）"));
+      const contextDir = yield* workspace.writeContext(run.taskId, {
+        "task.json": JSON.stringify(context, null, 2),
+        ...(prState === undefined ? {} : { "pr-state.json": prState }),
+      });
       const result = yield* claude.run({
         prompt: nextActionPrompt({ title: task.value.title, contextDir }),
         cwd: contextDir,

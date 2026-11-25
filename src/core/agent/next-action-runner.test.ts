@@ -11,7 +11,7 @@ import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
 import { runNextActionPlanning } from "./next-action-runner.js";
 
-const PROPOSAL = { steps: [{ title: "Slack で状況を聞く", effort: "easy", mode: "serial", options: [] }] };
+const PROPOSAL = { steps: [{ title: "Slack で状況を聞く", type: "manual", effort: "easy", mode: "serial", options: [] }] };
 
 const task = (options: { status?: TaskStatus; author?: string; source?: string; url?: string; nextActions?: unknown } = {}) =>
   Effect.gen(function* () {
@@ -58,6 +58,7 @@ const withAgent = (options: { fail?: string } = {}) => {
           AgentWorkspace,
           AgentWorkspace.of({
             prepare: () => Effect.die(new Error("リポジトリは要らない")),
+            pullRequestState: (url) => Effect.succeed(JSON.stringify({ url, author: "me", reviewDecision: "REVIEW_REQUIRED" })),
             writeContext: (taskId, files) =>
               Effect.sync(() => {
                 contexts.push(files);
@@ -76,6 +77,18 @@ const nextActionsOf = (taskId: number) =>
   Effect.gen(function* () {
     return Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).nextActions as { steps: { title: string }[] } | null;
   });
+
+describe("runNextActionPlanning（PR の Task）", () => {
+  it.effect("PR を追う Task には、PR の今の状態を集めて渡す（確認する手順を作らせないため）", () =>
+    Effect.gen(function* () {
+      yield* task({ url: "https://github.com/acme/app/pull/713" });
+      const agent = withAgent();
+
+      yield* agent.provide(run);
+
+      assert.deepInclude(JSON.parse(agent.contexts[0]!["pr-state.json"]!), { url: "https://github.com/acme/app/pull/713", reviewDecision: "REVIEW_REQUIRED" });
+    }).pipe(Effect.provide(TestDatabase)));
+});
 
 describe("runNextActionPlanning", () => {
   it.effect("次にやることがない Task を調査中のレーンに入れて claude に考えさせ、手順を保存して元のレーンに戻す", () =>
@@ -104,6 +117,7 @@ describe("runNextActionPlanning", () => {
       const request = agent.requests[0]!;
       assert.match(request.cwd, /\/context$/);
       assert.deepStrictEqual([...request.allowedTools], ["Read", "Grep", "Glob"]);
+      assert.isUndefined(agent.contexts[0]!["pr-state.json"], "PR でない項目には PR の状態を集めない");
       const context = JSON.parse(agent.contexts[0]!["task.json"]!);
       assert.strictEqual(context.title, "障害の調査依頼（acme/app）");
       assert.deepInclude(context.items[0], { url: "https://github.com/acme/app/issues/7", collected: "本文: ログを見てほしい" });
