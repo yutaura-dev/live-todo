@@ -12,6 +12,7 @@ node_modules/
 !/config.example.json
 /live-todo.db*
 /live-todo-*.db*
+/judge-dataset*.json
 
 # env files
 .env
