@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0006](decisions/0006-drizzle-on-effect-sql.md)
+> **直近の変更 ADR**: [ADR-0007](decisions/0007-separate-source-items-from-tasks.md)
 
 # Architecture — live-todo
 
@@ -23,6 +23,33 @@ macOS 向けの Electron アプリ。main プロセスがポーリングして S
                           │                    │
                     カンバン UI  <── Approval（外部への書き込みの承認）
 ```
+
+## ドメインモデル
+
+経緯は [ADR-0007](decisions/0007-separate-source-items-from-tasks.md)。
+
+```
+Source Item ──(Link: tracks / context)──▶ Task
+  └ Activity（出来事）  ── 解釈 ──▶  └ Task Change（更新マーク）
+```
+
+同期の流れ（`src/core/sync/sync-source.ts`）:
+
+1. Adapter から SourceChange を取得し、triage が pending の Item を判定する（トランザクションの外）
+2. Source Item を保存し、前回との差から Activity を記録する
+3. pending の Item は判定に従って Task を作り tracks で紐づける（not_todo なら ignored）
+4. linked の Item に resolved / reopened / removed が起きたら、tracks の Item の状態から Task の status を導き直す
+5. Task の項目が実際に変わったときだけ Task Change を記録する
+6. カーソルを保存する（2〜6 は 1 つのトランザクション）
+
+| テーブル | 中身 |
+|------|------|
+| `source_items` | Source Item。`(source, external_id)` で一意 |
+| `activities` | Activity |
+| `tasks` | Task（title / brief / status） |
+| `task_links` | Link。`source_item_id` で一意 |
+| `task_changes` | Task Change。`seen_at` が NULL のものが更新マーク |
+| `sync_cursors` | Source ごとのカーソル |
 
 ## 技術スタック
 
@@ -72,6 +99,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 - [ADR-0004: Epic とカスタムラベルを導入する](decisions/0004-epic-and-custom-labels.md)
 - [ADR-0005: 実装の基盤に Effect を採用する](decisions/0005-adopt-effect.md)
 - [ADR-0006: DB アクセスに Drizzle ORM（Effect 版）を使う](decisions/0006-drizzle-on-effect-sql.md)
+- [ADR-0007: Source Item と Task を別の概念として分ける](decisions/0007-separate-source-items-from-tasks.md)
 - 設計の方針
   - Source ごとの差異は Source Adapter に閉じ込め、Task・UI は Source に依存させない
   - 外部への書き込みは Approval を必ず通す。Adapter の書き込みメソッドは、承認済みの操作しか受け付けない形にする

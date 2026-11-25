@@ -1,6 +1,6 @@
 > **Stability**: 🌀 evolving
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0004](decisions/0004-epic-and-custom-labels.md)
+> **直近の変更 ADR**: [ADR-0007](decisions/0007-separate-source-items-from-tasks.md)
 
 # Plan — live-todo
 

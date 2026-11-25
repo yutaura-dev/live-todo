@@ -1,17 +1,22 @@
 import { Effect, Option, Schema } from "effect";
+import type { SqlClient } from "effect/sql";
+import { withTransaction } from "../db/database.js";
 import type { TodoJudgment, TodoVerdict } from "../judge/todo-judge.js";
-import type { Task, TaskChangeInput, TaskPatch, TaskStatus } from "../task/task.js";
+import { detectActivities } from "../source/activities.js";
+import type { ActivityKind, ItemState } from "../source/source-item.js";
+import { type SourceItem, SourceItemRepository } from "../source/source-item-repository.js";
+import { deriveTaskStatus } from "../task/task-status.js";
+import type { TaskStatus } from "../task/task.js";
 import { TaskRepository } from "../task/task-repository.js";
 import type { SourceAdapter } from "./source-adapter.js";
 import type { SourceChange } from "./source-change.js";
 
-export type TaskDraft = {
+export type ItemDraft = {
   title: string;
   url: string;
-  /** 内容の変化を検知するための値。変わると更新マークが付く */
+  state: Exclude<ItemState, "removed">;
+  /** Source Item の内容の変化を検知するための値。変わると Activity（changed）になる */
   fingerprint: string;
-  /** 元のツール側で解決済み（マージ・クローズなど）か */
-  resolved: boolean;
 };
 
 export type SourceBinding<TItem, TCursor, EA, EJ, RJ> = {
@@ -19,35 +24,34 @@ export type SourceBinding<TItem, TCursor, EA, EJ, RJ> = {
   adapter: SourceAdapter<TItem, TCursor, EA>;
   cursorSchema: Schema.Decoder<TCursor>;
   externalIdOf: (item: TItem) => string;
-  toDraft: (item: TItem) => TaskDraft;
+  toItemDraft: (item: TItem) => ItemDraft;
   judge: (item: TItem) => Effect.Effect<TodoJudgment, EJ, RJ>;
 };
 
 export type SyncSummary = {
-  created: number;
-  updated: number;
-  resolved: number;
-  reopened: number;
-  archived: number;
+  activities: number;
+  tasksCreated: number;
+  tasksUpdated: number;
+  itemsIgnored: number;
 };
 
 const STATUS_ON_CREATE = {
   todo: "todo",
   needs_review: "needs_review",
-  not_todo: "dismissed",
-} as const satisfies Record<TodoVerdict, TaskStatus>;
+} as const satisfies Record<Exclude<TodoVerdict, "not_todo">, TaskStatus>;
 
-const OPEN_STATUSES: ReadonlySet<TaskStatus> = new Set(["todo", "in_progress", "needs_review"]);
-const CLOSED_STATUSES: ReadonlySet<TaskStatus> = new Set(["done", "archived"]);
+const STATUS_AFFECTING_ACTIVITIES: ReadonlySet<ActivityKind> = new Set(["resolved", "reopened", "removed"]);
 
 const JUDGE_CONCURRENCY = 4;
 
+type Dependencies = SourceItemRepository | TaskRepository | SqlClient.SqlClient;
+
 export const syncSource = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
   binding: SourceBinding<TItem, TCursor, EA, EJ, RJ>,
-): Effect.fn.Return<SyncSummary, EA | EJ, TaskRepository | RJ> {
-  const repo = yield* TaskRepository;
+): Effect.fn.Return<SyncSummary, EA | EJ, Dependencies | RJ> {
+  const items = yield* SourceItemRepository;
 
-  const stored = yield* repo.loadCursor(binding.source);
+  const stored = yield* items.loadCursor(binding.source);
   const cursor = Option.flatMap(stored, Schema.decodeUnknownOption(binding.cursorSchema));
   if (Option.isSome(stored) && Option.isNone(cursor)) {
     yield* Effect.logWarning("保存されたカーソルを読めないため、カーソルなしで取得し直す").pipe(
@@ -59,30 +63,30 @@ export const syncSource = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, R
   // ネットワークの応答を待つ間 UI 側の書き込み（既読・カードの移動）まで止めてしまう。
   // 先に済ませても、失敗した時点ではまだ何も書いていないので原子性は保たれる。
   const { changes, nextCursor } = yield* binding.adapter.fetchChanges(Option.getOrNull(cursor));
-  const judgments = yield* judgeNewItems(binding, changes);
+  const judgments = yield* judgeItemsNeedingTriage(binding, changes);
 
-  return yield* repo.withTransaction(
+  return yield* withTransaction(
     Effect.gen(function* () {
-      const summary: SyncSummary = { created: 0, updated: 0, resolved: 0, reopened: 0, archived: 0 };
+      const summary: SyncSummary = { activities: 0, tasksCreated: 0, tasksUpdated: 0, itemsIgnored: 0 };
       for (const change of changes) {
-        yield* applyChange(repo, binding, change, judgments, summary);
+        yield* applyChange(binding, change, judgments, summary);
       }
-      yield* repo.saveCursor(binding.source, nextCursor);
+      yield* items.saveCursor(binding.source, nextCursor);
       return summary;
     }),
   );
 });
 
-const judgeNewItems = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
+const judgeItemsNeedingTriage = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
   binding: SourceBinding<TItem, TCursor, EA, EJ, RJ>,
   changes: readonly SourceChange<TItem>[],
-): Effect.fn.Return<Map<string, TodoJudgment>, EJ, TaskRepository | RJ> {
-  const repo = yield* TaskRepository;
+): Effect.fn.Return<Map<string, TodoJudgment>, EJ, SourceItemRepository | RJ> {
+  const items = yield* SourceItemRepository;
   const candidates: TItem[] = [];
   for (const change of changes) {
-    if (change.kind !== "upserted" || binding.toDraft(change.item).resolved) continue;
-    const existing = yield* repo.findBySource(binding.source, binding.externalIdOf(change.item));
-    if (Option.isNone(existing)) candidates.push(change.item);
+    if (change.kind !== "upserted" || binding.toItemDraft(change.item).state !== "open") continue;
+    const existing = yield* items.findItem(binding.source, binding.externalIdOf(change.item));
+    if (Option.isNone(existing) || existing.value.triage === "pending") candidates.push(change.item);
   }
 
   const judged = yield* Effect.forEach(
@@ -94,81 +98,73 @@ const judgeNewItems = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
 });
 
 const applyChange = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
-  repo: TaskRepository["Service"],
   binding: SourceBinding<TItem, TCursor, EA, EJ, RJ>,
   change: SourceChange<TItem>,
   judgments: ReadonlyMap<string, TodoJudgment>,
   summary: SyncSummary,
 ) {
+  const items = yield* SourceItemRepository;
+
+  const externalId = change.kind === "removed" ? change.externalId : binding.externalIdOf(change.item);
+  const previous = yield* items.findItem(binding.source, externalId);
+
+  let draft: { title: string; url: string; state: ItemState; fingerprint: string };
   if (change.kind === "removed") {
-    const existing = yield* repo.findBySource(binding.source, change.externalId);
-    if (Option.isNone(existing) || existing.value.status === "archived") return;
-    yield* repo.update(existing.value.id, { status: "archived" });
-    if (existing.value.status !== "dismissed") {
-      yield* repo.recordChange(existing.value.id, { kind: "source_removed", unread: true });
-    }
-    summary.archived++;
-    return;
+    if (Option.isNone(previous)) return;
+    const { title, url, fingerprint } = previous.value;
+    draft = { title, url, fingerprint, state: "removed" };
+  } else {
+    draft = binding.toItemDraft(change.item);
   }
+  const item = yield* items.upsertItem({ source: binding.source, externalId, ...draft });
 
-  const externalId = binding.externalIdOf(change.item);
-  const draft = binding.toDraft(change.item);
-  const existing = yield* repo.findBySource(binding.source, externalId);
-
-  if (Option.isNone(existing)) {
-    const judgment = judgments.get(externalId);
-    if (draft.resolved || judgment === undefined) return;
-    const task = yield* repo.insert({
-      source: binding.source,
-      externalId,
-      title: draft.title,
-      url: draft.url,
-      fingerprint: draft.fingerprint,
-      status: STATUS_ON_CREATE[judgment.verdict],
-    });
-    yield* repo.recordChange(task.id, { kind: "created", detail: { judgment }, unread: false });
-    summary.created++;
-    return;
+  const kinds = detectActivities(previous, item);
+  for (const kind of kinds) {
+    yield* items.recordActivity(item.id, kind);
   }
+  summary.activities += kinds.length;
 
-  yield* applyUpdate(repo, existing.value, draft, summary);
-});
-
-const applyUpdate = Effect.fnUntraced(function* (
-  repo: TaskRepository["Service"],
-  task: Task,
-  draft: TaskDraft,
-  summary: SyncSummary,
-) {
-  let patch: TaskPatch = {};
-  const records: TaskChangeInput[] = [];
-  // 対象外（dismissed）の Task に更新マークを付けない理由: ユーザーが見ないと決めたものなので、
-  // 内容だけ最新にしておき、通知のように目に入る形にはしない。
-  const silent = task.status === "dismissed";
-
-  if (draft.fingerprint !== task.fingerprint) {
-    patch = { ...patch, title: draft.title, url: draft.url, fingerprint: draft.fingerprint };
-    if (!silent) records.push({ kind: "content_updated", unread: true });
-    summary.updated++;
-  }
-
-  const next = nextStatus(task.status, draft.resolved);
-  if (next !== task.status) {
-    patch = { ...patch, status: next };
-    records.push({ kind: "status_changed", detail: { from: task.status, to: next }, unread: true });
-    if (next === "done") summary.resolved++;
-    else summary.reopened++;
-  }
-
-  if (Object.keys(patch).length === 0) return;
-  yield* repo.update(task.id, patch);
-  for (const record of records) {
-    yield* repo.recordChange(task.id, record);
+  if (item.triage === "pending") {
+    yield* triage(item, judgments.get(externalId), summary);
+  } else if (item.triage === "linked" && kinds.some((kind) => STATUS_AFFECTING_ACTIVITIES.has(kind))) {
+    yield* reconcileStatus(item, summary);
   }
 });
 
-function nextStatus(current: TaskStatus, resolved: boolean): TaskStatus {
-  if (resolved && OPEN_STATUSES.has(current)) return "done";
-  if (!resolved && CLOSED_STATUSES.has(current)) return "todo";
-  return current;
-}
+const triage = Effect.fnUntraced(function* (item: SourceItem, judgment: TodoJudgment | undefined, summary: SyncSummary) {
+  // 判定がない（初めて見た時点で解決済みなど）Item は pending のまま残し、再オープンされたときに判定する。
+  if (item.state !== "open" || judgment === undefined) return;
+  const items = yield* SourceItemRepository;
+  const tasks = yield* TaskRepository;
+
+  if (judgment.verdict === "not_todo") {
+    yield* items.setTriage(item.id, "ignored");
+    summary.itemsIgnored++;
+    return;
+  }
+
+  const task = yield* tasks.createTask({ title: item.title, status: STATUS_ON_CREATE[judgment.verdict] });
+  yield* tasks.linkItem(task.id, item.id, "tracks");
+  yield* items.setTriage(item.id, "linked");
+  yield* tasks.recordChange(task.id, { kind: "created", after: { judgment }, unread: false });
+  summary.tasksCreated++;
+});
+
+const reconcileStatus = Effect.fnUntraced(function* (item: SourceItem, summary: SyncSummary) {
+  const tasks = yield* TaskRepository;
+  const task = yield* tasks.findTaskByItem(item.id);
+  if (Option.isNone(task)) return;
+
+  const next = deriveTaskStatus(task.value.status, yield* tasks.trackedItemStates(task.value.id));
+  if (next === task.value.status) return;
+
+  yield* tasks.updateTask(task.value.id, { status: next });
+  yield* tasks.recordChange(task.value.id, {
+    kind: "field_changed",
+    field: "status",
+    before: task.value.status,
+    after: next,
+    unread: true,
+  });
+  summary.tasksUpdated++;
+});

@@ -17,8 +17,12 @@
 | Source | todo の取得元ツール（Slack, Gmail, GitHub など） |
 | Account | Source のアカウント単位（例: 会社の Slack ワークスペース、私用の Gmail） |
 | Source Adapter | Source ごとの取得・正規化・差分検知を担う実装。共通インターフェースを持つ |
-| Source Item | Source から取得した元データ（メッセージ、PR、メール、予定など） |
-| Task | Source Item から作られる todo。手動追加の Task もある |
+| Source Item | Source から取得した 1 件（PR、スレッド、メール、予定など）。外の世界の写しで、Task とは別の概念（[ADR-0007](docs/decisions/0007-separate-source-items-from-tasks.md)） |
+| Activity | Source Item に起きた出来事（appeared / changed / resolved / reopened / removed）。そのままでは更新マークにならない |
+| Link | Task と Source Item のつながり。tracks（完了を決める）と context（関連情報）。1 つの Item が属せる Task は 1 つまで |
+| Task | 自分がやること。Source の言葉ではなく自分にとっての意味（title: 何をするか、brief: 今の状況と次の一手）で持つ。手動追加の Task もある |
+| Task Change | Task の項目の変化（どの項目が何から何に）。更新マークはこれにだけ付く |
+| triage | Source Item の仕分け状態（pending: 未判定 / linked: Task に紐づけ済み / ignored: 対象外） |
 | Label / Priority | AI や規則で Task に付与される分類と優先度 |
 | Sync | ポーリングで Source の状態変化を取得し、Task に反映する処理 |
 | Agent Thread | Task ごとの AI Agent との会話履歴 |
@@ -27,7 +31,7 @@
 | LLM Profile | 使う LLM プロバイダ・モデル・認証情報の組み合わせ。当面は PC 単位で 1 つ |
 | Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる |
 | 未分類 | どの Epic にも入っていない Task |
-| 更新マーク | 未読の TaskChange（状態や内容の変化）がある Task に付く目印 |
+| 更新マーク | 未読の Task Change がある Task に付く目印。Source 側の変化ではなく Task の項目が変わったときだけ付く |
 | Decisions provider | 確率付きの判定 API（Jev / OpenAI Decisions / Gemini Decisions） |
 | 要確認 | 判定の確率が閾値の中間、または refusal だった Task の置き場 |
 | SnapshotDiffer | 全件取得の結果を前回の fingerprint と比べて SourceChange に変換する共通処理 |

@@ -1,18 +1,8 @@
-import type { taskChanges, tasks } from "./schema.js";
+export const TASK_STATUSES = ["todo", "in_progress", "done", "needs_review", "dismissed", "archived"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export type Task = typeof tasks.$inferSelect;
-export type TaskStatus = Task["status"];
-export type TaskChangeKind = typeof taskChanges.$inferSelect["kind"];
+export const TASK_CHANGE_KINDS = ["created", "field_changed", "link_added"] as const;
+export type TaskChangeKind = (typeof TASK_CHANGE_KINDS)[number];
 
-export type TaskWithUnread = Task & { unreadChanges: number };
-
-export type NewTask = Pick<Task, "source" | "externalId" | "title" | "url" | "status" | "fingerprint">;
-
-export type TaskPatch = Partial<Pick<Task, "title" | "url" | "status" | "fingerprint">>;
-
-export type TaskChangeInput = {
-  kind: TaskChangeKind;
-  detail?: Record<string, unknown>;
-  /** false にすると更新マークの対象にしない（作成時の記録など） */
-  unread: boolean;
-};
+export const LINK_ROLES = ["tracks", "context"] as const;
+export type LinkRole = (typeof LINK_ROLES)[number];
