@@ -12,10 +12,18 @@ export class GitHubTokenVerificationError extends Schema.TaggedError<GitHubToken
  */
 export const REQUIRED_GITHUB_SCOPES = ["repo"] as const;
 
+/**
+ * なくても同期はできるが、あると便利な scope。workflow がないと、.github/workflows を変える PR
+ * （GitHub Actions の更新など、依存更新の PR に多い）を merge できない。
+ */
+export const RECOMMENDED_GITHUB_SCOPES = ["workflow"] as const;
+
+export const missingRecommendedScopes = (scopes: ReadonlyArray<string>) => RECOMMENDED_GITHUB_SCOPES.filter((scope) => !scopes.includes(scope));
+
 /** 期限がこの日数より近づいたら、新しいトークンを入れるよう警告する */
 export const TOKEN_EXPIRY_WARNING_DAYS = 14;
 
-export type GitHubTokenInfo = { login: string; scopes: string[]; expiresAt: string | undefined };
+export type GitHubTokenInfo = { login: string; scopes: string[]; expiresAt: string | undefined; missingRecommendedScopes: string[] };
 
 const Viewer = Schema.Struct({ login: Schema.String });
 const DAY_MILLIS = 24 * 60 * 60 * 1000;
@@ -55,5 +63,10 @@ export const verifyGitHubToken = Effect.fnUntraced(function* (client: GitHubClie
     return yield* fail(`有効期限（${inspected.expiresAt}）を過ぎている`);
   }
 
-  return { login, scopes: inspected.scopes, expiresAt: inspected.expiresAt } satisfies GitHubTokenInfo;
+  return {
+    login,
+    scopes: inspected.scopes,
+    expiresAt: inspected.expiresAt,
+    missingRecommendedScopes: missingRecommendedScopes(inspected.scopes),
+  } satisfies GitHubTokenInfo;
 });

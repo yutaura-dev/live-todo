@@ -76,6 +76,27 @@ describe("mergePlan", () => {
     }).pipe(Effect.provide(TestDatabase)));
 });
 
+describe("approveAndMerge（権限が足りないとき）", () => {
+  it.effect("workflow の権限がなくて断られたら、何をすれば merge できるかを日本語で伝える", () =>
+    Effect.gen(function* () {
+      const taskId = yield* reviewedTask();
+      const client = gitHubClientStub({
+        mergePullRequest: () =>
+          Effect.fail(
+            new GitHubRequestError({
+              message: "GitHub API が 403 を返した: PUT /repos/acme/app/pulls/42/merge: refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope",
+              status: 403,
+            }),
+          ),
+      });
+
+      const error = yield* Effect.flip(approveAndMerge(taskId, { method: "squash", sha: "head-sha" }, clientFor(client)));
+
+      assert.include(error.message, "workflow の権限");
+      assert.include(error.message, "gh auth refresh -s workflow");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
 describe("approveAndMerge", () => {
   it.effect("承認された方法と commit で merge し、承認を記録して Task を完了にする", () =>
     Effect.gen(function* () {

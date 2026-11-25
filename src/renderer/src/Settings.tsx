@@ -254,6 +254,12 @@ function TokenSummary({ summary }: { summary: GitHubTokenSummary }) {
       <p>
         {summary.login} のトークン。権限: {summary.scopes.join(", ")}。有効期限: {summary.expiresAt === undefined ? "なし" : dateOf(summary.expiresAt)}
       </p>
+      {summary.missingRecommendedScopes.includes("workflow") && (
+        <p className="expiry-warning">
+          workflow の権限がないため、.github/workflows を変える PR（GitHub Actions の更新など）は merge できません。`gh auth refresh -s
+          workflow` で権限を足し、ここでトークンを保存し直してください。
+        </p>
+      )}
       {summary.expiryWarning && (
         <p className="expiry-warning" role="alert">
           {summary.expiryWarning.daysLeft === 0

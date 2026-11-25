@@ -10,7 +10,7 @@ import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { approveAndMerge, mergePlan } from "../app/merge-approval.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
-import { tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
+import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
@@ -193,7 +193,11 @@ const settingsSnapshot = Effect.gen(function* () {
   const githubTokens: Record<string, GitHubTokenSummary> = {};
   for (const [accountId, info] of Object.entries(yield* (yield* tokenInfoStore).all)) {
     const expiryWarning = tokenExpiryWarning(info.expiresAt, now);
-    githubTokens[accountId] = { ...info, ...(expiryWarning === undefined ? {} : { expiryWarning }) };
+    githubTokens[accountId] = {
+      ...info,
+      missingRecommendedScopes: missingRecommendedScopes(info.scopes),
+      ...(expiryWarning === undefined ? {} : { expiryWarning }),
+    };
   }
   return { configPath, config, problems, secrets, encryptionAvailable, githubTokens } satisfies SettingsSnapshot;
 });
@@ -255,7 +259,7 @@ function registerIpc() {
           const accountId = accountOfTokenKey(key);
           yield* forgetRemoteRepositories(accountId);
           if (accountId !== undefined) {
-            const { expiresAt, ...rest } = info;
+            const { expiresAt, missingRecommendedScopes: _computedOnRead, ...rest } = info;
             yield* (yield* tokenInfoStore).save(accountId, {
               ...rest,
               ...(expiresAt === undefined ? {} : { expiresAt }),

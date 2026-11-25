@@ -52,6 +52,13 @@ const reviewedPull = Effect.fnUntraced(function* (taskId: number) {
   return { repository: pull[1]!, number: Number(pull[2]), sha: run.subjectSha, accountId: account[1]! };
 });
 
+// GitHub の理由（英語）のうち、ユーザーが自分で直せるものは、直し方を添えて伝える
+const explainMergeFailure = (message: string) =>
+  /without `workflow` scope/.test(message)
+    ? "トークンに workflow の権限がないため、.github/workflows を変える PR は merge できません。" +
+      "`gh auth refresh -s workflow` で権限を足し、設定画面でトークンを保存し直してから、もう一度 merge してください"
+    : message;
+
 /** merge の確認に出す内容。merge の方法はリポジトリの慣習（最近の commit）に合わせて選ぶ */
 export const mergePlan = Effect.fnUntraced(function* <E, R>(taskId: number, clientFor: ClientFor<E, R>) {
   const target = yield* reviewedPull(taskId);
@@ -87,7 +94,7 @@ export const approveAndMerge = Effect.fnUntraced(function* <E, R>(
   const executedAt = DateTime.formatIso(yield* DateTime.now);
   if (result._tag === "Failure") {
     yield* db.insert(approvals).values({ ...record, status: "failed", error: result.failure.message, executedAt }).pipe(Effect.orDie);
-    return yield* new MergeFailedError({ message: result.failure.message });
+    return yield* new MergeFailedError({ message: explainMergeFailure(result.failure.message) });
   }
   yield* db.insert(approvals).values({ ...record, status: "executed", executedAt }).pipe(Effect.orDie);
 

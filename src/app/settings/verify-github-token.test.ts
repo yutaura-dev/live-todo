@@ -23,7 +23,21 @@ describe("verifyGitHubToken", () => {
       Effect.gen(function* () {
         const info = yield* verifyGitHubToken(token({ scopes: ["repo", "read:org"], expiresAt: "2027-02-01T00:00:00.000Z" }));
 
-        assert.deepStrictEqual(info, { login: "octocat", scopes: ["repo", "read:org"], expiresAt: "2027-02-01T00:00:00.000Z" });
+        assert.deepStrictEqual(info, {
+          login: "octocat",
+          scopes: ["repo", "read:org"],
+          expiresAt: "2027-02-01T00:00:00.000Z",
+          missingRecommendedScopes: ["workflow"],
+        });
+      }),
+    ));
+
+  it.effect("workflow の権限がなくても受け付けるが、足りないことを返す（.github/workflows を変える PR を merge できない）", () =>
+    atNow(
+      Effect.gen(function* () {
+        const info = yield* verifyGitHubToken(token({ scopes: ["repo"] }));
+
+        assert.deepStrictEqual(info.missingRecommendedScopes, ["workflow"]);
       }),
     ));
 

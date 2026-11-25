@@ -47,6 +47,8 @@ export type GitHubTokenSummary = {
   verifiedAt: string;
   /** 期限が近い（または過ぎた）ときだけ、残りの日数 */
   expiryWarning?: { daysLeft: number };
+  /** なくても同期はできるが、足りない権限（workflow がないと .github/workflows を変える PR を merge できない） */
+  missingRecommendedScopes: readonly string[];
 };
 
 export type MergeMethod = "squash" | "merge" | "rebase";

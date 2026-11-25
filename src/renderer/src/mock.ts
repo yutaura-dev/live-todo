@@ -74,6 +74,7 @@ export const mockApi: LiveTodoApi = {
         expiresAt: new Date(now + 5 * 24 * 60 * 60_000).toISOString(),
         verifiedAt: ago(60 * 24 * 80),
         expiryWarning: { daysLeft: 5 },
+        missingRecommendedScopes: ["workflow"],
       },
     },
   }),
