@@ -12,6 +12,8 @@ export function pullRequestCommands(pullUrl: string) {
   return {
     view: ["pr", "view", pullUrl, "--json", "title,body,author,files,statusCheckRollup,baseRefName,headRefName,headRefOid,mergeable"],
     diff: ["pr", "diff", pullUrl],
+    // 差分を取ったあとに head の commit を確かめ直すため（情報と差分の間に commit が足されていないか）
+    head: ["pr", "view", pullUrl, "--json", "headRefOid"],
   };
 }
 

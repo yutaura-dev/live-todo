@@ -8,6 +8,7 @@ describe("pullRequestCommands", () => {
     assert.deepStrictEqual(commands.view.slice(0, 3), ["pr", "view", "https://github.com/acme/app/pull/42"]);
     assert.include(commands.view[commands.view.indexOf("--json") + 1]!, "statusCheckRollup");
     assert.deepStrictEqual(commands.diff, ["pr", "diff", "https://github.com/acme/app/pull/42"]);
+    assert.deepStrictEqual(commands.head, ["pr", "view", "https://github.com/acme/app/pull/42", "--json", "headRefOid"]);
   });
 });
 

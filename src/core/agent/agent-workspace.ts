@@ -50,6 +50,12 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
           const commands = pullRequestCommands(pullUrl);
           const view = yield* spawner.string(ChildProcess.make("gh", commands.view)).pipe(Effect.mapError(fail("PR の情報を取れない")));
           const diff = yield* spawner.string(ChildProcess.make("gh", commands.diff)).pipe(Effect.mapError(fail("PR の差分を取れない")));
+          // 情報と差分を取る間に commit が足されると、AI が読む差分と merge のときに指定する commit がずれる。
+          // ずれたら今回は調べず、PR の更新として次の回に調べ直す
+          const headAfter = yield* spawner.string(ChildProcess.make("gh", commands.head)).pipe(Effect.mapError(fail("PR の head を確かめられない")));
+          if (headShaOf(view) === undefined || headShaOf(view) !== headShaOf(headAfter)) {
+            return yield* new AgentWorkspaceError({ message: "PR の情報を集めている間に PR が更新された" });
+          }
           const contextDir = `${taskRoot}/context`;
           yield* Effect.all([
             fs.makeDirectory(contextDir, { recursive: true }),
