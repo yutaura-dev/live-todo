@@ -8,7 +8,10 @@ export const githubSourceName = (accountId: string) => `github:${accountId}`;
 
 const GITHUB_TODO_QUESTION = "この GitHub の通知は、自分が対応すべきタスクか？";
 
-const GitHubCursor = Schema.Struct({ since: Schema.String });
+const GitHubCursor = Schema.Struct({
+  since: Schema.String,
+  backfill: Schema.optionalKey(Schema.Struct({ before: Schema.String, newest: Schema.String })),
+});
 
 export type GitHubBindingOptions = GitHubAdapterOptions & { accountId: string; thresholds?: TodoJudgeThresholds };
 

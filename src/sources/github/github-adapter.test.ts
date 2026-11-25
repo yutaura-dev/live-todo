@@ -8,6 +8,7 @@ import type { SourceChange } from "../../core/sync/source-change.js";
 import {
   GitHubClient,
   type GitHubAdapterOptions,
+  type GitHubCursor,
   type GitHubItem,
   GitHubResponseError,
   githubTodoRules,
@@ -24,16 +25,18 @@ const openPull = { ...mergedPull, state: "open", merged: false };
 const openIssue = { ...closedIssue, state: "open", state_reason: null };
 const allSubjectsOpen: Record<string, unknown> = { [PULL_URL]: openPull, [ISSUE_URL]: openIssue };
 
-function clientWith(options: { notifications?: unknown[]; subjects?: Record<string, unknown> }) {
+function clientWith(options: { notifications?: unknown[]; truncated?: boolean; subjects?: Record<string, unknown> }) {
   return gitHubClientStub({
-    listNotifications: vi.fn(() => Effect.succeed<unknown>(options.notifications ?? [])),
+    listNotifications: vi.fn(() =>
+      Effect.succeed({ notifications: options.notifications ?? [], truncated: options.truncated ?? false }),
+    ),
     getSubject: vi.fn((url: string) => Effect.succeed(Option.fromNullishOr(options.subjects?.[url]))),
   });
 }
 
 const fetchWith = (
   client: GitHubClient["Service"],
-  cursor: { since: string } | null,
+  cursor: GitHubCursor | null,
   extra: Partial<GitHubAdapterOptions> = {},
 ) =>
   Effect.gen(function* () {
@@ -147,6 +150,68 @@ describe("次回のカーソル", () => {
       const { nextCursor } = yield* fetchWith(clientWith({}), { since: "2026-11-20T00:00:00Z" });
 
       assert.deepStrictEqual(nextCursor, { since: "2026-11-20T00:00:00Z" });
+    }));
+});
+
+describe("打ち切られた通知の続き", () => {
+  const older = (id: string, updatedAt: string) => ({ ...notifications[2], id, updated_at: updatedAt });
+
+  it.effect("取得が上限で打ち切られたら、次回のカーソルに続きの範囲を入れる", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications, truncated: true, subjects: allSubjectsOpen });
+
+      const { nextCursor } = yield* fetchWith(client, null);
+
+      assert.deepStrictEqual(nextCursor, {
+        since: "2026-11-11T00:00:00.000Z",
+        backfill: { before: "2026-11-24T08:15:00Z", newest: "2026-11-24T10:30:00Z" },
+      });
+    }));
+
+  it.effect("続きの範囲があるときは、since と before で古い側を取りに行く", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications: [older("900", "2026-11-20T00:00:00Z")] });
+
+      yield* fetchWith(client, {
+        since: "2026-11-11T00:00:00.000Z",
+        backfill: { before: "2026-11-24T08:15:00Z", newest: "2026-11-24T10:30:00Z" },
+      });
+
+      expect(client.listNotifications).toHaveBeenCalledWith({
+        since: "2026-11-11T00:00:00.000Z",
+        before: "2026-11-24T08:15:00Z",
+        all: true,
+      });
+    }));
+
+  it.effect("続きを取り切ったら、最初の取得で一番新しかった時刻から通常の差分取得に戻る", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications: [older("900", "2026-11-20T00:00:00Z")] });
+
+      const { nextCursor } = yield* fetchWith(client, {
+        since: "2026-11-11T00:00:00.000Z",
+        backfill: { before: "2026-11-24T08:15:00Z", newest: "2026-11-24T10:30:00Z" },
+      });
+
+      assert.deepStrictEqual(nextCursor, { since: "2026-11-24T10:30:00Z" });
+    }));
+
+  it.effect("続きの取得もまた打ち切られたら、さらに古い側へ進む", () =>
+    Effect.gen(function* () {
+      const client = clientWith({
+        notifications: [older("900", "2026-11-20T00:00:00Z"), older("901", "2026-11-18T00:00:00Z")],
+        truncated: true,
+      });
+
+      const { nextCursor } = yield* fetchWith(client, {
+        since: "2026-11-11T00:00:00.000Z",
+        backfill: { before: "2026-11-24T08:15:00Z", newest: "2026-11-24T10:30:00Z" },
+      });
+
+      assert.deepStrictEqual(nextCursor, {
+        since: "2026-11-11T00:00:00.000Z",
+        backfill: { before: "2026-11-18T00:00:00Z", newest: "2026-11-24T10:30:00Z" },
+      });
     }));
 });
 

@@ -20,7 +20,11 @@ export class GitHubRateLimitedError extends Schema.TaggedError<GitHubRateLimited
 export type GitHubClientError = GitHubRequestError | GitHubRateLimitedError;
 
 export class GitHubClient extends Context.Service<GitHubClient, {
-  listNotifications(params: { since: string; all: boolean }): Effect.Effect<unknown, GitHubClientError>;
+  /** truncated: ページ数の上限で打ち切り、取り残した古い通知がある */
+  listNotifications(params: { since: string; before?: string; all: boolean }): Effect.Effect<
+    { notifications: unknown; truncated: boolean },
+    GitHubClientError
+  >;
   /** 対象が削除された・見られなくなったときは Option.none を返す */
   getSubject(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
   /** 自分が author の open な PR（Search API: is:pr is:open author:@me） */
@@ -68,7 +72,11 @@ export type GitHubItem = {
   updatedAt: string;
 };
 
-export type GitHubCursor = { since: string };
+/**
+ * backfill: 前回の取得がページ数の上限で打ち切られ、since から before までの古い通知を取り残している。
+ * 取り切ったら newest（打ち切られた最初の取得で一番新しかった時刻）から通常の差分取得に戻る。
+ */
+export type GitHubCursor = { since: string; backfill?: { before: string; newest: string } };
 
 export type GitHubAdapterOptions = {
   initialLookbackDays: number;
@@ -122,16 +130,20 @@ export const makeGitHubAdapter = Effect.fnUntraced(function* (options: GitHubAda
       Effect.gen(function* () {
         const since =
           cursor?.since ?? DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { days: options.initialLookbackDays }));
+        const backfill = cursor?.backfill;
         // all: true にする理由: 既定の未読のみだと、GitHub の Web で通知を開いて既読にした後の
         // マージ・クローズなどの状態変化が取れなくなるため。
-        const notifications = yield* client.listNotifications({ since, all: true }).pipe(Effect.flatMap(decodeNotifications));
+        const response = yield* client.listNotifications(
+          backfill === undefined ? { since, all: true } : { since, before: backfill.before, all: true },
+        );
+        const notifications = yield* decodeNotifications(response.notifications);
 
         const targets = notifications.filter((notification) => isTargetRepository(notification.repository.full_name));
         const changes = yield* Effect.forEach(targets, toChange);
 
         // フィルター後の targets ではなく全通知からカーソルを作る理由:
         // 除外したリポジトリの通知が最新のとき、カーソルが進まず毎回取得し直すことになるため。
-        return { changes, nextCursor: { since: latestUpdatedAt(notifications) ?? since } };
+        return { changes, nextCursor: nextCursorOf(since, backfill, notifications, response.truncated) };
       }),
   };
   return adapter;
@@ -142,6 +154,34 @@ function stateOf(detail: GitHubSubjectDetail): GitHubItemState {
   if (detail.state === "open" || detail.state === "closed") return detail.state;
   return "unknown";
 }
+
+// 通知は新しい順に返るので、打ち切られたときは取れた中で一番古い時刻より前が残っている。
+// カーソルを一番新しい時刻に進めてしまうと、その残りを二度と取りに行かなくなるため、続きの範囲を覚えておく。
+function nextCursorOf(
+  since: string,
+  backfill: GitHubCursor["backfill"],
+  notifications: readonly GitHubNotification[],
+  truncated: boolean,
+): GitHubCursor {
+  const oldest = oldestUpdatedAt(notifications);
+  if (truncated && oldest !== undefined) {
+    const newest = backfill?.newest ?? latestUpdatedAt(notifications) ?? since;
+    return { since, backfill: { before: oldest, newest } };
+  }
+  if (backfill !== undefined) return { since: backfill.newest };
+  return { since: latestUpdatedAt(notifications) ?? since };
+}
+
+function oldestUpdatedAt(notifications: readonly GitHubNotification[]): string | undefined {
+  let oldest: GitHubNotification | undefined;
+  for (const notification of notifications) {
+    if (oldest === undefined || epochOfNotification(notification) < epochOfNotification(oldest)) oldest = notification;
+  }
+  return oldest?.updated_at;
+}
+
+const epochOfNotification = (notification: GitHubNotification) =>
+  Option.match(DateTime.make(notification.updated_at), { onNone: () => Number.NEGATIVE_INFINITY, onSome: DateTime.toEpochMillis });
 
 function latestUpdatedAt(notifications: readonly GitHubNotification[]): string | undefined {
   // 文字列比較で済ませない理由: GitHub は通常 Z 付きの同一形式で返すが、

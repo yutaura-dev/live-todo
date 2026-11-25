@@ -53,7 +53,7 @@ describe("GitHubClientLive", () => {
       );
 
       const [request] = requests;
-      assert.deepStrictEqual(result, [{ id: "1" }]);
+      assert.deepStrictEqual(result, { notifications: [{ id: "1" }], truncated: false });
       assert.strictEqual(`${request?.url.origin}${request?.url.pathname}`, "https://api.github.com/notifications");
       assert.strictEqual(request?.url.searchParams.get("all"), "true");
       assert.strictEqual(request?.url.searchParams.get("since"), "2026-11-24T00:00:00Z");
@@ -77,8 +77,34 @@ describe("GitHubClientLive", () => {
         client.listNotifications({ since: "2026-11-24T00:00:00Z", all: true }),
       );
 
-      assert.deepStrictEqual(result, [{ id: "1" }, { id: "2" }]);
+      assert.deepStrictEqual(result, { notifications: [{ id: "1" }, { id: "2" }], truncated: false });
       assert.strictEqual(requests.length, 2);
+    }));
+
+  it.effect("before を指定したら、その時刻より前の通知に絞って取得する", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({ body: [] }));
+
+      yield* withClient(layer, (client) =>
+        client.listNotifications({ since: "2026-11-11T00:00:00Z", before: "2026-11-24T08:15:00Z", all: true }),
+      );
+
+      assert.strictEqual(requests[0]?.url.searchParams.get("before"), "2026-11-24T08:15:00Z");
+    }));
+
+  it.effect("ページ数の上限で打ち切ったら、打ち切ったことを返す", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub((url) => ({
+        body: [{ id: url.searchParams.get("page") ?? "1" }],
+        headers: { link: `<https://api.github.com/notifications?page=${Number(url.searchParams.get("page") ?? "1") + 1}>; rel="next"` },
+      }));
+
+      const result = yield* withClient(layer, (client) =>
+        client.listNotifications({ since: "2026-11-11T00:00:00Z", all: true }),
+      );
+
+      assert.strictEqual(requests.length, 10);
+      assert.isTrue(result.truncated);
     }));
 
   it.effect("自分の open な PR を検索し、複数ページの items を 1 つにまとめる", () =>

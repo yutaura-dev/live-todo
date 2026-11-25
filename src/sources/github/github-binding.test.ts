@@ -73,7 +73,7 @@ describe("GitHub の通知から Task まで", () => {
   /** subjects は参照で受け取り、テストの途中で PR の状態を書き換えられるようにする */
   const clientServing = (subjects: Record<string, unknown>, batches: unknown[][]) => {
     const listNotifications = vi.fn();
-    for (const batch of batches) listNotifications.mockReturnValueOnce(Effect.succeed<unknown>(batch));
+    for (const batch of batches) listNotifications.mockReturnValueOnce(Effect.succeed({ notifications: batch, truncated: false }));
     return gitHubClientStub({
       listNotifications,
       getSubject: (url: string) => Effect.succeed(Option.fromNullishOr(subjects[url])),

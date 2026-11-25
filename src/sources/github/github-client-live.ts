@@ -125,14 +125,16 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
       const collectPages = Effect.fnUntraced(function* (
         first: URL,
         pick: (body: unknown, url: URL) => Effect.Effect<ReadonlyArray<unknown>, GitHubRequestError>,
-      ): Effect.fn.Return<unknown[], GitHubClientError> {
+      ): Effect.fn.Return<{ items: unknown[]; truncated: boolean }, GitHubClientError> {
         const collected: unknown[] = [];
+        let truncated = false;
         let url: URL | undefined = first;
         for (let page = 0; url !== undefined; page++) {
           if (page >= MAX_PAGES) {
-            yield* Effect.logWarning("ページ数の上限に達したため、残りのページを取得しない").pipe(
+            yield* Effect.logWarning("ページ数の上限に達したため、残りのページは次の取得に回す").pipe(
               Effect.annotateLogs({ path: first.pathname, maxPages: MAX_PAGES }),
             );
+            truncated = true;
             break;
           }
           const current: URL = url;
@@ -142,7 +144,7 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
           const next = nextPageUrl(response.value);
           url = Option.isSome(next) ? yield* resolveUrl(next.value) : undefined;
         }
-        return collected;
+        return { items: collected, truncated };
       });
 
       const getOptional = Effect.fnUntraced(function* (apiUrl: string) {
@@ -155,9 +157,15 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
       const arrayItems = (body: unknown, url: URL) => decodeBody(ArrayBody, url)(body);
 
       return GitHubClient.of({
-        listNotifications: ({ since, all }) =>
-          resolveUrl("/notifications", { since, all: String(all), per_page: "50" }).pipe(
+        listNotifications: ({ since, before, all }) =>
+          resolveUrl("/notifications", {
+            since,
+            ...(before === undefined ? {} : { before }),
+            all: String(all),
+            per_page: "50",
+          }).pipe(
             Effect.flatMap((url) => collectPages(url, arrayItems)),
+            Effect.map(({ items, truncated }) => ({ notifications: items, truncated })),
           ),
         getSubject: getOptional,
         getPullRequest: getOptional,
@@ -168,7 +176,7 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
           Effect.flatMap((url) =>
             collectPages(url, (body, pageUrl) => decodeBody(SearchBody, pageUrl)(body).pipe(Effect.map((page) => page.items))),
           ),
-          Effect.map((items) => ({ items })),
+          Effect.map(({ items }) => ({ items })),
         ),
         listCheckRuns: (repository, sha) => {
           const repoPath = repository.split("/").map(encodeURIComponent).join("/");
@@ -178,12 +186,13 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
                 decodeBody(CheckRunsBody, pageUrl)(body).pipe(Effect.map((page) => page.check_runs)),
               ),
             ),
-            Effect.map((checkRuns) => ({ check_runs: checkRuns })),
+            Effect.map(({ items }) => ({ check_runs: items })),
           );
         },
         listReviews: (pullApiUrl) =>
           resolveUrl(`${pullApiUrl}/reviews`, { per_page: PER_PAGE }).pipe(
             Effect.flatMap((url) => collectPages(url, arrayItems)),
+            Effect.map(({ items }) => items),
           ),
       });
     }),
