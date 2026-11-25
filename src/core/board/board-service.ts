@@ -82,8 +82,10 @@ export type TaskDetail = {
   items: TaskDetailItem[];
   /** 新しい順 */
   changes: TaskDetailChange[];
-  /** 最後に AI に任せた作業 */
+  /** 依存更新の調査（最後に成功したもの。調べている最中・調査待ちならそれ） */
   agentRun?: TaskDetailAgentRun;
+  /** 成功した調査のあとの調べ直しが失敗していたら、その理由 */
+  agentRunProblem?: string;
   /** 次にやること（手順の並び全体） */
   nextActions?: NextActionPlan;
   /** いま着手できる手順の id */
@@ -242,7 +244,17 @@ export class BoardService extends Context.Service<BoardService, {
           .orderBy(asc(taskLinks.id))
           .pipe(Effect.orDie);
         const changes = yield* tasks.listChanges(taskId);
-        const [lastRun] = yield* db.select().from(agentRuns).where(eq(agentRuns.taskId, taskId)).orderBy(desc(agentRuns.id)).limit(1).pipe(Effect.orDie);
+        // 依存更新の調査の結果を出す。最後の調べ直しが失敗していても、成功した調査の結論を出し、失敗は添えるだけにする
+        const reviewRuns = yield* db
+          .select()
+          .from(agentRuns)
+          .where(and(eq(agentRuns.taskId, taskId), eq(agentRuns.kind, "dependency_review")))
+          .orderBy(desc(agentRuns.id))
+          .pipe(Effect.orDie);
+        const latest = reviewRuns[0];
+        const latestSucceeded = reviewRuns.find((candidate) => candidate.status === "succeeded");
+        const lastRun = latest !== undefined && latest.status !== "failed" ? latest : (latestSucceeded ?? latest);
+        const agentRunProblem = latest?.status === "failed" && latestSucceeded !== undefined ? (latest.error ?? "理由不明") : undefined;
 
         return {
           id: task.id,
@@ -265,6 +277,7 @@ export class BoardService extends Context.Service<BoardService, {
             onNone: () => ({}),
             onSome: (plan) => ({ nextActions: plan, currentStepIds: currentSteps(plan).map((step) => step.id) }),
           }),
+          ...(agentRunProblem === undefined ? {} : { agentRunProblem }),
           ...(lastRun === undefined
             ? {}
             : {

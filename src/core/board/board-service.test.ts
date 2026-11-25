@@ -248,6 +248,22 @@ describe("AI の調査", () => {
       }),
     ));
 
+  it.effect("最後の調べ直しが失敗していたら、成功した調査の結果を出し、失敗は添えるだけにする", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        const db = yield* Database;
+        const base = { taskId: task.id, kind: "dependency_review", subjectFingerprint: "v1", previousStatus: "todo", startedAt: "2026-11-25T00:00:00.000Z" };
+        yield* db.insert(agentRuns).values({ ...base, status: "succeeded", result: { conclusion: "mergeable" } });
+        yield* db.insert(agentRuns).values({ ...base, status: "failed", error: "作業場所を取得できない" });
+
+        const detail = yield* (yield* BoardService).taskDetail(task.id);
+
+        assert.deepInclude(detail.agentRun, { status: "succeeded", result: { conclusion: "mergeable" } });
+        assert.strictEqual(detail.agentRunProblem, "作業場所を取得できない");
+      }),
+    ));
+
   it.effect("調べたことがなければ、調査の結果は出さない", () =>
     run(
       Effect.gen(function* () {

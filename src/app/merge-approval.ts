@@ -29,11 +29,12 @@ const reviewedPull = Effect.fnUntraced(function* (taskId: number) {
   const [run] = yield* db
     .select()
     .from(agentRuns)
-    .where(and(eq(agentRuns.taskId, taskId), eq(agentRuns.kind, "dependency_review")))
+    // 最後に成功した調査を使う。そのあとの調べ直しが（作業場所の取得などで）失敗しても、結論は変わらないため
+    .where(and(eq(agentRuns.taskId, taskId), eq(agentRuns.kind, "dependency_review"), eq(agentRuns.status, "succeeded")))
     .orderBy(desc(agentRuns.id))
     .limit(1)
     .pipe(Effect.orDie);
-  if (run === undefined || run.status !== "succeeded") return yield* notAllowed("merge できると判定した調査がない");
+  if (run === undefined) return yield* notAllowed("merge できると判定した調査がない");
   const review = Option.getOrUndefined(decodeReview(run.result));
   const mergeable = review?.conclusion === "mergeable" || (review?.conclusion === "mergeable_after_fix" && review.canMergeAsIs === true);
   if (!mergeable) return yield* notAllowed("最後の調査で merge 可能と判定されていない");

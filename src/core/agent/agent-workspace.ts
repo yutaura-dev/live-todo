@@ -51,12 +51,23 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
           const dir = `${taskRoot}/repo/${repository}`;
           const exists = yield* fs.exists(`${dir}/.git`).pipe(Effect.orElseSucceed(() => false));
           if (!exists) yield* fs.makeDirectory(`${taskRoot}/repo`, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
-          for (const [command, args] of workspaceCommands({ exists, repository, dir })) {
-            const exitCode = yield* spawner.exitCode(ChildProcess.make(command, args)).pipe(Effect.mapError(fail(`${repository} を取得できない`)));
-            if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
-              return yield* new AgentWorkspaceError({ message: `${repository} を取得できない（${command} ${args[args.indexOf(dir) + 1] ?? args[0]} が終了コード ${exitCode}）` });
-            }
-          }
+          const runAll = (fresh: boolean) =>
+            Effect.gen(function* () {
+              for (const [command, args] of workspaceCommands({ exists: !fresh, repository, dir })) {
+                const exitCode = yield* spawner.exitCode(ChildProcess.make(command, args)).pipe(Effect.mapError(fail(`${repository} を取得できない`)));
+                if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
+                  return yield* new AgentWorkspaceError({ message: `${repository} を取得できない（${command} ${args[0]} が終了コード ${exitCode}）` });
+                }
+              }
+            });
+          // 取り直しに失敗したら（途中で壊れた clone など）、消して clone し直す。作業場所は AI が読むだけのもの
+          yield* runAll(!exists).pipe(
+            Effect.catch((error) =>
+              exists
+                ? fs.remove(dir, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作り直せない")), Effect.andThen(runAll(true)))
+                : Effect.fail(error),
+            ),
+          );
           const commands = pullRequestCommands(pullUrl);
           const view = yield* spawner.string(ChildProcess.make("gh", commands.view)).pipe(Effect.mapError(fail("PR の情報を取れない")));
           const diff = yield* spawner.string(ChildProcess.make("gh", commands.diff)).pipe(Effect.mapError(fail("PR の差分を取れない")));

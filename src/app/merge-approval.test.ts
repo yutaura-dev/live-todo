@@ -74,6 +74,24 @@ describe("mergePlan", () => {
       assert.strictEqual(plan.number, 42);
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("最後の調べ直しが失敗していても、それより前に成功した調査の結論で merge できる", () =>
+    Effect.gen(function* () {
+      const taskId = yield* reviewedTask();
+      yield* (yield* Database).insert(agentRuns).values({
+        taskId,
+        kind: "dependency_review",
+        status: "failed",
+        error: "作業場所を取得できない",
+        subjectFingerprint: "v1",
+        previousStatus: "todo",
+        startedAt: "2026-11-25T01:00:00.000Z",
+      });
+
+      const plan = yield* mergePlan(taskId, clientFor(squashRepo));
+
+      assert.strictEqual(plan.sha, "head-sha");
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("merge 可能と判定されていなければ、merge させない", () =>
     Effect.gen(function* () {
       const taskId = yield* reviewedTask({ conclusion: "mergeable_after_fix" });

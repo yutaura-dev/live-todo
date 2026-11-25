@@ -104,7 +104,7 @@ export function TaskDrawer(props: {
             {detail.brief && <p className="drawer-brief">{detail.brief}</p>}
 
             <NextAction detail={detail} onMerged={props.onChanged} />
-            {detail.agentRun && <AgentRunSection run={detail.agentRun} taskId={detail.id} onRequested={props.onChanged} />}
+            {detail.agentRun && <AgentRunSection run={detail.agentRun} problem={detail.agentRunProblem} taskId={detail.id} onRequested={props.onChanged} />}
 
             <section className="drawer-section" aria-labelledby="drawer-items">
               <h3 id="drawer-items" className="drawer-section-title">
@@ -164,7 +164,17 @@ type ReviewResult = {
   mergeAsIsNote?: string;
 };
 
-function AgentRunSection({ run, taskId, onRequested }: { run: NonNullable<TaskDetail["agentRun"]>; taskId: number; onRequested: () => Promise<void> }) {
+function AgentRunSection({
+  run,
+  problem,
+  taskId,
+  onRequested,
+}: {
+  run: NonNullable<TaskDetail["agentRun"]>;
+  problem: string | undefined;
+  taskId: number;
+  onRequested: () => Promise<void>;
+}) {
   const review = (run.result ?? {}) as ReviewResult;
   const idle = run.status === "succeeded" || run.status === "failed";
   return (
@@ -175,6 +185,7 @@ function AgentRunSection({ run, taskId, onRequested }: { run: NonNullable<TaskDe
       {run.status === "queued" && <p className="field-hint">調査待ちです。順番が来たら Claude Code が調べます。</p>}
       {run.status === "running" && <p className="field-hint">Claude Code が調べています（{dateTimeOf(run.startedAt)} から）。</p>}
       {run.status === "failed" && <p className="problem">調べられませんでした: {run.error}</p>}
+      {problem && <p className="field-hint">このあとの調べ直しは失敗しました（{problem}）。下の結果は、その前に調べたものです。</p>}
       {run.status === "succeeded" && (
         <div className="review">
           {review.conclusion && <p className={`review-conclusion review-conclusion--${review.conclusion}`}>{conclusionLabel(review.conclusion)}</p>}
