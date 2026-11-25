@@ -1,0 +1,7 @@
+{
+  "number": 7,
+  "state": "closed",
+  "state_reason": "completed",
+  "html_url": "https://github.com/acme/app/issues/7",
+  "title": "Login fails on Safari"
+}

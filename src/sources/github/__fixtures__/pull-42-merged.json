@@ -1,0 +1,7 @@
+{
+  "number": 42,
+  "state": "closed",
+  "merged": true,
+  "html_url": "https://github.com/acme/app/pull/42",
+  "title": "Add retry to sync"
+}

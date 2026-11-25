@@ -1,0 +1,50 @@
+[
+  {
+    "id": "1001",
+    "unread": true,
+    "reason": "review_requested",
+    "updated_at": "2026-11-24T09:00:00Z",
+    "subject": {
+      "title": "Add retry to sync",
+      "url": "https://api.github.com/repos/acme/app/pulls/42",
+      "latest_comment_url": null,
+      "type": "PullRequest"
+    },
+    "repository": {
+      "full_name": "acme/app",
+      "html_url": "https://github.com/acme/app"
+    }
+  },
+  {
+    "id": "1002",
+    "unread": false,
+    "reason": "mention",
+    "updated_at": "2026-11-24T10:30:00Z",
+    "subject": {
+      "title": "Login fails on Safari",
+      "url": "https://api.github.com/repos/acme/app/issues/7",
+      "latest_comment_url": "https://api.github.com/repos/acme/app/issues/comments/555",
+      "type": "Issue"
+    },
+    "repository": {
+      "full_name": "acme/app",
+      "html_url": "https://github.com/acme/app"
+    }
+  },
+  {
+    "id": "1003",
+    "unread": true,
+    "reason": "ci_activity",
+    "updated_at": "2026-11-24T08:15:00Z",
+    "subject": {
+      "title": "CI workflow run failed for main branch",
+      "url": null,
+      "latest_comment_url": null,
+      "type": "CheckSuite"
+    },
+    "repository": {
+      "full_name": "acme/app",
+      "html_url": "https://github.com/acme/app"
+    }
+  }
+]
