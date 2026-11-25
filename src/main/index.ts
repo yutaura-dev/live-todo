@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Cause, DateTime, Effect, Fiber, Layer, ManagedRuntime, Option, Redacted } from "effect";
+import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Redacted } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
@@ -64,6 +64,25 @@ const AppLayer = Layer.mergeAll(BoardService.layer.pipe(Layer.provideMerge(TaskR
 const runtime = ManagedRuntime.make(AppLayer);
 // 使うたびに作る理由: 中身はファイルの読み書きだけで、書くのはトークンを保存・削除したときに限られるため
 const tokenInfoStore = makeTokenInfoStore(tokenInfoPath);
+// プレビューは入力のたびに呼ばれるので、GitHub の一覧（数ページの取得）は数分間覚えておく。失敗は覚えない（トークンを直したらすぐ取り直す）
+const REMOTE_REPOSITORIES_TTL = "5 minutes";
+const remoteRepositories = runtime.runPromise(
+  Cache.makeWith(
+    (accountId: string) =>
+      Effect.gen(function* () {
+        const token = yield* (yield* SecretStore).get(`github.${accountId}.token`);
+        if (Option.isNone(token)) return yield* new GitHubRequestError({ message: "このアカウントのトークンが登録されていない" });
+        const http = yield* HttpClient.HttpClient;
+        return yield* Effect.gen(function* () {
+          return yield* (yield* GitHubClient).listMyRepositories;
+        }).pipe(Effect.provide(GitHubClientLive({ token: token.value })), Effect.provideService(HttpClient.HttpClient, http));
+      }),
+    { capacity: 16, timeToLive: (exit) => (Exit.isSuccess(exit) ? REMOTE_REPOSITORIES_TTL : 0) },
+  ),
+);
+const forgetRemoteRepositories = (accountId: string | undefined) =>
+  accountId === undefined ? Effect.void : Effect.flatMap(Effect.promise(() => remoteRepositories), (cache) => Cache.invalidate(cache, accountId));
+
 const accountOfTokenKey = (key: string) => /^github\.(.+)\.token$/.exec(key)?.[1];
 
 let syncFiber: Fiber.Fiber<unknown, unknown> | undefined;
@@ -185,6 +204,7 @@ function registerIpc() {
           }).pipe(Effect.provide(GitHubClientLive({ token: secret })), Effect.provideService(HttpClient.HttpClient, http));
           yield* (yield* SecretVault).set(key, secret);
           const accountId = accountOfTokenKey(key);
+          yield* forgetRemoteRepositories(accountId);
           if (accountId !== undefined) {
             const { expiresAt, ...rest } = info;
             yield* (yield* tokenInfoStore).save(accountId, {
@@ -209,6 +229,7 @@ function registerIpc() {
         const key = yield* decodeSecretKey(input);
         yield* (yield* SecretVault).remove(key);
         const accountId = accountOfTokenKey(key);
+        yield* forgetRemoteRepositories(accountId);
         if (accountId !== undefined) yield* (yield* tokenInfoStore).remove(accountId);
       }),
     );
@@ -219,20 +240,21 @@ function registerIpc() {
     runtime.runPromise(
       Effect.gen(function* () {
         const request = yield* decodeFilterPreviewRequest(input);
-        const tokenKey = yield* decodeSecretKey(`github.${request.accountId}.token`);
-        const token = yield* (yield* SecretStore).get(tokenKey);
-        const http = yield* HttpClient.HttpClient;
-        // 同期とは別のクライアントで取る理由: 設定を保存する前のフィルタで試すので、同期中のジョブとは
-        // 組み立てが別になる。一覧の取得は数ページで終わるので、キューが分かれても集中にはならない。
-        const listRemote = Option.match(token, {
-          onNone: () => Effect.fail(new GitHubRequestError({ message: "このアカウントのトークンが登録されていない" })),
-          onSome: (value) =>
-            Effect.gen(function* () {
-              return yield* (yield* GitHubClient).listMyRepositories;
-            }).pipe(Effect.provide(GitHubClientLive({ token: value })), Effect.provideService(HttpClient.HttpClient, http)),
-        });
-        return yield* previewAccountFilter({ ...request, listRemote });
-      }).pipe(Effect.catch((error) => Effect.succeed({ error: "message" in error ? String(error.message) : String(error) }))),
+        yield* decodeSecretKey(`github.${request.accountId}.token`);
+        const cache = yield* Effect.promise(() => remoteRepositories);
+        return yield* previewAccountFilter({ ...request, listRemote: Cache.get(cache, request.accountId) });
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.succeed({
+            error:
+              error._tag === "InvalidRepositoryPatternError"
+                ? `${error.pattern} は owner/repo か owner/* の形ではありません`
+                : "message" in error
+                  ? String(error.message)
+                  : String(error),
+          }),
+        ),
+      ),
     ),
   );
 }

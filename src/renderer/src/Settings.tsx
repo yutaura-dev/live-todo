@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
   AccountFilterPreview,
   ConfigDocument,
@@ -11,6 +11,8 @@ import { api } from "./api.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
+
+const PREVIEW_DELAY_MS = 400;
 
 const EMPTY_CONFIG: ConfigDocument = {
   llmProfiles: { default: { provider: "none", model: "-" } },
@@ -148,30 +150,50 @@ function AccountEditor(props: {
   const [include, setInclude] = useState((account.repositories?.include ?? []).join("\n"));
   const [exclude, setExclude] = useState((account.repositories?.exclude ?? []).join("\n"));
   const [targets, setTargets] = useState("");
-  const [preview, setPreview] = useState<AccountFilterPreview | { error: string } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<AccountFilterPreview | null>(null);
+  const [previewProblem, setPreviewProblem] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const latestRequest = useRef(0);
 
-  const filter = { include: lines(include), exclude: lines(exclude) };
-  const commitFilter = () => props.onChange({ ...account, repositories: filter });
-
-  const runPreview = async () => {
-    commitFilter();
-    setPreviewing(true);
-    try {
-      setPreview(await api.previewFilter({ accountId: account.id, filter, targets: lines(targets) }));
-    } finally {
-      setPreviewing(false);
-    }
+  const updateFilter = (nextInclude: string, nextExclude: string) => {
+    setInclude(nextInclude);
+    setExclude(nextExclude);
+    props.onChange({ ...account, repositories: { include: lines(nextInclude), exclude: lines(nextExclude) } });
   };
 
+  // 入力のたびに送らず、手を止めてから判定する。GitHub の一覧は main が数分間覚えているので、ここで送るのは手元の判定だけ
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => {
+      const request = ++latestRequest.current;
+      setPreviewing(true);
+      void api
+        .previewFilter({ accountId: account.id, filter: { include: lines(include), exclude: lines(exclude) }, targets: lines(targets) })
+        .then((result) => {
+          // 後から届いた古い応答で、新しい結果を上書きしない
+          if (request !== latestRequest.current) return;
+          if ("error" in result) {
+            setPreviewProblem(result.error);
+          } else {
+            setPreview(result);
+            setPreviewProblem(null);
+          }
+        })
+        .finally(() => {
+          if (request === latestRequest.current) setPreviewing(false);
+        });
+    }, PREVIEW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [open, account.id, include, exclude, targets, props.tokenStatus]);
+
   return (
-    <article className="account">
-      <header className="account-header">
+    <details className="account" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="account-header">
         <h4 className="account-name">{account.id}</h4>
-        <button type="button" className="dismiss-button" onClick={props.onRemove}>
-          このアカウントを外す
-        </button>
-      </header>
+        <span className="field-hint">{props.tokenSummary ? `${props.tokenSummary.login}・` : ""}トークン: {SECRET_LABELS[props.tokenStatus]}</span>
+      </summary>
+      <div className="account-body">
 
       <SecretField label="トークン" secretKey={`github.${account.id}.token`} status={props.tokenStatus} onChanged={props.onSecretChanged} />
       {props.tokenStatus === "saved" && props.tokenSummary && <TokenSummary summary={props.tokenSummary} />}
@@ -188,8 +210,8 @@ function AccountEditor(props: {
           <span className="field-label">除くリポジトリ</span>
           <span className="field-hint">含めるリストより優先する</span>
         </label>
-        <textarea id={`${id}-include`} rows={4} value={include} onChange={(event) => setInclude(event.target.value)} onBlur={commitFilter} placeholder="acme/*" />
-        <textarea id={`${id}-exclude`} rows={4} value={exclude} onChange={(event) => setExclude(event.target.value)} onBlur={commitFilter} placeholder="acme/legacy" />
+        <textarea id={`${id}-include`} rows={4} value={include} onChange={(event) => updateFilter(event.target.value, exclude)} placeholder="acme/*" />
+        <textarea id={`${id}-exclude`} rows={4} value={exclude} onChange={(event) => updateFilter(include, event.target.value)} placeholder="acme/legacy" />
       </div>
 
       <label className="field">
@@ -197,12 +219,16 @@ function AccountEditor(props: {
         <span className="field-hint">1 行に 1 つ。URL か owner/repo#番号</span>
         <textarea rows={2} value={targets} onChange={(event) => setTargets(event.target.value)} placeholder="https://github.com/acme/app/pull/42" />
       </label>
-      <button type="button" className="quiet-button preview-button" onClick={() => void runPreview()} disabled={previewing}>
-        {previewing ? "GitHub から一覧を取っています" : "このフィルタで試す"}
-      </button>
-
+      <p className="preview-status" role="status">
+        {previewing ? "判定しています" : previewProblem ?? ""}
+      </p>
       {preview !== null && <FilterPreview preview={preview} />}
-    </article>
+
+      <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
+        このアカウントを外す
+      </button>
+      </div>
+    </details>
   );
 }
 
@@ -242,14 +268,7 @@ const REASON_TEXT = (reason: FilterReason): string => {
 
 const TARGET_KIND: Record<string, string> = { pull: "PR", issue: "issue", number: "番号", repository: "リポジトリ" };
 
-function FilterPreview({ preview }: { preview: AccountFilterPreview | { error: string } }) {
-  if ("error" in preview) {
-    return (
-      <p className="problem" role="alert">
-        試せませんでした: {preview.error}
-      </p>
-    );
-  }
+function FilterPreview({ preview }: { preview: AccountFilterPreview }) {
   return (
     <div className="preview" aria-live="polite">
       {preview.targets.length > 0 && (
