@@ -10,11 +10,19 @@
     "skipLibCheck": true,
     "noEmit": true,
     "types": [
-      "node"
+      "node",
+      "vite/client"
     ],
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ]
   },
   "include": [
-    "src"
+    "src",
+    "electron.vite.config.ts"
   ]
 }

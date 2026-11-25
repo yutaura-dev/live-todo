@@ -1,6 +1,9 @@
 # dependencies
 node_modules/
 
+# electron-vite の出力
+/out/
+
 # nix / direnv
 .direnv/
 /result

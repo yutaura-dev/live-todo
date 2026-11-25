@@ -10,14 +10,19 @@ export class Database extends Context.Service<Database, DrizzleDatabase>()("live
   static readonly layer = Layer.effect(Database, SQLiteNodeDrizzle.makeWithDefaults());
 }
 
-const MIGRATIONS_FOLDER = fileURLToPath(new URL("../../../drizzle", import.meta.url));
+// ソースのまま実行するとき（tsx・テスト）のマイグレーションの場所。Electron のように 1 ファイルに束ねると
+// import.meta.url の位置が変わるので、そのときは databaseMigrationsFrom でフォルダを渡す。
+const SOURCE_MIGRATIONS_FOLDER = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 
-export const DatabaseMigrations = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const db = yield* Database;
-    yield* migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  }),
-);
+export const databaseMigrationsFrom = (migrationsFolder: string) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const db = yield* Database;
+      yield* migrate(db, { migrationsFolder });
+    }),
+  );
+
+export const DatabaseMigrations = databaseMigrationsFrom(SOURCE_MIGRATIONS_FOLDER);
 
 // db.transaction ではなく SqlClient.withTransaction を使う理由: 呼び出し側の Effect は tx ではなく
 // 各 repository が持つ db を使って書かれている。Drizzle の Effect 版も内部で SqlClient.withTransaction を使い、

@@ -1,0 +1,233 @@
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { useCallback, useEffect, useState } from "react";
+import type { Board, BoardCard, BoardColumnId, MovableStatus } from "../../shared/api.js";
+import { api, isMock } from "./api.js";
+
+const REFRESH_INTERVAL_MS = 15_000;
+
+/** "タイトル（owner/repo）" をタイトルとリポジトリに分ける */
+function splitTitle(title: string): { main: string; repository?: string } {
+  const match = /^(.*)（([^（）\s]+\/[^（）\s]+)）$/.exec(title);
+  return match ? { main: match[1]!, repository: match[2]! } : { main: title };
+}
+
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+
+export function App() {
+  const [board, setBoard] = useState<Board | null>(null);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setBoard(await api.board());
+      setLoadedAt(new Date().toISOString());
+    } catch {
+      setProblem("Task を読み込めませんでした。同期の設定を確かめてから、再読み込みしてください。");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const timer = setInterval(() => void load(), REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", load);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", load);
+    };
+  }, [load]);
+
+  const move = useCallback(
+    async (card: BoardCard, status: MovableStatus) => {
+      if (card.status === status) return;
+      // 先に画面を動かしてから保存する。保存に失敗したら読み込み直して元に戻す
+      setBoard((current) => current && moveLocally(current, card.id, status));
+      try {
+        await api.moveTask(card.id, status);
+        setProblem(null);
+      } catch {
+        setProblem(`「${splitTitle(card.title).main}」を動かせませんでした。もう一度試してください。`);
+      }
+      await load();
+    },
+    [load],
+  );
+
+  const markSeen = useCallback(
+    async (card: BoardCard) => {
+      await api.markSeen(card.id);
+      await load();
+    },
+    [load],
+  );
+
+  const open = useCallback(
+    async (card: BoardCard) => {
+      if (card.url === undefined) return;
+      await api.openExternal(card.url);
+      if (card.unreadChanges > 0) await markSeen(card);
+    },
+    [markSeen],
+  );
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const card = event.active.data.current?.["card"] as BoardCard | undefined;
+    const target = event.over?.id as BoardColumnId | undefined;
+    if (card !== undefined && target !== undefined) void move(card, target);
+  };
+
+  return (
+    <div className="app">
+      <header className="masthead">
+        <h1 className="wordmark">live-todo</h1>
+        <p className="sync-note">
+          {isMock ? "見本のデータを表示しています" : loadedAt ? `${timeOf(loadedAt)} に読み込み` : "読み込んでいます"}
+        </p>
+        <button type="button" className="quiet-button" onClick={() => void load()}>
+          再読み込み
+        </button>
+      </header>
+      {problem && (
+        <p className="problem" role="alert">
+          {problem}
+        </p>
+      )}
+      {board && (
+        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+          <main className="board">
+            {board.columns.map((column) => (
+              <Column key={column.id} id={column.id} title={column.title} cards={column.cards}>
+                {column.cards.map((card) => (
+                  <Card key={card.id} card={card} inTray={column.id === "needs_review"} onMove={move} onOpen={open} onSeen={markSeen} />
+                ))}
+              </Column>
+            ))}
+          </main>
+        </DndContext>
+      )}
+    </div>
+  );
+}
+
+function moveLocally(board: Board, taskId: number, status: MovableStatus): Board {
+  const card = board.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === taskId);
+  if (card === undefined) return board;
+  return {
+    columns: board.columns.map((column) => ({
+      ...column,
+      cards: [
+        ...(column.id === status ? [{ ...card, status }] : []),
+        ...column.cards.filter((candidate) => candidate.id !== taskId),
+      ],
+    })),
+  };
+}
+
+const EMPTY_MESSAGES: Record<BoardColumnId, string> = {
+  needs_review: "仕分ける通知はありません。新しい通知は、同期のたびにここに入ります。",
+  todo: "やることはありません。",
+  in_progress: "手を付けている Task はありません。カードをここに移すと進行中になります。",
+  done: "完了した Task はまだありません。",
+};
+
+function Column(props: { id: BoardColumnId; title: string; cards: readonly BoardCard[]; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: props.id });
+  return (
+    <section
+      ref={setNodeRef}
+      className={`column column--${props.id}${isOver ? " column--over" : ""}`}
+      aria-label={`${props.title} ${props.cards.length} 件`}
+    >
+      <h2 className="column-title">
+        {props.title}
+        <span className="count">{props.cards.length}</span>
+      </h2>
+      <div className="column-body">
+        {props.cards.length === 0 ? <p className="empty">{EMPTY_MESSAGES[props.id]}</p> : props.children}
+      </div>
+    </section>
+  );
+}
+
+function Card(props: {
+  card: BoardCard;
+  inTray: boolean;
+  onMove: (card: BoardCard, status: MovableStatus) => Promise<void>;
+  onOpen: (card: BoardCard) => Promise<void>;
+  onSeen: (card: BoardCard) => Promise<void>;
+}) {
+  const { card, inTray } = props;
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.id, data: { card } });
+  const { main, repository } = splitTitle(card.title);
+  const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined;
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={style}
+      className={`card${inTray ? " card--tray" : ""}${card.unreadChanges > 0 ? " card--updated" : ""}${isDragging ? " card--dragging" : ""}`}
+      {...attributes}
+      {...listeners}
+      aria-roledescription="動かせるカード"
+    >
+      {card.unreadChanges > 0 && (
+        <button
+          type="button"
+          className="update-tab"
+          onClick={() => void props.onSeen(card)}
+          onPointerDown={(event) => event.stopPropagation()}
+          aria-label={`${card.unreadChanges} 件の更新を既読にする`}
+        >
+          更新 {card.unreadChanges}
+        </button>
+      )}
+      <h3 className="card-title">{main}</h3>
+      {repository && <p className="card-repository">{repository}</p>}
+      {inTray && card.judgment && <Judgment judgment={card.judgment} />}
+      <div className="card-actions" onPointerDown={(event) => event.stopPropagation()}>
+        {inTray && (
+          <>
+            <button type="button" className="primary-button" onClick={() => void props.onMove(card, "todo")}>
+              Todo にする
+            </button>
+            <button type="button" className="dismiss-button" onClick={() => void props.onMove(card, "dismissed")}>
+              対象外にする
+            </button>
+          </>
+        )}
+        {card.url && (
+          <button type="button" className={inTray ? "quiet-button" : "open-link"} onClick={() => void props.onOpen(card)}>
+            GitHub で開く
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function Judgment({ judgment }: { judgment: NonNullable<BoardCard["judgment"]> }) {
+  if (judgment.probability !== undefined) {
+    const percent = Math.round(judgment.probability * 100);
+    return (
+      <div className="judgment">
+        <span className="judgment-label">自分の対応が要る確率 {percent}%</span>
+        <span className="meter" aria-hidden="true">
+          <span className="meter-fill" style={{ inlineSize: `${percent}%` }} />
+        </span>
+      </div>
+    );
+  }
+  if (judgment.reason !== undefined) return <blockquote className="judgment-reason">{judgment.reason}</blockquote>;
+  return null;
+}

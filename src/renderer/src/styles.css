@@ -1,0 +1,311 @@
+:root {
+  --paper: #e8edf1;
+  --ink: #232b4a;
+  --muted: #5c6785;
+  --tray: #d5dde4;
+  --card: #fbfcfd;
+  --rule: #c3cdd6;
+  --tab: #f2b705;
+  --tab-ink: #3d2e00;
+  --rust: #9a4a3a;
+  --focus: #3c4fd6;
+
+  color: var(--ink);
+  background: var(--paper);
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+  font-weight: 300;
+  font-size: 14px;
+  line-height: 1.6;
+  font-feature-settings: "palt";
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  min-block-size: 100vh;
+  padding: 20px 24px 24px;
+  gap: 16px;
+}
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.wordmark {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.sync-note {
+  margin: 0 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.problem {
+  margin: 0;
+  padding: 10px 14px;
+  border-inline-start: 3px solid var(--rust);
+  background: #f3e6e2;
+  color: #5a2a20;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.6fr) repeat(3, minmax(220px, 1fr));
+  gap: 20px;
+  align-items: start;
+  min-block-size: 0;
+}
+
+.column {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  min-block-size: 100%;
+  border-radius: 10px;
+  padding: 4px 2px 12px;
+  transition: background-color 120ms ease-out;
+}
+
+.column--over {
+  background: rgb(35 43 74 / 0.06);
+}
+
+.column--needs_review {
+  background: var(--tray);
+  padding: 14px 14px 18px;
+  box-shadow: inset 0 2px 6px rgb(35 43 74 / 0.12);
+}
+
+.column--needs_review.column--over {
+  background: #cbd5de;
+}
+
+.column--done {
+  opacity: 0.72;
+}
+
+.column-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.column--needs_review .column-title {
+  font-size: 18px;
+}
+
+.count {
+  color: var(--muted);
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+}
+
+.column-body {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  max-inline-size: 32ch;
+}
+
+.card {
+  position: relative;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  touch-action: none;
+}
+
+.card--tray {
+  padding: 14px 16px 12px;
+  border-color: #b8c3cd;
+}
+
+.card--dragging {
+  z-index: 10;
+  box-shadow: 0 10px 24px rgb(35 43 74 / 0.22);
+  cursor: grabbing;
+}
+
+/* 画面の中でいちばん目立つ要素。ほかの強調を足すときはこれより目立たせない */
+.update-tab {
+  position: absolute;
+  inset-block-start: -7px;
+  inset-inline-end: 12px;
+  padding: 2px 10px 3px;
+  border: 0;
+  border-radius: 2px 2px 6px 6px;
+  background: var(--tab);
+  color: var(--tab-ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 0 rgb(61 46 0 / 0.18);
+}
+
+.card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.card--tray .card-title {
+  font-size: 15px;
+}
+
+/* 付箋のタブとタイトルが重ならないよう、更新があるときだけ右に余白を取る */
+.card--updated .card-title {
+  padding-inline-end: 64px;
+}
+
+.card-repository {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.judgment {
+  display: grid;
+  gap: 4px;
+  margin-block-start: 10px;
+}
+
+.judgment-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  display: block;
+  block-size: 4px;
+  border-radius: 2px;
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.meter-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--ink);
+}
+
+.judgment-reason {
+  margin: 10px 0 0;
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--rule);
+  color: var(--muted);
+  font-size: 12px;
+  max-inline-size: 60ch;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block-start: 12px;
+}
+
+.primary-button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--card);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.dismiss-button {
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--rust);
+  font-size: 13px;
+}
+
+.dismiss-button:hover {
+  border-color: rgb(154 74 58 / 0.4);
+}
+
+.quiet-button {
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: none;
+  font-size: 13px;
+}
+
+.card .quiet-button,
+.open-link {
+  margin-inline-start: auto;
+}
+
+/* 棚のカードは数が多いので、開く操作は文字だけにして高さを抑える */
+.open-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.card:not(.card--tray) .card-actions {
+  margin-block-start: 4px;
+}
+
+@media (max-width: 1180px) {
+  .board {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .column--needs_review {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .column {
+    transition: none;
+  }
+}

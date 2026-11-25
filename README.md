@@ -16,6 +16,8 @@ live-todo は各ツールから自分の todo を自動で集め、ラベルと�
 direnv allow          # nix devShell と .env を有効化（初回のみ）
 cp .env.example .env  # 自分の環境の値を記入（秘匿値は .env.local へ）
 pnpm install          # pnpm は corepack が packageManager の版で起動する
+pnpm exec install-electron  # Electron 本体を取得する（strictDepBuilds で postinstall を止めているため、初回のみ）
+pnpm app:dev          # 画面を開き、裏で同期を回す（config.json と live-todo.db を使う）
 ```
 
 > 依存は nix flake で固定されている。詳細は [docs/architecture.md](docs/architecture.md) を参照。
