@@ -114,6 +114,21 @@ describe("approveAndMerge（権限が足りないとき）", () => {
     }).pipe(Effect.provide(TestDatabase)));
 });
 
+describe("approveAndMerge（GitHub 側のエラー）", () => {
+  it.effect("GitHub 側のエラー（500 番台）で断られたら、GitHub の画面から merge するよう伝える", () =>
+    Effect.gen(function* () {
+      const taskId = yield* reviewedTask();
+      const client = gitHubClientStub({
+        mergePullRequest: () =>
+          Effect.fail(new GitHubRequestError({ message: "GitHub API が 500 を返した: PUT /repos/acme/app/pulls/42/merge", status: 500 })),
+      });
+
+      const error = yield* Effect.flip(approveAndMerge(taskId, { method: "squash", sha: "head-sha" }, clientFor(client)));
+
+      assert.include(error.message, "GitHub の画面");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
 describe("approveAndMerge", () => {
   it.effect("承認された方法と commit で merge し、承認を記録して Task を完了にする", () =>
     Effect.gen(function* () {

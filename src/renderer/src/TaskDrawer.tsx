@@ -215,6 +215,7 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
 
   if (detail.status === "done" || detail.status === "dismissed" || review.conclusion === undefined) return null;
   const canMerge = review.conclusion === "mergeable" || (review.conclusion === "mergeable_after_fix" && review.canMergeAsIs === true);
+  const pullUrl = detail.items.find((item) => item.role === "tracks" && item.url.includes("/pull/"))?.url;
 
   const openConfirm = async () => {
     setState({ kind: "busy" });
@@ -285,6 +286,11 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
         <>
           <p className="problem">merge できませんでした: {state.message}</p>
           {/commit が分からない|調べ直された/.test(state.message) && <RequestReviewButton taskId={detail.id} onRequested={onMerged} />}
+          {/GitHub の画面/.test(state.message) && pullUrl && (
+            <button type="button" className="quiet-button" onClick={() => void api.openExternal(pullUrl)}>
+              GitHub で PR を開く
+            </button>
+          )}
         </>
       )}
     </section>
