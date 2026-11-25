@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import type {
-  RepositoryChoiceList,
   AccountFilterPreview,
   ConfigDocument,
   FilterReason,
@@ -9,7 +8,6 @@ import type {
   SettingsSnapshot,
 } from "../../shared/api.js";
 import { api } from "./api.js";
-import { RepositoryPicker } from "./RepositoryPicker.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
@@ -146,23 +144,18 @@ function AccountEditor(props: {
   onSecretChanged: () => Promise<unknown>;
 }) {
   const { account } = props;
-  const include = account.repositories?.include ?? [];
-  const exclude = account.repositories?.exclude ?? [];
-  const [choices, setChoices] = useState<RepositoryChoiceList | { error: string } | null>(null);
-
-  useEffect(() => {
-    if (props.tokenStatus === "missing") return;
-    void api.listRepositories(account.id).then(setChoices);
-  }, [account.id, props.tokenStatus]);
+  const id = useId();
+  const [include, setInclude] = useState((account.repositories?.include ?? []).join("\n"));
+  const [exclude, setExclude] = useState((account.repositories?.exclude ?? []).join("\n"));
   const [targets, setTargets] = useState("");
   const [preview, setPreview] = useState<AccountFilterPreview | { error: string } | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
-  const filter = { include: [...include], exclude: [...exclude] };
-  const setFilter = (next: { include: string[]; exclude: string[] }) => props.onChange({ ...account, repositories: next });
-  const pickable = choices !== null && !("error" in choices) ? choices : { owners: [], repositories: [] };
+  const filter = { include: lines(include), exclude: lines(exclude) };
+  const commitFilter = () => props.onChange({ ...account, repositories: filter });
 
   const runPreview = async () => {
+    commitFilter();
     setPreviewing(true);
     try {
       setPreview(await api.previewFilter({ accountId: account.id, filter, targets: lines(targets) }));
@@ -186,25 +179,17 @@ function AccountEditor(props: {
         <p className="token-summary">環境変数のトークンは確かめていません。ここに貼り付けて保存すると、権限と有効期限を確かめます。</p>
       )}
 
-      {props.tokenStatus === "missing" && <p className="field-hint">トークンを保存すると、見られるリポジトリの一覧から選べます。</p>}
-      {choices !== null && "error" in choices && (
-        <p className="field-hint">リポジトリの一覧を取れませんでした（{choices.error}）。owner/repo か owner/* を入力して追加できます。</p>
-      )}
       <div className="filter-grid">
-        <RepositoryPicker
-          label="含めるリポジトリ"
-          hint="選ばなければ、すべてを含める"
-          value={include}
-          choices={pickable}
-          onChange={(next) => setFilter({ include: next, exclude: [...exclude] })}
-        />
-        <RepositoryPicker
-          label="除くリポジトリ"
-          hint="含めるリポジトリより優先する"
-          value={exclude}
-          choices={pickable}
-          onChange={(next) => setFilter({ include: [...include], exclude: next })}
-        />
+        <label className="field" htmlFor={`${id}-include`}>
+          <span className="field-label">含めるリポジトリ</span>
+          <span className="field-hint">1 行に 1 つ。owner/repo か owner/*。空なら全部を含める</span>
+        </label>
+        <label className="field" htmlFor={`${id}-exclude`}>
+          <span className="field-label">除くリポジトリ</span>
+          <span className="field-hint">含めるリストより優先する</span>
+        </label>
+        <textarea id={`${id}-include`} rows={4} value={include} onChange={(event) => setInclude(event.target.value)} onBlur={commitFilter} placeholder="acme/*" />
+        <textarea id={`${id}-exclude`} rows={4} value={exclude} onChange={(event) => setExclude(event.target.value)} onBlur={commitFilter} placeholder="acme/legacy" />
       </div>
 
       <label className="field">

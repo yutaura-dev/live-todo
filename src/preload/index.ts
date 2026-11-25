@@ -12,7 +12,6 @@ const api: LiveTodoApi = {
   setSecret: (key, value) => ipcRenderer.invoke(IPC_CHANNELS.setSecret, { key, value }),
   removeSecret: (key) => ipcRenderer.invoke(IPC_CHANNELS.removeSecret, key),
   previewFilter: (request) => ipcRenderer.invoke(IPC_CHANNELS.previewFilter, request),
-  listRepositories: (accountId) => ipcRenderer.invoke(IPC_CHANNELS.listRepositories, accountId),
 };
 
 contextBridge.exposeInMainWorld("liveTodo", api);

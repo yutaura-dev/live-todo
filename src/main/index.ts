@@ -7,7 +7,6 @@ import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
-import { repositoryChoicesFrom } from "../app/settings/repository-choices.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { BoardService } from "../core/board/board-service.js";
@@ -238,24 +237,6 @@ function registerIpc() {
   );
 }
 
-function registerRepositoryList() {
-  ipcMain.handle(IPC_CHANNELS.listRepositories, (_event, input: unknown) =>
-    runtime.runPromise(
-      Effect.gen(function* () {
-        const key = yield* decodeSecretKey(`github.${String(input)}.token`);
-        const token = yield* (yield* SecretStore).get(key);
-        if (Option.isNone(token)) return { error: "このアカウントのトークンが登録されていない" };
-        const http = yield* HttpClient.HttpClient;
-        const { repositories, truncated } = yield* Effect.gen(function* () {
-          return yield* (yield* GitHubClient).listMyRepositories;
-        }).pipe(Effect.provide(GitHubClientLive({ token: token.value })), Effect.provideService(HttpClient.HttpClient, http));
-        const choices = yield* repositoryChoicesFrom(repositories);
-        return { ...choices, truncated };
-      }).pipe(Effect.catch((error) => Effect.succeed({ error: "message" in error ? String(error.message) : String(error) }))),
-    ),
-  );
-}
-
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -318,7 +299,6 @@ function createWindow() {
 void app.whenReady().then(() => {
   if (headless) app.dock?.hide();
   registerIpc();
-  registerRepositoryList();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();
 });
