@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MergePlanView, MovableStatus, TaskDetail } from "../../shared/api.js";
 import { api } from "./api.js";
+import { Markdown } from "./Markdown.js";
 import { conclusionLabel, describeChange, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
@@ -190,7 +191,7 @@ function ReviewField({ label, text }: { label: string; text: string | undefined 
   return (
     <div className="review-field">
       <span className="field-label">{label}</span>
-      <p className="review-text">{text}</p>
+      <Markdown text={text} onOpenLink={(url) => void api.openExternal(url)} />
     </div>
   );
 }
