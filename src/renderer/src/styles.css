@@ -982,6 +982,55 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.next-action {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--card-edge);
+  border-radius: 6px;
+}
+
+.next-action > .primary-button {
+  justify-self: start;
+}
+
+.next-action-text {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.next-action-done {
+  margin: 0;
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.merge-confirm {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--tray);
+  border-radius: 6px;
+}
+
+.merge-confirm-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.merge-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-block-start: 4px;
+}
+
+.request-review {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
 .toast {
   position: fixed;
   inset-block-end: 20px;

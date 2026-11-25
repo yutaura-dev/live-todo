@@ -8,11 +8,12 @@ import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
+import { approveAndMerge, mergePlan } from "../app/merge-approval.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
-import { recoverInterruptedAgentRuns, runDependencyReviews } from "../core/agent/dependency-triage.js";
+import { recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
@@ -25,6 +26,7 @@ import { GitHubClientLive } from "../sources/github/github-client-live.js";
 import type { GitHubTokenSummary, Outcome, SecretStatus, SettingsSnapshot } from "../shared/api.js";
 import {
   decodeFilterPreviewRequest,
+  decodeMergeRequest,
   decodeMoveRequest,
   decodeSecretInput,
   decodeSecretKey,
@@ -306,6 +308,45 @@ function registerIpc() {
   );
 }
 
+/** アカウントのトークンで GitHub のクライアントを作る（merge など、ユーザーが承認した操作のため） */
+const githubClientFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const token = yield* (yield* SecretStore).require(yield* decodeSecretKey(`github.${accountId}.token`));
+    const http = yield* HttpClient.HttpClient;
+    return yield* Effect.gen(function* () {
+      return yield* GitHubClient;
+    }).pipe(Effect.provide(GitHubClientLive({ token })), Effect.provideService(HttpClient.HttpClient, http));
+  });
+
+const errorMessage = (error: unknown) =>
+  typeof error === "object" && error !== null && "message" in error ? String(error.message) : String(error);
+
+function registerMerge() {
+  ipcMain.handle(IPC_CHANNELS.requestReview, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        yield* requestDependencyReview(yield* decodeTaskId(input));
+      }),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.mergePlan, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* mergePlan(yield* decodeTaskId(input), githubClientFor);
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+  // 外部への書き込み。renderer で確認を出し、ユーザーが承認した方法と commit だけを受け取って実行する
+  ipcMain.handle(IPC_CHANNELS.merge, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* decodeMergeRequest(input);
+        yield* approveAndMerge(request.taskId, { method: request.method, sha: request.sha }, githubClientFor);
+      }),
+    ),
+  );
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -368,6 +409,7 @@ function createWindow() {
 void app.whenReady().then(() => {
   if (headless) app.dock?.hide();
   registerIpc();
+  registerMerge();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();
 });

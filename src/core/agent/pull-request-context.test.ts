@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { pullRequestCommands, truncateDiff } from "./pull-request-context.js";
+import { headShaOf, pullRequestCommands, truncateDiff } from "./pull-request-context.js";
 
 describe("pullRequestCommands", () => {
   it("PR の本文・CI の結果・変更したファイルと、差分を、読み取りだけの gh コマンドで集める", () => {
@@ -8,6 +8,17 @@ describe("pullRequestCommands", () => {
     assert.deepStrictEqual(commands.view.slice(0, 3), ["pr", "view", "https://github.com/acme/app/pull/42"]);
     assert.include(commands.view[commands.view.indexOf("--json") + 1]!, "statusCheckRollup");
     assert.deepStrictEqual(commands.diff, ["pr", "diff", "https://github.com/acme/app/pull/42"]);
+  });
+});
+
+describe("headShaOf", () => {
+  it("gh pr view の JSON から head の commit を読む", () => {
+    assert.strictEqual(headShaOf('{"title":"x","headRefOid":"abc123"}'), "abc123");
+  });
+
+  it("読めなければ undefined（merge のボタンを出さない）", () => {
+    assert.isUndefined(headShaOf('{"title":"x"}'));
+    assert.isUndefined(headShaOf("not json"));
   });
 });
 

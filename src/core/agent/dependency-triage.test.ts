@@ -9,7 +9,7 @@ import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
 import { AgentWorkspace } from "./agent-workspace.js";
-import { recoverInterruptedAgentRuns, runDependencyReviews } from "./dependency-triage.js";
+import { recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "./dependency-triage.js";
 
 const REVIEW = {
   conclusion: "mergeable_after_fix",
@@ -72,7 +72,8 @@ const withAgent = (options: { fail?: string; sessionId?: string; onRun?: Effect.
       return yield* effect.pipe(
         Effect.provideService(ClaudeCode, claude),
         Effect.provideService(AgentWorkspace, AgentWorkspace.of({
-            prepare: (repository, taskId) => Effect.succeed({ cwd: `/work/${taskId}/repo/${repository}`, contextDir: `/work/${taskId}/context` }),
+            prepare: (repository, taskId) =>
+              Effect.succeed({ cwd: `/work/${taskId}/repo/${repository}`, contextDir: `/work/${taskId}/context`, headSha: "head-sha-1" }),
           })),
       );
     });
@@ -117,7 +118,7 @@ describe("runDependencyReviews", () => {
 
       const db = yield* Database;
       const [runRow] = yield* db.select().from(agentRuns).where(eq(agentRuns.taskId, taskId));
-      assert.deepInclude(runRow, { status: "succeeded", sessionId: "session-1", previousStatus: "needs_review" });
+      assert.deepInclude(runRow, { status: "succeeded", sessionId: "session-1", previousStatus: "needs_review", subjectSha: "head-sha-1" });
       assert.deepStrictEqual(runRow?.result, REVIEW);
       const [thread] = yield* db.select().from(agentThreads).where(eq(agentThreads.taskId, taskId));
       assert.deepInclude(thread, { provider: "claude-code", sessionId: "session-1", workspace: `/work/${taskId}/repo/acme/app` });
@@ -236,6 +237,42 @@ describe("調査待ち", () => {
       assert.lengthOf(agent.recorded.requests, 1);
       assert.strictEqual(yield* statusOf(second.taskId), "done");
       assert.lengthOf(yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, second.taskId)), 0);
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("requestDependencyReview", () => {
+  it.effect("調べ終わった Task を調査待ちに入れ直し、次の回で前回の session を続けて調べ直す", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      yield* withAgent({ sessionId: "session-1" }).provide(run);
+
+      yield* requestDependencyReview(taskId);
+
+      assert.strictEqual(yield* statusOf(taskId), "agent_running");
+      const again = withAgent({ sessionId: "session-1" });
+      const outcome = yield* again.provide(run);
+      assert.deepStrictEqual(outcome, [{ taskId, succeeded: true }]);
+      assert.strictEqual(again.recorded.requests[0]?.resumeSessionId, "session-1");
+      assert.strictEqual(yield* statusOf(taskId), "todo");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("すでに調査待ちか調べている最中なら、二重には入れない", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      yield* requestDependencyReview(taskId);
+      yield* requestDependencyReview(taskId);
+
+      const queued = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, taskId));
+      assert.lengthOf(queued, 1);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("PR を追っていない Task は調べられない", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask({ url: "https://github.com/acme/app/issues/1" });
+
+      const error = yield* Effect.flip(requestDependencyReview(taskId));
+
+      assert.strictEqual(error._tag, "ReviewNotAvailableError");
     }).pipe(Effect.provide(TestDatabase)));
 });
 

@@ -1,5 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { DateTime, Effect, Option } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns, agentThreads, sourceItems, taskLinks, tasks } from "../db/schema.js";
 import { TaskRepository } from "../task/task-repository.js";
@@ -125,7 +125,7 @@ const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
     yield* db.update(agentRuns).set({ status: "running", startedAt: yield* nowIso }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
 
     const outcome = yield* Effect.gen(function* () {
-      const { cwd, contextDir } = yield* workspace.prepare(target.repository, target.taskId, target.url);
+      const { cwd, contextDir, headSha } = yield* workspace.prepare(target.repository, target.taskId, target.url);
       const [thread] = yield* db.select().from(agentThreads).where(eq(agentThreads.taskId, target.taskId)).pipe(Effect.orDie);
       const result = yield* claude.run({
         prompt: dependencyReviewPrompt({ url: target.url, repository: target.repository, title: target.title, contextDir }),
@@ -141,15 +141,22 @@ const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
       const review = yield* decodeDependencyReview(result.structured).pipe(
         Effect.mapError((error) => ({ message: `claude の回答の形が想定と違う: ${error.message}` })),
       );
-      return { cwd, result, review };
+      return { cwd, result, review, headSha };
     }).pipe(Effect.result);
 
     const finishedAt = yield* nowIso;
     if (outcome._tag === "Success") {
-      const { cwd, result, review } = outcome.success;
+      const { cwd, result, review, headSha } = outcome.success;
       yield* db
         .update(agentRuns)
-        .set({ status: "succeeded", result: review, sessionId: result.sessionId, costUsd: result.costUsd?.toString() ?? null, finishedAt })
+        .set({
+          status: "succeeded",
+          result: review,
+          subjectSha: headSha ?? null,
+          sessionId: result.sessionId,
+          costUsd: result.costUsd?.toString() ?? null,
+          finishedAt,
+        })
         .where(eq(agentRuns.id, runId))
         .pipe(Effect.orDie);
       yield* db
@@ -171,6 +178,43 @@ const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
     yield* moveTask(target.taskId, "agent_running", target.previousStatus);
     return Option.some({ taskId: target.taskId, succeeded: false });
   });
+
+export class ReviewNotAvailableError extends Schema.TaggedError<ReviewNotAvailableError>()("ReviewNotAvailableError", {
+  message: Schema.String,
+}) {}
+
+/**
+ * ユーザーの依頼で、Task を調査待ちに入れ直す（調査が失敗した・merge に使う commit が残っていないときなど）。
+ * 次の回で、前回の session を続けて調べ直す。
+ */
+export const requestDependencyReview = Effect.fnUntraced(function* (taskId: number) {
+  const db = yield* Database;
+  const taskRepository = yield* TaskRepository;
+  const active = yield* db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.taskId, taskId), eq(agentRuns.kind, KIND), inArray(agentRuns.status, ["queued", "running"])))
+    .limit(1)
+    .pipe(Effect.orDie);
+  if (active.length > 0) return;
+
+  const task = yield* taskRepository.findTask(taskId);
+  const [item] = yield* db
+    .select({ url: sourceItems.url, fingerprint: sourceItems.fingerprint })
+    .from(taskLinks)
+    .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+    .where(and(eq(taskLinks.taskId, taskId), eq(taskLinks.role, "tracks")))
+    .limit(1)
+    .pipe(Effect.orDie);
+  if (Option.isNone(task) || item === undefined || PULL_URL.exec(item.url) === null) {
+    return yield* new ReviewNotAvailableError({ message: "GitHub の PR を追う Task ではないので調べられない" });
+  }
+  yield* db
+    .insert(agentRuns)
+    .values({ taskId, kind: KIND, status: "queued", subjectFingerprint: item.fingerprint, previousStatus: task.value.status, startedAt: yield* nowIso })
+    .pipe(Effect.orDie);
+  yield* moveTask(taskId, task.value.status, "agent_running");
+});
 
 /** 状態を変える。ただし、調べている間に同期などが状態を変えていたら（merge されて完了など）上書きしない */
 const moveTask = (taskId: number, expected: TaskStatus, next: TaskStatus) =>

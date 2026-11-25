@@ -10,19 +10,20 @@ type Reply = { status?: number; body?: unknown; headers?: Record<string, string>
 const TOKEN = "ghp_test_token";
 
 /** 受け取ったリクエストを記録し、URL に応じた応答を返す偽の GitHub */
-function fakeGitHub(route: (url: URL) => Reply) {
-  const requests: { url: URL; headers: Record<string, string> }[] = [];
+function fakeGitHub(route: (url: URL, method: string) => Reply) {
+  const requests: { url: URL; headers: Record<string, string>; method: string; body: unknown }[] = [];
   const concurrency = { inFlight: 0, max: 0 };
   const http = HttpClient.make((request, url) =>
     Effect.gen(function* () {
-      requests.push({ url, headers: { ...request.headers } });
+      const body = request.body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(request.body.body)) : undefined;
+      requests.push({ url, headers: { ...request.headers }, method: request.method, body });
       concurrency.inFlight++;
       concurrency.max = Math.max(concurrency.max, concurrency.inFlight);
       // 応答を返す前に他の fiber に順番を譲り、並行に送っていれば同時に処理中になるようにする
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
       concurrency.inFlight--;
-      const reply = route(url);
+      const reply = route(url, request.method);
       return HttpClientResponse.fromWeb(
         request,
         new Response(reply.body === undefined ? null : JSON.stringify(reply.body), {
@@ -193,6 +194,63 @@ describe("GitHubClientLive", () => {
       const result = yield* withClient(layer, (client) => client.inspectToken);
 
       assert.deepStrictEqual(result, { viewer: { login: "octocat" }, scopes: undefined, expiresAt: undefined });
+    }));
+
+  it.effect("リポジトリで許されている merge の方法を読む", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({ body: { allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: true } }));
+
+      const result = yield* withClient(layer, (client) => client.getRepository("acme/app"));
+
+      assert.deepStrictEqual(result, { allowSquashMerge: true, allowMergeCommit: false, allowRebaseMerge: true });
+      assert.strictEqual(requests[0]?.url.pathname, "/repos/acme/app");
+    }));
+
+  it.effect("PR を merge するときは、調べたときの head の commit を指定して PUT で送る", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({ body: { merged: true, sha: "merged-sha" } }));
+
+      const result = yield* withClient(layer, (client) =>
+        client.mergePullRequest({ repository: "acme/app", number: 42, sha: "head-sha", method: "squash" }),
+      );
+
+      assert.deepStrictEqual(result, { sha: "merged-sha" });
+      assert.strictEqual(requests[0]?.method, "PUT");
+      assert.strictEqual(requests[0]?.url.pathname, "/repos/acme/app/pulls/42/merge");
+      assert.deepStrictEqual(requests[0]?.body, { sha: "head-sha", merge_method: "squash" });
+    }));
+
+  it.effect("merge を断られたら（調べたあとに PR が更新された・merge できない状態など）、GitHub の理由つきでエラーにする", () =>
+    Effect.gen(function* () {
+      const { layer } = fakeGitHub(() => ({ status: 409, body: { message: "Head branch was modified. Review and try the merge again." } }));
+
+      const error = yield* Effect.flip(
+        withClient(layer, (client) => client.mergePullRequest({ repository: "acme/app", number: 42, sha: "old", method: "squash" })),
+      );
+
+      assert.instanceOf(error, GitHubRequestError);
+      assert.include(error.message, "Head branch was modified");
+      assert.strictEqual((error as GitHubRequestError).status, 409);
+    }));
+
+  it.effect("既定のブランチの最近の commit を、親の数とメッセージの 1 行目だけにして読む", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({
+        body: [
+          { commit: { message: "Update deps (#12)\n\nbody" }, parents: [{ sha: "a" }] },
+          { commit: { message: "Merge pull request #11" }, parents: [{ sha: "b" }, { sha: "c" }] },
+        ],
+      }));
+
+      const result = yield* withClient(layer, (client) => client.listRecentCommits("acme/app"));
+
+      assert.deepStrictEqual(result, [
+        { title: "Update deps (#12)", parents: 1 },
+        { title: "Merge pull request #11", parents: 2 },
+      ]);
+      assert.strictEqual(requests[0]?.url.pathname, "/repos/acme/app/commits");
+      assert.strictEqual(requests[0]?.url.searchParams.get("per_page"), "30");
+      assert.strictEqual(requests.length, 1, "1 ページだけ読む");
     }));
 
   it.effect("自分のアカウントは /user から取得する", () =>

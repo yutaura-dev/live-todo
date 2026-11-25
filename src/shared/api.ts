@@ -49,6 +49,9 @@ export type GitHubTokenSummary = {
   expiryWarning?: { daysLeft: number };
 };
 
+export type MergeMethod = "squash" | "merge" | "rebase";
+export type MergePlanView = { repository: string; number: number; sha: string; method: MergeMethod; reason: string };
+
 export type Outcome = { ok: true; detail?: string } | { ok: false; message: string };
 
 export type FilterPreviewRequest = {
@@ -63,6 +66,12 @@ export interface LiveTodoApi {
   moveTask(taskId: number, status: MovableStatus): Promise<void>;
   markSeen(taskId: number): Promise<void>;
   taskDetail(taskId: number): Promise<TaskDetail>;
+  /** merge の確認に出す内容（merge 先・方法と理由・調べたときの commit） */
+  mergePlan(taskId: number): Promise<MergePlanView | { error: string }>;
+  /** 確認で承認した内容（方法と commit）で merge する。外部への書き込み */
+  merge(taskId: number, approved: { method: MergeMethod; sha: string }): Promise<Outcome>;
+  /** AI にもう一度調べてもらう（調査待ちに入れ直す） */
+  requestReview(taskId: number): Promise<Outcome>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

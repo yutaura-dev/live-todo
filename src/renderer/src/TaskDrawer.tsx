@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MovableStatus, TaskDetail } from "../../shared/api.js";
+import type { MergePlanView, MovableStatus, TaskDetail } from "../../shared/api.js";
 import { api } from "./api.js";
 import { conclusionLabel, describeChange, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
 
@@ -15,6 +15,8 @@ export function TaskDrawer(props: {
   onClose: () => void;
   onMove: (taskId: number, status: MovableStatus) => Promise<void>;
   onDelete: (taskId: number) => Promise<void>;
+  /** merge などで Task が外から変わったあとに、カンバンを読み直す */
+  onChanged: () => Promise<void>;
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -100,7 +102,8 @@ export function TaskDrawer(props: {
 
             {detail.brief && <p className="drawer-brief">{detail.brief}</p>}
 
-            {detail.agentRun && <AgentRunSection run={detail.agentRun} />}
+            <NextAction detail={detail} onMerged={props.onChanged} />
+            {detail.agentRun && <AgentRunSection run={detail.agentRun} taskId={detail.id} onRequested={props.onChanged} />}
 
             <section className="drawer-section" aria-labelledby="drawer-items">
               <h3 id="drawer-items" className="drawer-section-title">
@@ -152,13 +155,15 @@ export function TaskDrawer(props: {
 
 type ReviewResult = { conclusion?: string; impact?: string; requiredChanges?: string; blockers?: string; configChanges?: string };
 
-function AgentRunSection({ run }: { run: NonNullable<TaskDetail["agentRun"]> }) {
+function AgentRunSection({ run, taskId, onRequested }: { run: NonNullable<TaskDetail["agentRun"]>; taskId: number; onRequested: () => Promise<void> }) {
   const review = (run.result ?? {}) as ReviewResult;
+  const idle = run.status === "succeeded" || run.status === "failed";
   return (
     <section className="drawer-section" aria-labelledby="drawer-agent">
       <h3 id="drawer-agent" className="drawer-section-title">
         AI の調査（依存更新の PR）
       </h3>
+      {run.status === "queued" && <p className="field-hint">調査待ちです。順番が来たら Claude Code が調べます。</p>}
       {run.status === "running" && <p className="field-hint">Claude Code が調べています（{dateTimeOf(run.startedAt)} から）。</p>}
       {run.status === "failed" && <p className="problem">調べられませんでした: {run.error}</p>}
       {run.status === "succeeded" && (
@@ -175,6 +180,7 @@ function AgentRunSection({ run }: { run: NonNullable<TaskDetail["agentRun"]> }) 
         {run.costUsd !== undefined && `費用 $${run.costUsd.toFixed(2)}。`}
         {run.sessionId && <>session: <code className="session-id">{run.sessionId}</code></>}
       </p>
+      {idle && <RequestReviewButton taskId={taskId} onRequested={onRequested} />}
     </section>
   );
 }
@@ -185,6 +191,107 @@ function ReviewField({ label, text }: { label: string; text: string | undefined 
     <div className="review-field">
       <span className="field-label">{label}</span>
       <p className="review-text">{text}</p>
+    </div>
+  );
+}
+
+const METHOD_LABELS: Record<string, string> = { squash: "squash", merge: "merge commit", rebase: "rebase" };
+
+/** Task の「次にやること」。依存更新の調査の結論から決める */
+function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => Promise<void> }) {
+  const run = detail.agentRun;
+  const review = (run?.status === "succeeded" ? (run.result ?? {}) : {}) as ReviewResult;
+  const [plan, setPlan] = useState<MergePlanView | null>(null);
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "merged" } | { kind: "failed"; message: string }>({ kind: "idle" });
+
+  if (detail.status === "done" || detail.status === "dismissed" || review.conclusion === undefined) return null;
+
+  const openConfirm = async () => {
+    setState({ kind: "busy" });
+    const result = await api.mergePlan(detail.id);
+    if ("error" in result) setState({ kind: "failed", message: result.error });
+    else {
+      setPlan(result);
+      setState({ kind: "idle" });
+    }
+  };
+  const merge = async () => {
+    if (plan === null) return;
+    setState({ kind: "busy" });
+    const outcome = await api.merge(detail.id, { method: plan.method, sha: plan.sha });
+    if (outcome.ok) {
+      setState({ kind: "merged" });
+      setPlan(null);
+      await onMerged();
+    } else setState({ kind: "failed", message: outcome.message });
+  };
+
+  return (
+    <section className="next-action" aria-labelledby="drawer-next">
+      <h3 id="drawer-next" className="drawer-section-title">
+        次にやること
+      </h3>
+      {review.conclusion === "mergeable" && (
+        <>
+          <p className="next-action-text">PR を merge する（AI の調査で merge 可能と判定）</p>
+          {state.kind === "merged" ? (
+            <p className="next-action-done">merge しました</p>
+          ) : plan === null ? (
+            <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void openConfirm()}>
+              merge する
+            </button>
+          ) : (
+            <div className="merge-confirm" role="alertdialog" aria-labelledby="merge-confirm-title">
+              <p id="merge-confirm-title" className="merge-confirm-title">
+                {plan.repository} #{plan.number} を {METHOD_LABELS[plan.method]} で merge します
+              </p>
+              <p className="field-hint">方法の理由: {plan.reason}</p>
+              <p className="field-hint">
+                調べたときの commit（<code className="session-id">{plan.sha.slice(0, 7)}</code>）から PR が変わっていれば、GitHub が merge を断ります。
+              </p>
+              <div className="merge-confirm-actions">
+                <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void merge()}>
+                  merge する
+                </button>
+                <button type="button" className="quiet-button" onClick={() => setPlan(null)}>
+                  やめる
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {review.conclusion === "mergeable_after_fix" && <p className="next-action-text">修正してから merge する。必要な修正は下の「AI の調査」を見てください</p>}
+      {review.conclusion === "not_mergeable" && (
+        <p className="next-action-text">merge しない。renovate / dependabot の設定を直すか、PR を閉じる。直し方は下の「AI の調査」を見てください</p>
+      )}
+      {state.kind === "failed" && (
+        <>
+          <p className="problem">merge できませんでした: {state.message}</p>
+          {/commit が分からない|調べ直された/.test(state.message) && <RequestReviewButton taskId={detail.id} onRequested={onMerged} />}
+        </>
+      )}
+    </section>
+  );
+}
+
+function RequestReviewButton({ taskId, onRequested }: { taskId: number; onRequested: () => Promise<void> }) {
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <div className="request-review">
+      <button
+        type="button"
+        className="quiet-button"
+        onClick={() =>
+          void api.requestReview(taskId).then(async (outcome) => {
+            setMessage(outcome.ok ? "調査待ちに入れました。1 分以内に調べ始めます" : `調べ直せません: ${outcome.message}`);
+            await onRequested();
+          })
+        }
+      >
+        もう一度調べる
+      </button>
+      {message && <span className="field-hint">{message}</span>}
     </div>
   );
 }

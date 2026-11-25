@@ -10,4 +10,7 @@ export const IPC_CHANNELS = {
   removeSecret: "settings:remove-secret",
   previewFilter: "settings:preview-filter",
   taskDetail: "board:task-detail",
+  mergePlan: "board:merge-plan",
+  merge: "board:merge",
+  requestReview: "board:request-review",
 } as const;

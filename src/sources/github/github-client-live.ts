@@ -12,6 +12,15 @@ const ArrayBody = Schema.Array(Schema.Unknown);
 const SearchBody = Schema.Struct({ items: ArrayBody });
 const CheckRunsBody = Schema.Struct({ check_runs: ArrayBody });
 const ErrorBody = Schema.Struct({ message: Schema.String });
+const RepositoryBody = Schema.Struct({
+  allow_squash_merge: Schema.Boolean,
+  allow_merge_commit: Schema.Boolean,
+  allow_rebase_merge: Schema.Boolean,
+});
+const MergeBody = Schema.Struct({ sha: Schema.String });
+const CommitsBody = Schema.Array(Schema.Struct({ commit: Schema.Struct({ message: Schema.String }), parents: Schema.Array(Schema.Unknown) }));
+// 慣習を読み取るのに使う commit の数。1 ページで足り、API の回数を増やさない
+const RECENT_COMMITS = "30";
 const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody);
 
 export type GitHubClientLiveOptions = { token: Redacted.Redacted<string> };
@@ -49,7 +58,7 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
         return Effect.succeed(url);
       };
 
-      const describe = (url: URL) => `GET ${url.pathname}`;
+      const describe = (url: URL, method = "GET") => `${method} ${url.pathname}`;
 
       const rateLimitResetAt = Effect.fnUntraced(function* (response: HttpClientResponse.HttpClientResponse) {
         const header = (name: string) => Headers.get(response.headers, name);
@@ -66,15 +75,15 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
       });
 
       /** 404 / 410 のときは none、2xx は応答、それ以外は GitHubClientError */
-      const sendOnce = Effect.fnUntraced(function* (url: URL): Effect.fn.Return<
+      const sendOnce = Effect.fnUntraced(function* (url: URL, request: HttpClientRequest.HttpClientRequest = HttpClientRequest.get(url.toString())): Effect.fn.Return<
         Option.Option<HttpClientResponse.HttpClientResponse>,
         GitHubClientError
       > {
-        const response = yield* http.execute(HttpClientRequest.get(url.toString())).pipe(
+        const response = yield* http.execute(request).pipe(
           // cause に元のエラーを入れない理由: HttpClientError は送ったリクエスト（authorization ヘッダーを含む）を
           // 持っているため、ログに出したときにトークンが漏れる。エラーの種類と送り先だけを残す。
           Effect.mapError(
-            (error) => new GitHubRequestError({ message: `GitHub API に接続できない（${error.reason._tag}）: ${describe(url)}` }),
+            (error) => new GitHubRequestError({ message: `GitHub API に接続できない（${error.reason._tag}）: ${describe(url, request.method)}` }),
           ),
         );
         if (response.status >= 200 && response.status < 300) return Option.some(response);
@@ -94,12 +103,12 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
           Effect.orElseSucceed(() => ""),
         );
         return yield* new GitHubRequestError({
-          message: `GitHub API が ${response.status} を返した: ${describe(url)}${reason}`,
+          message: `GitHub API が ${response.status} を返した: ${describe(url, request.method)}${reason}`,
           status: response.status,
         });
       });
 
-      const send = (url: URL) =>
+      const send = (url: URL, request?: HttpClientRequest.HttpClientRequest) =>
         Semaphore.withPermits(
           queue,
           1,
@@ -110,7 +119,7 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
             if (Option.isSome(blocked) && DateTime.toEpochMillis(yield* DateTime.now) < DateTime.toEpochMillis(blocked.value)) {
               return yield* new GitHubRateLimitedError({ resetAt: DateTime.formatIso(blocked.value) });
             }
-            return yield* sendOnce(url);
+            return yield* sendOnce(url, request);
           }),
         );
 
@@ -235,6 +244,36 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
             Effect.map(({ items }) => ({ check_runs: items })),
           );
         },
+        getRepository: (repository) =>
+          Effect.gen(function* () {
+            const url = yield* resolveUrl(`/repos/${repository.split("/").map(encodeURIComponent).join("/")}`);
+            const response = yield* send(url);
+            if (Option.isNone(response)) {
+              return yield* new GitHubRequestError({ message: `リポジトリが見つからない: ${repository}`, status: 404 });
+            }
+            const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(RepositoryBody, url)));
+            return { allowSquashMerge: body.allow_squash_merge, allowMergeCommit: body.allow_merge_commit, allowRebaseMerge: body.allow_rebase_merge };
+          }),
+        mergePullRequest: ({ repository, number, sha, method }) =>
+          Effect.gen(function* () {
+            const url = yield* resolveUrl(`/repos/${repository.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/merge`);
+            // sha を必ず付ける理由: 調べたあとに PR へ commit が足されていたら、GitHub に merge を断らせるため
+            const request = HttpClientRequest.put(url.toString()).pipe(HttpClientRequest.bodyJsonUnsafe({ sha, merge_method: method }));
+            const response = yield* send(url, request);
+            if (Option.isNone(response)) {
+              return yield* new GitHubRequestError({ message: `PR が見つからない: ${repository}#${number}`, status: 404 });
+            }
+            const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(MergeBody, url)));
+            return { sha: body.sha };
+          }),
+        listRecentCommits: (repository) =>
+          Effect.gen(function* () {
+            const url = yield* resolveUrl(`/repos/${repository.split("/").map(encodeURIComponent).join("/")}/commits`, { per_page: RECENT_COMMITS });
+            const response = yield* send(url);
+            if (Option.isNone(response)) return [];
+            const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(CommitsBody, url)));
+            return body.map((entry) => ({ title: entry.commit.message.split("\n")[0] ?? "", parents: entry.parents.length }));
+          }),
         listMyRepositories: resolveUrl("/user/repos", { sort: "pushed", per_page: PER_PAGE }).pipe(
           Effect.flatMap((url) => collectPages(url, arrayItems)),
           Effect.map(({ items, truncated }) => ({ repositories: items, truncated })),

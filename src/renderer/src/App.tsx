@@ -173,6 +173,7 @@ export function App() {
           taskId={openTaskId}
           revision={loadedAt}
           onClose={() => setOpenTaskId(null)}
+          onChanged={load}
           onMove={async (taskId, status) => {
             const card = board?.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === taskId);
             if (card) await move(card, status);

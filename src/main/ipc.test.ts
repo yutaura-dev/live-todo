@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
-import { decodeFilterPreviewRequest, decodeMoveRequest, decodeSecretInput, decodeSecretKey, decodeTaskId, isAllowedExternalUrl } from "./ipc.js";
+import { decodeMergeRequest, decodeFilterPreviewRequest, decodeMoveRequest, decodeSecretInput, decodeSecretKey, decodeTaskId, isAllowedExternalUrl } from "./ipc.js";
 
 describe("isAllowedExternalUrl", () => {
   it.each(["https://github.com/acme/app/pull/42", "https://github.com/acme/app/issues/7#issuecomment-1"])(
@@ -94,5 +94,24 @@ describe("decodeFilterPreviewRequest", () => {
     Effect.gen(function* () {
       const targets = Array.from({ length: 101 }, (_, index) => `acme/repo-${index}`);
       assert.isTrue(Option.isNone(yield* Effect.option(decodeFilterPreviewRequest({ accountId: "work", filter: {}, targets }))));
+    }));
+});
+
+describe("decodeMergeRequest", () => {
+  const sha = "a".repeat(40);
+
+  it.effect("Task の id・merge の方法・確認した commit を受け取る", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* decodeMergeRequest({ taskId: 3, method: "squash", sha }), { taskId: 3, method: "squash", sha });
+    }));
+
+  it.effect.each([
+    { taskId: 3, method: "fast-forward", sha },
+    { taskId: 3, method: "squash", sha: "abc" },
+    { taskId: 3, method: "squash", sha: "z".repeat(40) },
+    { taskId: 3, method: "squash" },
+  ])("想定外の値はエラーにする: %j", (input) =>
+    Effect.gen(function* () {
+      assert.isTrue(Option.isNone(yield* Effect.option(decodeMergeRequest(input))));
     }));
 });

@@ -1,6 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { pullRequestCommands, truncateDiff } from "./pull-request-context.js";
+import { headShaOf, pullRequestCommands, truncateDiff } from "./pull-request-context.js";
 
 export class AgentWorkspaceError extends Schema.TaggedError<AgentWorkspaceError>()("AgentWorkspaceError", {
   message: Schema.String,
@@ -15,7 +15,11 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
    * contextDir を clone の外に置く理由: clone の中に同じ名前のシンボリックリンクを置かれると、書き出しが
    * リンクをたどってリポジトリの外のファイルを上書きしうるため。
    */
-  prepare(repository: string, taskId: number, pullUrl: string): Effect.Effect<{ cwd: string; contextDir: string }, AgentWorkspaceError>;
+  prepare(
+    repository: string,
+    taskId: number,
+    pullUrl: string,
+  ): Effect.Effect<{ cwd: string; contextDir: string; headSha: string | undefined }, AgentWorkspaceError>;
 }>()("live-todo/core/agent/AgentWorkspace") {
   static readonly layer = (root: string) =>
     Layer.effect(
@@ -52,7 +56,7 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
             fs.writeFileString(`${contextDir}/pr.json`, view),
             fs.writeFileString(`${contextDir}/pr.diff`, truncateDiff(diff)),
           ]).pipe(Effect.mapError(fail("PR の情報を書き出せない")));
-          return { cwd: dir, contextDir };
+          return { cwd: dir, contextDir, headSha: headShaOf(view) };
         });
 
         return AgentWorkspace.of({ prepare });

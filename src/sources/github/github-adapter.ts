@@ -41,6 +41,12 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   listReviews(pullApiUrl: string): Effect.Effect<unknown, GitHubClientError>;
   /** トークンの持ち主と、応答ヘッダーから読んだ権限（classic token の scope）・有効期限（ISO 8601）。ヘッダーがなければ undefined */
   readonly inspectToken: Effect.Effect<{ viewer: unknown; scopes: string[] | undefined; expiresAt: string | undefined }, GitHubClientError>;
+  /** リポジトリで許されている merge の方法 */
+  getRepository(repository: string): Effect.Effect<{ allowSquashMerge: boolean; allowMergeCommit: boolean; allowRebaseMerge: boolean }, GitHubClientError>;
+  /** PR を merge する（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ）。sha は調べたときの head の commit */
+  mergePullRequest(params: { repository: string; number: number; sha: string; method: "squash" | "merge" | "rebase" }): Effect.Effect<{ sha: string }, GitHubClientError>;
+  /** 既定のブランチの最近の commit（merge の慣習を読み取るため）。タイトルと親の数だけ */
+  listRecentCommits(repository: string): Effect.Effect<ReadonlyArray<{ title: string; parents: number }>, GitHubClientError>;
   /** 自分が見られるリポジトリ（設定画面でフィルタの効き方を見せるため）。truncated: ページ数の上限で打ち切った */
   readonly listMyRepositories: Effect.Effect<{ repositories: unknown; truncated: boolean }, GitHubClientError>;
 }>()("live-todo/sources/github/GitHubClient") {}

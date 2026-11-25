@@ -52,6 +52,9 @@ export const mockApi: LiveTodoApi = {
       ],
     };
   },
+  mergePlan: async () => ({ repository: "acme/app", number: 42, sha: "a".repeat(40), method: "squash", reason: "既定のブランチの最近の commit 30 件中 27 件が squash" }),
+  merge: async () => ({ ok: true }),
+  requestReview: async () => ({ ok: true }),
   markSeen: async (taskId: number) => {
     cards = cards.map((card) => (card.id === taskId ? { ...card, unreadChanges: 0 } : card));
   },

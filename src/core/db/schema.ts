@@ -118,6 +118,8 @@ export const agentRuns = sqliteTable(
     status: text({ enum: AGENT_RUN_STATUSES }).notNull(),
     /** どの状態の元の項目を調べたか。項目が変わったら調べ直すために使う */
     subjectFingerprint: text("subject_fingerprint").notNull(),
+    /** 調べたときの PR の head の commit。merge するときに指定し、調べたあとの変更を merge しないようにする */
+    subjectSha: text("subject_sha"),
     /** 調べる前の Task の状態。失敗したときにここへ戻す */
     previousStatus: text("previous_status").notNull(),
     result: text({ mode: "json" }),
@@ -128,4 +130,27 @@ export const agentRuns = sqliteTable(
     finishedAt: text("finished_at"),
   },
   (table) => [index("agent_runs_task_id").on(table.taskId)],
+);
+
+export const APPROVAL_STATUSES = ["executed", "failed"] as const;
+
+/** 外部への書き込みを、ユーザーが承認した記録（charter: 承認なしの外部書き込みはしない） */
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id),
+    action: text().notNull(),
+    /** 書き込む先（例: acme/app#42） */
+    target: text().notNull(),
+    /** 承認したときに見せた内容（merge の方法・commit など） */
+    payload: text({ mode: "json" }).notNull(),
+    status: text({ enum: APPROVAL_STATUSES }).notNull(),
+    error: text(),
+    approvedAt: text("approved_at").notNull(),
+    executedAt: text("executed_at"),
+  },
+  (table) => [index("approvals_task_id").on(table.taskId)],
 );

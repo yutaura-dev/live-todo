@@ -31,6 +31,14 @@ export const decodeSecretInput = Schema.decodeUnknownEffect(
   }),
 );
 
+export const decodeMergeRequest = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    taskId: TaskId,
+    method: Schema.Literals(["squash", "merge", "rebase"]),
+    sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+  }),
+);
+
 const MAX_PREVIEW_TARGETS = 100;
 export const decodeFilterPreviewRequest = Schema.decodeUnknownEffect(
   Schema.Struct({

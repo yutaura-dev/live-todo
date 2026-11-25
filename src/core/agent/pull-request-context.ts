@@ -1,7 +1,16 @@
+import { Option, Schema } from "effect";
+
+const HeadSha = Schema.fromJsonString(Schema.Struct({ headRefOid: Schema.String }));
+const decodeHeadSha = Schema.decodeUnknownOption(HeadSha);
+
+/** gh pr view の JSON から、調べたときの head の commit を読む */
+export const headShaOf = (viewJson: string): string | undefined =>
+  Option.getOrUndefined(Option.map(decodeHeadSha(viewJson), (view) => view.headRefOid));
+
 /** PR の情報を集める gh コマンドの引数。どれも読み取りだけ */
 export function pullRequestCommands(pullUrl: string) {
   return {
-    view: ["pr", "view", pullUrl, "--json", "title,body,author,files,statusCheckRollup,baseRefName,headRefName,mergeable"],
+    view: ["pr", "view", pullUrl, "--json", "title,body,author,files,statusCheckRollup,baseRefName,headRefName,headRefOid,mergeable"],
     diff: ["pr", "diff", pullUrl],
   };
 }
