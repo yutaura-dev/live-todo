@@ -8,7 +8,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot } from "../../shared/api.js";
 import { api, isMock } from "./api.js";
@@ -27,6 +27,8 @@ const viewFromHash = (): View => (window.location.hash === "#settings" ? "settin
 export function App() {
   const [view, setView] = useState<View>(viewFromHash);
   const [board, setBoard] = useState<Board | null>(null);
+  const boardRef = useRef<Board | null>(null);
+  boardRef.current = board;
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<number | null>(null);
@@ -37,7 +39,11 @@ export function App() {
     void api.settings().then((snapshot) => setExpiringTokens(expiringTokensOf(snapshot)));
     try {
       const next = await api.board();
-      withTransition(() => setBoard(next));
+      // カードがレーンを移ったときだけ動かす。何も変わらない定期の読み直しでアニメーションさせない
+      // （アニメーションの間はカードが一番上の層に描かれ、ドロワーの上に一瞬出てしまうため）
+      const current = boardRef.current;
+      if (current === null || layoutOf(current) === layoutOf(next)) setBoard(next);
+      else withTransition(() => setBoard(next));
       setLoadedAt(new Date().toISOString());
     } catch {
       setProblem("Task を読み込めませんでした。同期の設定を確かめてから、再読み込みしてください。");
@@ -233,6 +239,9 @@ function withTransition(update: () => void) {
   }
   document.startViewTransition(() => flushSync(update));
 }
+
+/** どのカードがどのレーンにあるか（並び順を含む）。変わったかどうかの比較に使う */
+const layoutOf = (board: Board) => board.columns.map((column) => `${column.id}:${column.cards.map((card) => card.id).join(",")}`).join("|");
 
 function expiringTokensOf(snapshot: SettingsSnapshot) {
   return Object.entries(snapshot.githubTokens).flatMap(([accountId, token]) =>

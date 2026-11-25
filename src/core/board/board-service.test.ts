@@ -337,6 +337,20 @@ describe("次にやること", () => {
       }),
     ));
 
+  it.effect("済んだにした手順を戻せる", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        yield* (yield* TaskRepository).updateTask(task.id, { nextActions: plan });
+        const service = yield* BoardService;
+        yield* service.completeStep(task.id, "fix");
+
+        yield* service.reopenStep(task.id, "fix");
+
+        assert.deepStrictEqual((yield* service.taskDetail(task.id)).currentStepIds, ["fix"]);
+      }),
+    ));
+
   it.effect("分かれ道を選ぶと、選んだ側の手順に進む", () =>
     run(
       Effect.gen(function* () {

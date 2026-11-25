@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { chooseOption, completeStep, currentSteps, type NextActionPlan, planFromDependencyReview } from "./next-actions.js";
+import { chooseOption, completeStep, currentSteps, type NextActionPlan, planFromDependencyReview, reopenStep } from "./next-actions.js";
 
 const review = (overrides: Record<string, unknown> = {}) => ({
   conclusion: "mergeable" as const,
@@ -46,6 +46,28 @@ describe("planFromDependencyReview", () => {
     const plan = planFromDependencyReview(review({ conclusion: "not_mergeable" }));
 
     assert.deepStrictEqual(titles(plan), ["renovate / dependabot の設定を直す（normal）", "PR を閉じる（easy）"]);
+  });
+});
+
+describe("reopenStep", () => {
+  it("済んだ手順を、まだの状態に戻す", () => {
+    const plan = planFromDependencyReview(review({ conclusion: "mergeable_after_fix" }));
+    const fix = currentSteps(plan)[0]!;
+
+    const reopened = reopenStep(completeStep(plan, fix.id), fix.id);
+
+    assert.deepStrictEqual(currentSteps(reopened).map((step) => step.id), [fix.id]);
+  });
+
+  it("選んだ分かれ道を戻すと、選ぶ前に戻る", () => {
+    const plan = planFromDependencyReview(review({ conclusion: "mergeable_after_fix", canMergeAsIs: true }));
+    const decision = currentSteps(plan)[0]!;
+
+    const reopened = reopenStep(chooseOption(plan, decision.id, "as_is"), decision.id);
+
+    assert.deepStrictEqual(titles(reopened), ["修正を行うか、そのまま merge するか決める（easy）"]);
+    const step = reopened.steps[0]!;
+    assert.isTrue(step.kind === "decision" && step.chosen === undefined);
   });
 });
 

@@ -57,6 +57,7 @@ export const mockApi: LiveTodoApi = {
   requestReview: async () => ({ ok: true }),
   completeStep: async () => ({ ok: true }),
   chooseOption: async () => ({ ok: true }),
+  reopenStep: async () => ({ ok: true }),
   markSeen: async (taskId: number) => {
     cards = cards.map((card) => (card.id === taskId ? { ...card, unreadChanges: 0 } : card));
   },

@@ -738,6 +738,12 @@ button:disabled {
   position: fixed;
   inset: 0;
   z-index: 100;
+  /* カードのアニメーション（View Transitions）の間も、ドロワーをカードより上に描くため */
+  view-transition-name: drawer-layer;
+}
+
+.toast {
+  view-transition-name: toast;
 }
 
 .drawer-backdrop {

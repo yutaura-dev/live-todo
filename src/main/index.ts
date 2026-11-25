@@ -357,6 +357,14 @@ function registerMerge() {
       }),
     ),
   );
+  ipcMain.handle(IPC_CHANNELS.reopenStep, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* decodeStepRequest(input);
+        yield* (yield* BoardService).reopenStep(request.taskId, request.stepId);
+      }),
+    ),
+  );
   ipcMain.handle(IPC_CHANNELS.chooseOption, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {

@@ -274,7 +274,14 @@ function StepItem(props: {
         <span className={`effort effort--${step.effort}`}>{effortLabel(step.effort)}</span>
         <span className="step-title">{step.title}</span>
         {props.parallel && <span className="field-hint">前と並行してできる</span>}
-        {step.status === "done" && <span className="step-done">済み</span>}
+        {step.status === "done" && (
+          <>
+            <span className="step-done">済み</span>
+            <button type="button" className="open-link" onClick={() => void run(api.reopenStep(detail.id, step.id))}>
+              戻す
+            </button>
+          </>
+        )}
       </div>
       {isCurrent && step.kind === "merge_pull_request" && <MergeFlow detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />}
       {isCurrent && step.kind === "decision" && (

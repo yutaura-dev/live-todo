@@ -4,7 +4,7 @@ import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks } from "../db/schema.js";
 import { TaskRepository, type TaskWithUnread } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
-import { chooseOption, completeStep, currentSteps, decodePlan, EFFORTS, type Effort, type NextActionPlan, taskEffort } from "../task/next-actions.js";
+import { chooseOption, completeStep, currentSteps, reopenStep, decodePlan, EFFORTS, type Effort, type NextActionPlan, taskEffort } from "../task/next-actions.js";
 
 export class TaskNotFoundError extends Schema.TaggedError<TaskNotFoundError>()("TaskNotFoundError", {
   taskId: Schema.Number,
@@ -119,6 +119,8 @@ export class BoardService extends Context.Service<BoardService, {
   completeStep(taskId: number, stepId: string): Effect.Effect<void, TaskNotFoundError>;
   /** 次にやることの分かれ道を選ぶ */
   chooseOption(taskId: number, stepId: string, optionKey: string): Effect.Effect<void, TaskNotFoundError>;
+  /** 済んだにした手順・選んだ分かれ道を戻す（押し間違えたとき） */
+  reopenStep(taskId: number, stepId: string): Effect.Effect<void, TaskNotFoundError>;
 }>()("live-todo/core/board/BoardService") {
   static readonly layer = Layer.effect(
     BoardService,
@@ -310,6 +312,7 @@ export class BoardService extends Context.Service<BoardService, {
         taskDetail,
         completeStep: (taskId, stepId) => updatePlan(taskId, (plan) => completeStep(plan, stepId)),
         chooseOption: (taskId, stepId, optionKey) => updatePlan(taskId, (plan) => chooseOption(plan, stepId, optionKey)),
+        reopenStep: (taskId, stepId) => updatePlan(taskId, (plan) => reopenStep(plan, stepId)),
       });
     }),
   );

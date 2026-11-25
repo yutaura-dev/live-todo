@@ -80,6 +80,8 @@ export interface LiveTodoApi {
   completeStep(taskId: number, stepId: string): Promise<Outcome>;
   /** 次にやることの分かれ道を選ぶ */
   chooseOption(taskId: number, stepId: string, optionKey: string): Promise<Outcome>;
+  /** 済んだにした手順・選んだ分かれ道を戻す */
+  reopenStep(taskId: number, stepId: string): Promise<Outcome>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

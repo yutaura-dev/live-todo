@@ -56,6 +56,16 @@ export const completeStep = (plan: NextActionPlan, id: string): NextActionPlan =
   steps: mapSteps(plan.steps, (step) => (step.id === id ? { ...step, status: "done" } : step)),
 });
 
+/** 済んだにした手順を戻す。分かれ道なら、選ぶ前に戻す */
+export const reopenStep = (plan: NextActionPlan, id: string): NextActionPlan => ({
+  steps: mapSteps(plan.steps, (step) => {
+    if (step.id !== id) return step;
+    if (step.kind !== "decision") return { ...step, status: "todo" };
+    const { chosen: _chosen, ...rest } = step;
+    return { ...rest, status: "todo" };
+  }),
+});
+
 export const chooseOption = (plan: NextActionPlan, id: string, key: string): NextActionPlan => ({
   steps: mapSteps(plan.steps, (step) => (step.id === id && step.kind === "decision" ? { ...step, chosen: key, status: "done" } : step)),
 });

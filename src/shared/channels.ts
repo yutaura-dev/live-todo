@@ -15,4 +15,5 @@ export const IPC_CHANNELS = {
   requestReview: "board:request-review",
   completeStep: "board:complete-step",
   chooseOption: "board:choose-option",
+  reopenStep: "board:reopen-step",
 } as const;

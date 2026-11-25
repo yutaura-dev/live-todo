@@ -12,6 +12,7 @@ const api: LiveTodoApi = {
   requestReview: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.requestReview, taskId),
   completeStep: (taskId, stepId) => ipcRenderer.invoke(IPC_CHANNELS.completeStep, { taskId, stepId }),
   chooseOption: (taskId, stepId, optionKey) => ipcRenderer.invoke(IPC_CHANNELS.chooseOption, { taskId, stepId, optionKey }),
+  reopenStep: (taskId, stepId) => ipcRenderer.invoke(IPC_CHANNELS.reopenStep, { taskId, stepId }),
   openExternal: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternal, url),
   settings: () => ipcRenderer.invoke(IPC_CHANNELS.settings),
   saveConfig: (config) => ipcRenderer.invoke(IPC_CHANNELS.saveConfig, config),
