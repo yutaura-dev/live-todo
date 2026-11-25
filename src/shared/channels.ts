@@ -9,4 +9,5 @@ export const IPC_CHANNELS = {
   setSecret: "settings:set-secret",
   removeSecret: "settings:remove-secret",
   previewFilter: "settings:preview-filter",
+  taskDetail: "board:task-detail",
 } as const;

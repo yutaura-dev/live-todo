@@ -179,6 +179,13 @@ function registerIpc() {
       }),
     ),
   );
+  ipcMain.handle(IPC_CHANNELS.taskDetail, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* BoardService).taskDetail(yield* decodeTaskId(input));
+      }),
+    ),
+  );
   ipcMain.handle(IPC_CHANNELS.openExternal, async (_event, url: unknown) => {
     // renderer から来た URL をそのまま開かない理由: 任意の URL や file:// を開かせないため
     if (typeof url === "string" && isAllowedExternalUrl(url)) await shell.openExternal(url);

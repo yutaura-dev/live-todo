@@ -134,3 +134,63 @@ describe("BoardService.markSeen", () => {
       }),
     ));
 });
+
+describe("BoardService.taskDetail", () => {
+  it.effect("Task に紐づいた元の項目を、役割と判定の結果つきで返す", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo", { method: "decisions", probability: 0.7 });
+        const items = yield* SourceItemRepository;
+        const related = yield* items.upsertItem({
+          source: "slack:work",
+          externalId: "thread-1",
+          title: "関連するスレッド",
+          url: "https://example.slack.com/archives/C1/p1",
+          state: "open",
+          fingerprint: "v1",
+        });
+        yield* (yield* TaskRepository).linkItem(task.id, related.id, "context");
+
+        const detail = yield* (yield* BoardService).taskDetail(task.id);
+
+        assert.deepStrictEqual(
+          detail.items.map((item) => ({ role: item.role, source: item.source, title: item.title, judgment: item.judgment })),
+          [
+            { role: "tracks", source: "github:work", title: "a", judgment: { method: "decisions", probability: 0.7 } },
+            { role: "context", source: "slack:work", title: "関連するスレッド", judgment: undefined },
+          ],
+        );
+      }),
+    ));
+
+  it.effect("変更の履歴を新しい順に、誰が変えたかと未読かどうかつきで返す", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "needs_review");
+        const tasks = yield* TaskRepository;
+        yield* tasks.recordChange(task.id, { kind: "field_changed", field: "title", before: "a", after: "b", unread: true });
+        yield* TestClock.adjust("1 minute");
+        yield* (yield* BoardService).moveTask(task.id, "todo");
+
+        const detail = yield* (yield* BoardService).taskDetail(task.id);
+
+        assert.deepStrictEqual(
+          detail.changes.map(({ field, before, after, actor, unread }) => ({ field, before, after, actor, unread })),
+          [
+            { field: "status", before: "needs_review", after: "todo", actor: "user", unread: false },
+            { field: "title", before: "a", after: "b", actor: "sync", unread: true },
+          ],
+        );
+        assert.strictEqual(detail.status, "todo");
+      }),
+    ));
+
+  it.effect("存在しない Task なら TaskNotFoundError にする", () =>
+    run(
+      Effect.gen(function* () {
+        const error = yield* Effect.flip((yield* BoardService).taskDetail(999));
+
+        assert.instanceOf(error, TaskNotFoundError);
+      }),
+    ));
+});

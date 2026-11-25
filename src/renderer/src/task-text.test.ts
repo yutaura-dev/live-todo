@@ -1,0 +1,60 @@
+import { assert, describe, it } from "@effect/vitest";
+import { describeChange, judgmentText, statusLabel } from "./task-text.js";
+
+const change = (overrides: Partial<Parameters<typeof describeChange>[0]>) => ({
+  kind: "field_changed",
+  field: null,
+  before: null,
+  after: null,
+  actor: "sync",
+  occurredAt: "2026-11-25T00:00:00.000Z",
+  unread: false,
+  ...overrides,
+});
+
+describe("describeChange", () => {
+  it("ステータスの変更は、画面の列の名前で前後を書く", () => {
+    assert.strictEqual(
+      describeChange(change({ field: "status", before: "todo", after: "in_progress", actor: "user" })),
+      "あなたが ステータスを「Todo」から「進行中」に変えた",
+    );
+  });
+
+  it("タイトルの変更は前後の文字を書く", () => {
+    assert.strictEqual(describeChange(change({ field: "title", before: "a", after: "b" })), "同期で タイトルを「a」から「b」に変えた");
+  });
+
+  it("作成と項目の追加は、種類だけを書く", () => {
+    assert.strictEqual(describeChange(change({ kind: "created" })), "同期で 作られた");
+    assert.strictEqual(describeChange(change({ kind: "link_added" })), "同期で 元の項目が追加された");
+  });
+
+  it("知らない項目の変更も、項目名をそのまま出して書く", () => {
+    assert.strictEqual(describeChange(change({ field: "brief", before: null, after: "次は返信" })), "同期で briefを「（なし）」から「次は返信」に変えた");
+  });
+});
+
+describe("judgmentText", () => {
+  it("規則で決まったものは、規則で決まったと書く", () => {
+    assert.strictEqual(judgmentText({ method: "rule" }), "規則で決まった");
+  });
+
+  it("確率があれば、方法と確率を書く", () => {
+    assert.strictEqual(judgmentText({ method: "decisions", probability: 0.704 }), "OpenAI Decisions・自分の対応が要る確率 70%");
+  });
+
+  it("理由があれば、方法と理由を書く", () => {
+    assert.strictEqual(judgmentText({ method: "structured", reason: "本人へのレビュー依頼" }), "LLM・本人へのレビュー依頼");
+  });
+
+  it("知らない方法は、名前をそのまま出す", () => {
+    assert.strictEqual(judgmentText({ method: "jev" }), "jev");
+  });
+});
+
+describe("statusLabel", () => {
+  it("削除した Task と、元の項目が消えた Task も名前で返す", () => {
+    assert.strictEqual(statusLabel("dismissed"), "削除済み");
+    assert.strictEqual(statusLabel("archived"), "元の項目が消えた");
+  });
+});

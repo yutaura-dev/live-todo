@@ -6,6 +6,7 @@ const api: LiveTodoApi = {
   board: () => ipcRenderer.invoke(IPC_CHANNELS.board),
   moveTask: (taskId, status) => ipcRenderer.invoke(IPC_CHANNELS.move, { taskId, status }),
   markSeen: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.seen, taskId),
+  taskDetail: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.taskDetail, taskId),
   openExternal: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternal, url),
   settings: () => ipcRenderer.invoke(IPC_CHANNELS.settings),
   saveConfig: (config) => ipcRenderer.invoke(IPC_CHANNELS.saveConfig, config),

@@ -35,6 +35,23 @@ export const mockApi: LiveTodoApi = {
   moveTask: async (taskId: number, status: MovableStatus) => {
     cards = cards.map((card) => (card.id === taskId ? { ...card, status } : card));
   },
+  taskDetail: async (taskId: number) => {
+    const card = cards.find((candidate) => candidate.id === taskId);
+    if (card === undefined) throw new Error("not found");
+    return {
+      id: card.id,
+      title: card.title,
+      brief: null,
+      status: card.status,
+      createdAt: ago(60 * 24),
+      updatedAt: card.updatedAt,
+      items: card.url ? [{ role: "tracks", source: card.source ?? "", title: card.title, url: card.url, state: "open", judgment: card.judgment }] : [],
+      changes: [
+        { kind: "field_changed", field: "status", before: "needs_review", after: card.status, actor: "user", occurredAt: ago(30), unread: false },
+        { kind: "created", field: null, before: null, after: null, actor: "sync", occurredAt: ago(60 * 24), unread: false },
+      ],
+    };
+  },
   markSeen: async (taskId: number) => {
     cards = cards.map((card) => (card.id === taskId ? { ...card, unreadChanges: 0 } : card));
   },

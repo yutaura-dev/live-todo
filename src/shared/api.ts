@@ -1,7 +1,8 @@
 import type { Board } from "../core/board/board-service.js";
 import type { AccountFilterPreview } from "../app/settings/filter-preview.js";
 
-export type { Board, BoardCard, BoardColumnId, CardJudgment } from "../core/board/board-service.js";
+export type { Board, BoardCard, BoardColumnId, CardJudgment, TaskDetail, TaskDetailChange, TaskDetailItem } from "../core/board/board-service.js";
+import type { TaskDetail } from "../core/board/board-service.js";
 export type { AccountFilterPreview, TargetCheck } from "../app/settings/filter-preview.js";
 export type { FilterReason } from "../sources/github/repository-filter.js";
 
@@ -60,6 +61,7 @@ export interface LiveTodoApi {
   board(): Promise<Board>;
   moveTask(taskId: number, status: MovableStatus): Promise<void>;
   markSeen(taskId: number): Promise<void>;
+  taskDetail(taskId: number): Promise<TaskDetail>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

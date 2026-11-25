@@ -32,6 +32,37 @@ export type BoardCard = {
   judgment?: CardJudgment;
 };
 
+export type TaskDetailItem = {
+  role: string;
+  source: string;
+  title: string;
+  url: string;
+  state: string;
+  judgment: CardJudgment | undefined;
+};
+
+export type TaskDetailChange = {
+  kind: string;
+  field: string | null;
+  before: unknown;
+  after: unknown;
+  actor: string;
+  occurredAt: string;
+  unread: boolean;
+};
+
+export type TaskDetail = {
+  id: number;
+  title: string;
+  brief: string | null;
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  items: TaskDetailItem[];
+  /** 新しい順 */
+  changes: TaskDetailChange[];
+};
+
 export type Board = { columns: ReadonlyArray<{ id: BoardColumnId; title: string; cards: BoardCard[] }> };
 
 // 完了の列は増え続けるので、新しいものから一定数だけ出す
@@ -52,6 +83,7 @@ export class BoardService extends Context.Service<BoardService, {
   /** ユーザーがカードを動かした。ユーザーの操作として記録し、判定の正解として集められるようにする */
   moveTask(taskId: number, status: TaskStatus): Effect.Effect<void, TaskNotFoundError>;
   markSeen(taskId: number): Effect.Effect<void>;
+  taskDetail(taskId: number): Effect.Effect<TaskDetail, TaskNotFoundError>;
 }>()("live-todo/core/board/BoardService") {
   static readonly layer = Layer.effect(
     BoardService,
@@ -121,7 +153,58 @@ export class BoardService extends Context.Service<BoardService, {
         });
       });
 
-      return BoardService.of({ board, moveTask, markSeen: tasks.markChangesSeen });
+      const toJudgment = (stored: unknown): CardJudgment | undefined =>
+        Option.match(decodeJudgment(stored), {
+          onNone: () => undefined,
+          onSome: ({ method, probability, reason }) => ({
+            method,
+            ...(probability === undefined ? {} : { probability }),
+            ...(reason === undefined ? {} : { reason }),
+          }),
+        });
+
+      const taskDetail = Effect.fn("BoardService.taskDetail")(function* (taskId: number) {
+        const found = yield* tasks.findTask(taskId);
+        if (Option.isNone(found)) return yield* new TaskNotFoundError({ taskId });
+        const task = found.value;
+
+        const itemRows = yield* db
+          .select({
+            role: taskLinks.role,
+            source: sourceItems.source,
+            title: sourceItems.title,
+            url: sourceItems.url,
+            state: sourceItems.state,
+            judgment: sourceItems.judgment,
+          })
+          .from(taskLinks)
+          .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+          .where(eq(taskLinks.taskId, taskId))
+          .orderBy(asc(taskLinks.id))
+          .pipe(Effect.orDie);
+        const changes = yield* tasks.listChanges(taskId);
+
+        return {
+          id: task.id,
+          title: task.title,
+          brief: task.brief,
+          status: task.status,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+          items: itemRows.map((row) => ({ ...row, judgment: toJudgment(row.judgment) })),
+          changes: changes.toReversed().map((change) => ({
+            kind: change.kind,
+            field: change.field,
+            before: change.before,
+            after: change.after,
+            actor: change.actor,
+            occurredAt: change.occurredAt,
+            unread: change.seenAt === null,
+          })),
+        } satisfies TaskDetail;
+      });
+
+      return BoardService.of({ board, moveTask, markSeen: tasks.markChangesSeen, taskDetail });
     }),
   );
 }

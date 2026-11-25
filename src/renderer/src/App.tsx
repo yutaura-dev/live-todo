@@ -12,8 +12,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot } from "../../shared/api.js";
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
+import { TaskDrawer } from "./TaskDrawer.js";
 
 const REFRESH_INTERVAL_MS = 15_000;
+const UNDO_VISIBLE_MS = 8_000;
 
 /** "タイトル（owner/repo）" をタイトルとリポジトリに分ける */
 function splitTitle(title: string): { main: string; repository?: string } {
@@ -31,6 +33,8 @@ export function App() {
   const [board, setBoard] = useState<Board | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [openTaskId, setOpenTaskId] = useState<number | null>(null);
+  const [undo, setUndo] = useState<{ taskId: number; title: string; previous: MovableStatus } | null>(null);
   const [expiringTokens, setExpiringTokens] = useState<{ accountId: string; daysLeft: number }[]>([]);
 
   const load = useCallback(async () => {
@@ -68,6 +72,22 @@ export function App() {
     },
     [load],
   );
+
+  const remove = useCallback(
+    async (card: { id: number; title: string; status: string }) => {
+      const previous = card.status as MovableStatus;
+      await move({ ...card, status: previous } as BoardCard, "dismissed");
+      setUndo({ taskId: card.id, title: splitTitle(card.title).main, previous });
+      if (openTaskId === card.id) setOpenTaskId(null);
+    },
+    [move, openTaskId],
+  );
+
+  useEffect(() => {
+    if (undo === null) return;
+    const timer = setTimeout(() => setUndo(null), UNDO_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [undo]);
 
   const markSeen = useCallback(
     async (card: BoardCard) => {
@@ -136,12 +156,51 @@ export function App() {
             {board.columns.map((column) => (
               <Column key={column.id} id={column.id} title={column.title} cards={column.cards}>
                 {column.cards.map((card) => (
-                  <Card key={card.id} card={card} inTray={column.id === "needs_review"} onMove={move} onOpen={open} onSeen={markSeen} />
+                  <Card
+                    key={card.id}
+                    card={card}
+                    inTray={column.id === "needs_review"}
+                    onMove={move}
+                    onOpen={open}
+                    onSeen={markSeen}
+                    onShow={() => setOpenTaskId(card.id)}
+                    onDelete={() => void remove(card)}
+                  />
                 ))}
               </Column>
             ))}
           </main>
         </DndContext>
+      )}
+      {openTaskId !== null && (
+        <TaskDrawer
+          taskId={openTaskId}
+          revision={loadedAt}
+          onClose={() => setOpenTaskId(null)}
+          onMove={async (taskId, status) => {
+            const card = board?.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === taskId);
+            if (card) await move(card, status);
+          }}
+          onDelete={async (taskId) => {
+            const card = board?.columns.flatMap((column) => column.cards).find((candidate) => candidate.id === taskId);
+            if (card) await remove(card);
+          }}
+        />
+      )}
+      {undo && (
+        <div className="toast" role="status">
+          「{undo.title}」を削除しました
+          <button
+            type="button"
+            className="quiet-button"
+            onClick={() => {
+              void api.moveTask(undo.taskId, undo.previous).then(load);
+              setUndo(null);
+            }}
+          >
+            元に戻す
+          </button>
+        </div>
       )}
     </div>
   );
@@ -199,6 +258,8 @@ function Card(props: {
   onMove: (card: BoardCard, status: MovableStatus) => Promise<void>;
   onOpen: (card: BoardCard) => Promise<void>;
   onSeen: (card: BoardCard) => Promise<void>;
+  onShow: () => void;
+  onDelete: () => void;
 }) {
   const { card, inTray } = props;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.id, data: { card } });
@@ -213,22 +274,39 @@ function Card(props: {
       {...attributes}
       {...listeners}
       aria-roledescription="動かせるカード"
+      onClick={props.onShow}
     >
       {card.unreadChanges > 0 && (
         <button
           type="button"
           className="update-tab"
-          onClick={() => void props.onSeen(card)}
+          onClick={(event) => {
+            event.stopPropagation();
+            void props.onSeen(card);
+          }}
           onPointerDown={(event) => event.stopPropagation()}
           aria-label={`${card.unreadChanges} 件の更新を既読にする`}
         >
           更新 {card.unreadChanges}
         </button>
       )}
-      <h3 className="card-title">{main}</h3>
+      <h3 className="card-title">
+        {/* キーボードでは Enter とスペースがドラッグの開始に使われるので、詳細はタイトルのボタンから開く */}
+        <button
+          type="button"
+          className="card-title-button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            props.onShow();
+          }}
+        >
+          {main}
+        </button>
+      </h3>
       {repository && <p className="card-repository">{repository}</p>}
       {inTray && card.judgment && <Judgment judgment={card.judgment} />}
-      <div className="card-actions" onPointerDown={(event) => event.stopPropagation()}>
+      <div className="card-actions" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
         {inTray && (
           <>
             <button type="button" className="primary-button" onClick={() => void props.onMove(card, "todo")}>
@@ -238,6 +316,11 @@ function Card(props: {
               対象外にする
             </button>
           </>
+        )}
+        {!inTray && (
+          <button type="button" className="delete-link" onClick={props.onDelete}>
+            削除
+          </button>
         )}
         {card.url && (
           <button type="button" className={inTray ? "quiet-button" : "open-link"} onClick={() => void props.onOpen(card)}>
