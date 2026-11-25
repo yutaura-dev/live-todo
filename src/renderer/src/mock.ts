@@ -4,13 +4,13 @@ const now = Date.now();
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
 
 let cards: BoardCard[] = [
-  { id: 1, title: "aya-payment の redis gem を v6 へ更新する（quipper/monorepo）", status: "needs_review", unreadChanges: 1, updatedAt: ago(4), url: "https://github.com/quipper/monorepo/pull/1", source: "github:personal", judgment: { method: "decisions", probability: 0.24 } },
-  { id: 2, title: "【調査依頼】演習問題の回答ができない事象（quipper/tara-issues）", status: "needs_review", unreadChanges: 0, updatedAt: ago(30), url: "https://github.com/quipper/tara-issues/issues/2", source: "github:personal", judgment: { method: "structured", reason: "チームへのメンションで、調査の担当が自分かどうかは本文からは確定できない。" } },
-  { id: 3, title: "🚀 Weekly Release at 2026-11-24 15:43:59（quipper/monorepo）", status: "needs_review", unreadChanges: 0, updatedAt: ago(90), url: "https://github.com/quipper/monorepo/pull/3", source: "github:personal", judgment: { method: "decisions", probability: 0.05 } },
+  { id: 1, title: "payment の redis gem を v6 へ更新する（acme/platform）", status: "needs_review", unreadChanges: 1, updatedAt: ago(4), url: "https://github.com/acme/platform/pull/1", source: "github:personal", judgment: { method: "decisions", probability: 0.24 } },
+  { id: 2, title: "【調査依頼】演習問題の回答ができない事象（acme/support）", status: "needs_review", unreadChanges: 0, updatedAt: ago(30), url: "https://github.com/acme/support/issues/2", source: "github:personal", judgment: { method: "structured", reason: "チームへのメンションで、調査の担当が自分かどうかは本文からは確定できない。" } },
+  { id: 3, title: "🚀 Weekly Release at 2026-11-24 15:43:59（acme/platform）", status: "needs_review", unreadChanges: 0, updatedAt: ago(90), url: "https://github.com/acme/platform/pull/3", source: "github:personal", judgment: { method: "decisions", probability: 0.05 } },
   { id: 4, title: "PR #42 の conflict を解消する（acme/app）", status: "todo", unreadChanges: 2, updatedAt: ago(12), url: "https://github.com/acme/app/pull/42", source: "github:personal:watch" },
   { id: 5, title: "Add retry to sync（acme/app）", status: "todo", unreadChanges: 0, updatedAt: ago(200), url: "https://github.com/acme/app/pull/40", source: "github:personal" },
-  { id: 6, title: "PR #178091 の CI の失敗を直す（quipper/monorepo）", status: "in_progress", unreadChanges: 0, updatedAt: ago(45), url: "https://github.com/quipper/monorepo/pull/178091", source: "github:personal:watch" },
-  { id: 7, title: "back-office: 実行済みの oneshot ジョブを削除する（quipper/monorepo）", status: "done", unreadChanges: 0, updatedAt: ago(600), url: "https://github.com/quipper/monorepo/pull/7", source: "github:personal" },
+  { id: 6, title: "PR #178091 の CI の失敗を直す（acme/platform）", status: "in_progress", unreadChanges: 0, updatedAt: ago(45), url: "https://github.com/acme/platform/pull/178091", source: "github:personal:watch" },
+  { id: 7, title: "実行済みの一回限りのジョブを削除する（acme/platform）", status: "done", unreadChanges: 0, updatedAt: ago(600), url: "https://github.com/acme/platform/pull/7", source: "github:personal" },
 ];
 
 const COLUMNS = [
