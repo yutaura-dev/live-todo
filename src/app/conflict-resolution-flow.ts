@@ -195,7 +195,7 @@ export const pushConflictResolution = Effect.fnUntraced(function* <E, R>(taskId:
     payload: { runId, headRef: result.headRef, commitSha: result.commitSha, baseSha: headSha },
     approvedAt: yield* nowIso,
   };
-  const pushed = yield* workspace.push(result.cwd, result.headRef, headSha, token).pipe(Effect.result);
+  const pushed = yield* workspace.push(result.cwd, result.repository, result.headRef, headSha, token).pipe(Effect.result);
   const executedAt = yield* nowIso;
   if (pushed._tag === "Failure") {
     yield* db.insert(approvals).values({ ...record, status: "failed", error: pushed.failure.message, executedAt }).pipe(Effect.orDie);

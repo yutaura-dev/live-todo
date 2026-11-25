@@ -4,25 +4,31 @@ import {
   CONFLICT_RESOLUTION_TOOLS,
   conflictResolutionPrompt,
   conflictWorkspaceCommands,
-  gitControlSnapshot,
   gitPushEnv,
   HARDENED_GIT_ARGS,
-  sameGitControl,
   hasConflictMarkers,
   isSafeRef,
+  trustedGitArgs,
   unexpectedChanges,
 } from "./conflict-resolution.js";
 
 describe("conflictWorkspaceCommands", () => {
-  it("履歴ごと（中身は必要な分だけ）clone し、PR のブランチを取り出して、ベースを hooks なしで commit せずに merge する", () => {
-    const commands = conflictWorkspaceCommands({ repository: "acme/app", dir: "/w/task-1/conflict", headRef: "feature/x", baseRef: "main" });
+  const options = { repository: "acme/app", dir: "/w/task-1/conflict", gitDir: "/w/task-1/conflict.git", headRef: "feature/x", baseRef: "main" };
 
-    assert.deepStrictEqual(commands.clone, ["gh", ["repo", "clone", "acme/app", "/w/task-1/conflict", "--", "--filter=blob:none", "--no-checkout"]]);
-    assert.deepStrictEqual(commands.checkout, ["git", ["-C", "/w/task-1/conflict", "checkout", "-B", "feature/x", "origin/feature/x"]]);
-    assert.deepStrictEqual(commands.merge, [
-      "git",
-      ["-C", "/w/task-1/conflict", "-c", "core.hooksPath=/dev/null", "merge", "--no-ff", "--no-commit", "origin/main"],
+  it("git のデータは AI が触れる作業ディレクトリの外に分けて clone する（履歴ごと、中身は必要な分だけ）", () => {
+    assert.deepStrictEqual(conflictWorkspaceCommands(options).clone, [
+      "gh",
+      ["repo", "clone", "acme/app", "/w/task-1/conflict", "--", "--filter=blob:none", "--no-checkout", "--separate-git-dir=/w/task-1/conflict.git"],
     ]);
+  });
+
+  it("git はいつも外に分けたデータを直接指して動かし、作業ディレクトリの .git（AI が書き換えられる）は見ない", () => {
+    const commands = conflictWorkspaceCommands(options);
+
+    assert.deepStrictEqual(commands.checkout[1].slice(0, 2), ["--git-dir=/w/task-1/conflict.git", "--work-tree=/w/task-1/conflict"]);
+    assert.deepStrictEqual(trustedGitArgs(options.gitDir, options.dir, ["status"]).slice(0, 2), ["--git-dir=/w/task-1/conflict.git", "--work-tree=/w/task-1/conflict"]);
+    assert.deepStrictEqual(commands.merge[1].slice(-4), ["merge", "--no-ff", "--no-commit", "origin/main"]);
+    assert.include(commands.merge[1].join(" "), "core.hooksPath=/dev/null");
   });
 });
 
@@ -55,20 +61,21 @@ describe("hasConflictMarkers", () => {
   });
 });
 
-describe("gitControlSnapshot", () => {
-  it("AI が .git の設定・info・hooks を変えていたら、記録と食い違う（そのあとの git でコマンドを動かされないため）", () => {
-    const before = gitControlSnapshot({ "config": "[core]\n", "info/exclude": "" });
-
-    assert.isTrue(sameGitControl(before, gitControlSnapshot({ "info/exclude": "", "config": "[core]\n" })));
-    assert.isFalse(sameGitControl(before, gitControlSnapshot({ "config": "[core]\n\tfsmonitor = sh -c evil\n", "info/exclude": "" })));
-    assert.isFalse(sameGitControl(before, gitControlSnapshot({ "config": "[core]\n", "info/exclude": "", "hooks/pre-push": "#!/bin/sh" })));
-  });
-});
-
 describe("HARDENED_GIT_ARGS", () => {
   it("AI のあとで動かす git は、コマンドを動かし得る設定（hooks・fsmonitor・外部 diff・pager・認証の helper）を打ち消す", () => {
     const args = HARDENED_GIT_ARGS.join(" ");
-    for (const setting of ["core.hooksPath=/dev/null", "core.fsmonitor=false", "diff.external=", "core.pager=cat", "credential.helper="]) {
+    for (const setting of [
+      "core.hooksPath=/dev/null",
+      "core.fsmonitor=false",
+      "diff.external=",
+      "core.pager=cat",
+      "credential.helper=",
+      "core.sshCommand=",
+      "commit.gpgSign=false",
+      "protocol.allow=never",
+      "protocol.https.allow=always",
+      "http.proxy=",
+    ]) {
       assert.include(args, setting);
     }
   });

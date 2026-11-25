@@ -7,14 +7,27 @@ export const CONFLICT_RESOLUTION_TOOLS = ["Read", "Edit", "Grep", "Glob"] as con
 const SAFE_REF = /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/;
 export const isSafeRef = (ref: string) => SAFE_REF.test(ref) && !ref.includes("..");
 
-/** コンフリクトを直す作業場所を用意するコマンド。毎回作り直す（前の merge の途中の状態を持ち越さない） */
-export function conflictWorkspaceCommands(options: { repository: string; dir: string; headRef: string; baseRef: string }) {
+/** git のデータ（gitDir）を直接指して git を動かす引数。作業ディレクトリの .git は AI が書き換えられるので、探させない */
+export const trustedGitArgs = (gitDir: string, workTree: string, args: ReadonlyArray<string>) => [
+  `--git-dir=${gitDir}`,
+  `--work-tree=${workTree}`,
+  ...HARDENED_GIT_ARGS,
+  ...args,
+];
+
+/**
+ * コンフリクトを直す作業場所を用意するコマンド。毎回作り直す（前の merge の途中の状態を持ち越さない）。
+ * git のデータは作業ディレクトリの外（gitDir）に分け、AI に触らせない
+ */
+export function conflictWorkspaceCommands(options: { repository: string; dir: string; gitDir: string; headRef: string; baseRef: string }) {
   return {
     // merge には共通の祖先までの履歴が要るので浅い clone にはしない。中身は取り出すときに必要な分だけ取る
-    clone: ["gh", ["repo", "clone", options.repository, options.dir, "--", "--filter=blob:none", "--no-checkout"]] as const,
-    checkout: ["git", ["-C", options.dir, "checkout", "-B", options.headRef, `origin/${options.headRef}`]] as const,
-    // clone したリポジトリの hooks を動かさない（中身は信頼できない）
-    merge: ["git", ["-C", options.dir, "-c", "core.hooksPath=/dev/null", "merge", "--no-ff", "--no-commit", `origin/${options.baseRef}`]] as const,
+    clone: [
+      "gh",
+      ["repo", "clone", options.repository, options.dir, "--", "--filter=blob:none", "--no-checkout", `--separate-git-dir=${options.gitDir}`],
+    ] as const,
+    checkout: ["git", trustedGitArgs(options.gitDir, options.dir, ["checkout", "-B", options.headRef, `origin/${options.headRef}`])] as const,
+    merge: ["git", trustedGitArgs(options.gitDir, options.dir, ["merge", "--no-ff", "--no-commit", `origin/${options.baseRef}`])] as const,
   };
 }
 
@@ -39,10 +52,7 @@ export function unexpectedChanges(porcelain: string, conflicted: ReadonlyArray<s
 
 export const hasConflictMarkers = (content: string) => /^(<{7}|>{7})( |$)/m.test(content);
 
-/**
- * AI のあとで動かす git に付ける。AI は作業ディレクトリの中の .git も書き換えられるので、
- * コマンドを動かし得る設定を打ち消す（.git の中身の照合と二重に守る）
- */
+/** git に付ける。リポジトリやユーザーの設定から、コマンドを動かし得る設定・通信先を打ち消す */
 export const HARDENED_GIT_ARGS = [
   "-c",
   "core.hooksPath=/dev/null",
@@ -54,13 +64,17 @@ export const HARDENED_GIT_ARGS = [
   "core.pager=cat",
   "-c",
   "credential.helper=",
+  "-c",
+  "core.sshCommand=",
+  "-c",
+  "commit.gpgSign=false",
+  "-c",
+  "protocol.allow=never",
+  "-c",
+  "protocol.https.allow=always",
+  "-c",
+  "http.proxy=",
 ] as const;
-
-/** .git の設定・info・hooks の中身（パス → 内容）を、比べられる形にする */
-export const gitControlSnapshot = (files: Record<string, string>): string =>
-  JSON.stringify(Object.entries(files).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
-
-export const sameGitControl = (before: string, after: string) => before === after;
 
 /** push に使うトークンを、引数ではなく環境変数の git 設定で渡す（プロセスの一覧に出さない） */
 export function gitPushEnv(token: string): Record<string, string> {

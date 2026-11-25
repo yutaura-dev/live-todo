@@ -62,7 +62,7 @@ const doubles = (options: { claudeFails?: boolean; commitFails?: string; pushFai
             options.commitFails === undefined
               ? Effect.succeed({ commitSha: "b".repeat(40), diff: "diff --git a/a.json b/a.json" })
               : Effect.fail(new ConflictWorkspaceError({ message: options.commitFails })),
-          push: (cwd, headRef, expectedHeadSha, token) =>
+          push: (cwd, _repository, headRef, expectedHeadSha, token) =>
             Effect.suspend(() => {
               pushes.push({ cwd, headRef, expectedHeadSha, token });
               return options.pushFails === undefined ? Effect.void : Effect.fail(new ConflictWorkspaceError({ message: options.pushFails }));
