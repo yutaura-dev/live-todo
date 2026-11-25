@@ -39,6 +39,29 @@ export function unexpectedChanges(porcelain: string, conflicted: ReadonlyArray<s
 
 export const hasConflictMarkers = (content: string) => /^(<{7}|>{7})( |$)/m.test(content);
 
+/**
+ * AI のあとで動かす git に付ける。AI は作業ディレクトリの中の .git も書き換えられるので、
+ * コマンドを動かし得る設定を打ち消す（.git の中身の照合と二重に守る）
+ */
+export const HARDENED_GIT_ARGS = [
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "diff.external=",
+  "-c",
+  "core.pager=cat",
+  "-c",
+  "credential.helper=",
+] as const;
+
+/** .git の設定・info・hooks の中身（パス → 内容）を、比べられる形にする */
+export const gitControlSnapshot = (files: Record<string, string>): string =>
+  JSON.stringify(Object.entries(files).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
+export const sameGitControl = (before: string, after: string) => before === after;
+
 /** push に使うトークンを、引数ではなく環境変数の git 設定で渡す（プロセスの一覧に出さない） */
 export function gitPushEnv(token: string): Record<string, string> {
   return {
@@ -46,6 +69,7 @@ export function gitPushEnv(token: string): Record<string, string> {
     GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
     GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${btoa(`x-access-token:${token}`)}`,
     GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
   };
 }
 

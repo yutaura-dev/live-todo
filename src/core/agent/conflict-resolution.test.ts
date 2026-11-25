@@ -4,7 +4,10 @@ import {
   CONFLICT_RESOLUTION_TOOLS,
   conflictResolutionPrompt,
   conflictWorkspaceCommands,
+  gitControlSnapshot,
   gitPushEnv,
+  HARDENED_GIT_ARGS,
+  sameGitControl,
   hasConflictMarkers,
   isSafeRef,
   unexpectedChanges,
@@ -49,6 +52,25 @@ describe("hasConflictMarkers", () => {
   it("<<<<<<< か >>>>>>> の行が残っていれば true（======= だけは Markdown の見出しにも使うので見ない）", () => {
     assert.isTrue(hasConflictMarkers("a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> origin/main\n"));
     assert.isFalse(hasConflictMarkers("Title\n=======\nbody\n"));
+  });
+});
+
+describe("gitControlSnapshot", () => {
+  it("AI が .git の設定・info・hooks を変えていたら、記録と食い違う（そのあとの git でコマンドを動かされないため）", () => {
+    const before = gitControlSnapshot({ "config": "[core]\n", "info/exclude": "" });
+
+    assert.isTrue(sameGitControl(before, gitControlSnapshot({ "info/exclude": "", "config": "[core]\n" })));
+    assert.isFalse(sameGitControl(before, gitControlSnapshot({ "config": "[core]\n\tfsmonitor = sh -c evil\n", "info/exclude": "" })));
+    assert.isFalse(sameGitControl(before, gitControlSnapshot({ "config": "[core]\n", "info/exclude": "", "hooks/pre-push": "#!/bin/sh" })));
+  });
+});
+
+describe("HARDENED_GIT_ARGS", () => {
+  it("AI のあとで動かす git は、コマンドを動かし得る設定（hooks・fsmonitor・外部 diff・pager・認証の helper）を打ち消す", () => {
+    const args = HARDENED_GIT_ARGS.join(" ");
+    for (const setting of ["core.hooksPath=/dev/null", "core.fsmonitor=false", "diff.external=", "core.pager=cat", "credential.helper="]) {
+      assert.include(args, setting);
+    }
   });
 });
 
