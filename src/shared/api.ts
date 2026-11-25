@@ -20,6 +20,7 @@ export type ConfigDocument = {
     llmProfile?: string;
     initialLookbackDays?: number;
     repositories?: { include?: string[]; exclude?: string[] };
+    reviewDependencyPrs?: boolean;
   }>;
 };
 

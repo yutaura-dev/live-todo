@@ -47,6 +47,17 @@ describe("SourceItemRepository", () => {
       assert.strictEqual(second.updatedAt, "2026-11-25T01:00:00.000Z");
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("作成者を保存し、渡さなければ空のままにする", () =>
+    Effect.gen(function* () {
+      const items = yield* SourceItemRepository;
+
+      const withAuthor = yield* items.upsertItem(draft({ externalId: "with-author", author: "renovate[bot]" }));
+      const withoutAuthor = yield* items.upsertItem(draft({ externalId: "without-author" }));
+
+      assert.strictEqual(withAuthor.author, "renovate[bot]");
+      assert.isNull(withoutAuthor.author);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("記録した Activity を Item ごとに古い順で取得できる", () =>
     Effect.gen(function* () {
       const repo = yield* SourceItemRepository;

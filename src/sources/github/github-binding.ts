@@ -39,6 +39,7 @@ export function githubItemDraft(item: GitHubItem): ItemDraft {
     // あとで Task の brief を書き直す材料にするため。更新マークは Task の項目が変わったときだけ付くので、
     // ここに含めても目印が増えることはない（ADR-0007）。
     fingerprint: JSON.stringify([item.title, item.state, item.updatedAt]),
+    ...(item.author === undefined ? {} : { author: item.author }),
   };
 }
 

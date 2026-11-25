@@ -1,7 +1,7 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { Database } from "../db/database.js";
-import { sourceItems, taskLinks } from "../db/schema.js";
+import { agentRuns, sourceItems, taskLinks } from "../db/schema.js";
 import { TaskRepository, type TaskWithUnread } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 
@@ -11,6 +11,7 @@ export class TaskNotFoundError extends Schema.TaggedError<TaskNotFoundError>()("
 
 export const BOARD_COLUMNS = [
   { id: "needs_review", title: "要確認" },
+  { id: "agent_running", title: "AI が調査中" },
   { id: "todo", title: "Todo" },
   { id: "in_progress", title: "進行中" },
   { id: "done", title: "完了" },
@@ -26,6 +27,8 @@ export type BoardCard = {
   status: TaskStatus;
   unreadChanges: number;
   updatedAt: string;
+  /** 今の状況と次の一手（AI の調査の結論など） */
+  brief?: string;
   /** tracks で紐づいた元の項目（PR / issue など）。手動で追加した Task にはない */
   url?: string;
   source?: string;
@@ -51,6 +54,17 @@ export type TaskDetailChange = {
   unread: boolean;
 };
 
+export type TaskDetailAgentRun = {
+  kind: string;
+  status: string;
+  result: unknown;
+  error: string | null;
+  sessionId: string | null;
+  costUsd: number | undefined;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
 export type TaskDetail = {
   id: number;
   title: string;
@@ -61,6 +75,8 @@ export type TaskDetail = {
   items: TaskDetailItem[];
   /** 新しい順 */
   changes: TaskDetailChange[];
+  /** 最後に AI に任せた作業 */
+  agentRun?: TaskDetailAgentRun;
 };
 
 export type Board = { columns: ReadonlyArray<{ id: BoardColumnId; title: string; cards: BoardCard[] }> };
@@ -115,6 +131,7 @@ export class BoardService extends Context.Service<BoardService, {
             status: task.status,
             unreadChanges: task.unreadChanges,
             updatedAt: task.updatedAt,
+            ...(task.brief === null ? {} : { brief: task.brief }),
             ...(item === undefined ? {} : { url: item.url, source: item.source }),
             ...Option.match(judgment, {
               onNone: () => ({}),
@@ -183,6 +200,7 @@ export class BoardService extends Context.Service<BoardService, {
           .orderBy(asc(taskLinks.id))
           .pipe(Effect.orDie);
         const changes = yield* tasks.listChanges(taskId);
+        const [lastRun] = yield* db.select().from(agentRuns).where(eq(agentRuns.taskId, taskId)).orderBy(desc(agentRuns.id)).limit(1).pipe(Effect.orDie);
 
         return {
           id: task.id,
@@ -201,6 +219,20 @@ export class BoardService extends Context.Service<BoardService, {
             occurredAt: change.occurredAt,
             unread: change.seenAt === null,
           })),
+          ...(lastRun === undefined
+            ? {}
+            : {
+                agentRun: {
+                  kind: lastRun.kind,
+                  status: lastRun.status,
+                  result: lastRun.result,
+                  error: lastRun.error,
+                  sessionId: lastRun.sessionId,
+                  costUsd: lastRun.costUsd === null ? undefined : Number(lastRun.costUsd),
+                  startedAt: lastRun.startedAt,
+                  finishedAt: lastRun.finishedAt,
+                },
+              }),
         } satisfies TaskDetail;
       });
 

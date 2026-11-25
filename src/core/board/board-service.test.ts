@@ -1,13 +1,15 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
+import { Database } from "../db/database.js";
+import { agentRuns } from "../db/schema.js";
 import { TestDatabase } from "../db/test-database.js";
 import { SourceItemRepository } from "../source/source-item-repository.js";
 import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 import { BoardService, TaskNotFoundError } from "./board-service.js";
 
-const run = <A, E>(effect: Effect.Effect<A, E, BoardService | TaskRepository | SourceItemRepository>) =>
+const run = <A, E>(effect: Effect.Effect<A, E, BoardService | TaskRepository | SourceItemRepository | Database>) =>
   effect.pipe(Effect.provide(BoardService.layer), Effect.provide(TestDatabase));
 
 const taskWithItem = (title: string, status: TaskStatus, judgment?: unknown) =>
@@ -36,6 +38,7 @@ describe("BoardService.board", () => {
     run(
       Effect.gen(function* () {
         yield* taskWithItem("a", "needs_review");
+        yield* taskWithItem("g", "agent_running");
         yield* taskWithItem("b", "todo");
         yield* taskWithItem("c", "in_progress");
         yield* taskWithItem("d", "done");
@@ -44,7 +47,7 @@ describe("BoardService.board", () => {
 
         const board = yield* (yield* BoardService).board;
 
-        assert.deepStrictEqual(columnTitles(board), { needs_review: ["a"], todo: ["b"], in_progress: ["c"], done: ["d"] });
+        assert.deepStrictEqual(columnTitles(board), { needs_review: ["a"], agent_running: ["g"], todo: ["b"], in_progress: ["c"], done: ["d"] });
       }),
     ));
 
@@ -130,7 +133,7 @@ describe("BoardService.markSeen", () => {
         yield* (yield* BoardService).markSeen(task.id);
 
         const board = yield* (yield* BoardService).board;
-        assert.strictEqual(board.columns[1]?.cards[0]?.unreadChanges, 0);
+        assert.strictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.unreadChanges, 0);
       }),
     ));
 });
@@ -191,6 +194,44 @@ describe("BoardService.taskDetail", () => {
         const error = yield* Effect.flip((yield* BoardService).taskDetail(999));
 
         assert.instanceOf(error, TaskNotFoundError);
+      }),
+    ));
+});
+
+describe("AI の調査", () => {
+  it.effect("カードに brief（今の状況）を出す", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        yield* (yield* TaskRepository).updateTask(task.id, { brief: "依存更新の調査: merge 可能" });
+
+        const board = yield* (yield* BoardService).board;
+
+        assert.strictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.brief, "依存更新の調査: merge 可能");
+      }),
+    ));
+
+  it.effect("詳細には、最後の調査の状態・結果・session id を出す", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        const db = yield* Database;
+        const base = { taskId: task.id, kind: "dependency_review", subjectFingerprint: "v1", previousStatus: "todo", startedAt: "2026-11-25T00:00:00.000Z" };
+        yield* db.insert(agentRuns).values({ ...base, status: "failed", error: "落ちた" });
+        yield* db.insert(agentRuns).values({ ...base, status: "succeeded", result: { conclusion: "mergeable" }, sessionId: "s-2", costUsd: "0.4", finishedAt: "2026-11-25T00:05:00.000Z" });
+
+        const detail = yield* (yield* BoardService).taskDetail(task.id);
+
+        assert.deepInclude(detail.agentRun, { kind: "dependency_review", status: "succeeded", result: { conclusion: "mergeable" }, sessionId: "s-2", costUsd: 0.4 });
+      }),
+    ));
+
+  it.effect("調べたことがなければ、調査の結果は出さない", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+
+        assert.isUndefined((yield* (yield* BoardService).taskDetail(task.id)).agentRun);
       }),
     ));
 });

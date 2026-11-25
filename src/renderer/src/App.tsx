@@ -106,7 +106,8 @@ export function App() {
   const onDragEnd = (event: DragEndEvent) => {
     const card = event.active.data.current?.["card"] as BoardCard | undefined;
     const target = event.over?.id as BoardColumnId | undefined;
-    if (card !== undefined && target !== undefined) void move(card, target);
+    // AI が調査中のレーンは、自動トリアージだけが出し入れする
+    if (card !== undefined && target !== undefined && target !== "agent_running") void move(card, target);
   };
 
   return (
@@ -223,13 +224,14 @@ function moveLocally(board: Board, taskId: number, status: MovableStatus): Board
 
 const EMPTY_MESSAGES: Record<BoardColumnId, string> = {
   needs_review: "仕分ける通知はありません。新しい通知は、同期のたびにここに入ります。",
+  agent_running: "AI が調べている Task はありません。依存更新の bot の PR は、自動でここに入って調べられます。",
   todo: "やることはありません。",
   in_progress: "手を付けている Task はありません。カードをここに移すと進行中になります。",
   done: "完了した Task はまだありません。",
 };
 
 function Column(props: { id: BoardColumnId; title: string; cards: readonly BoardCard[]; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: props.id });
+  const { setNodeRef, isOver } = useDroppable({ id: props.id, disabled: props.id === "agent_running" });
   return (
     <section
       ref={setNodeRef}
@@ -300,6 +302,8 @@ function Card(props: {
         </button>
       </h3>
       {repository && <p className="card-repository">{repository}</p>}
+      {card.status === "agent_running" && <p className="card-brief card-brief--working">Claude Code が調べています</p>}
+      {card.status !== "agent_running" && card.brief && <p className="card-brief">{card.brief}</p>}
       {inTray && card.judgment && <Judgment judgment={card.judgment} />}
       <div className="card-actions" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
         {inTray && (

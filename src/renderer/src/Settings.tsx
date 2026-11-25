@@ -201,6 +201,20 @@ function AccountEditor(props: {
         <p className="token-summary">環境変数のトークンは確かめていません。ここに貼り付けて保存すると、権限と有効期限を確かめます。</p>
       )}
 
+      <label className="checkbox judge-probabilities">
+        <input
+          type="checkbox"
+          checked={account.reviewDependencyPrs ?? false}
+          onChange={(event) => props.onChange({ ...account, reviewDependencyPrs: event.target.checked })}
+        />
+        <span>
+          <span className="judge-option-label">依存更新の PR を Claude Code で自動で調べる</span>
+          <span className="field-hint">
+            renovate / dependabot の PR を見つけたら、merge してよいかと影響範囲を調べます。PR とリポジトリのコードを Claude に送るので、送ってよいアカウントだけで有効にしてください
+          </span>
+        </span>
+      </label>
+
       <div className="filter-grid">
         <label className="field" htmlFor={`${id}-include`}>
           <span className="field-label">含めるリポジトリ</span>

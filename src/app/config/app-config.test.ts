@@ -30,6 +30,14 @@ describe("decodeAppConfig", () => {
       assert.strictEqual(config.accounts[0]?.initialLookbackDays, 14);
       assert.deepStrictEqual(config.accounts[0]?.repositories, { include: ["acme/*"], exclude: ["acme/legacy"] });
       assert.deepStrictEqual(config.llmProfiles["personal"]?.decisions, { provider: "openai" });
+      assert.isFalse(config.accounts[0]?.reviewDependencyPrs);
+    }));
+
+  it.effect("依存更新の PR を Claude Code で調べるかをアカウントごとに書ける", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig({ ...validConfig, accounts: [{ kind: "github", id: "personal", reviewDependencyPrs: true }] });
+
+      assert.isTrue(config.accounts[0]?.reviewDependencyPrs);
     }));
 
   it.effect("対応していない LLM のプロバイダはエラーにする", () =>

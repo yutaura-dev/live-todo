@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { describeChange, judgmentText, statusLabel } from "./task-text.js";
+import { conclusionLabel, describeChange, judgmentText, statusLabel } from "./task-text.js";
 
 const change = (overrides: Partial<Parameters<typeof describeChange>[0]>) => ({
   kind: "field_changed",
@@ -30,7 +30,7 @@ describe("describeChange", () => {
   });
 
   it("知らない項目の変更も、項目名をそのまま出して書く", () => {
-    assert.strictEqual(describeChange(change({ field: "brief", before: null, after: "次は返信" })), "同期で briefを「（なし）」から「次は返信」に変えた");
+    assert.strictEqual(describeChange(change({ field: "labels", before: null, after: "urgent" })), "同期で labelsを「（なし）」から「urgent」に変えた");
   });
 });
 
@@ -49,6 +49,27 @@ describe("judgmentText", () => {
 
   it("知らない方法は、名前をそのまま出す", () => {
     assert.strictEqual(judgmentText({ method: "jev" }), "jev");
+  });
+});
+
+describe("AI による変更", () => {
+  it("AI が変えたことと、AI が調査中の状態を名前で書く", () => {
+    assert.strictEqual(
+      describeChange(change({ field: "status", before: "todo", after: "agent_running", actor: "agent" })),
+      "AI が ステータスを「Todo」から「AI が調査中」に変えた",
+    );
+  });
+
+  it("brief は「今の状況」として書く", () => {
+    assert.strictEqual(describeChange(change({ field: "brief", before: null, after: "依存更新の調査: merge 可能", actor: "agent" })), "AI が 今の状況を「（なし）」から「依存更新の調査: merge 可能」に変えた");
+  });
+});
+
+describe("conclusionLabel", () => {
+  it("依存更新の調査の結論を、画面の言葉で返す", () => {
+    assert.strictEqual(conclusionLabel("mergeable"), "merge 可能");
+    assert.strictEqual(conclusionLabel("mergeable_after_fix"), "修正すれば merge 可能");
+    assert.strictEqual(conclusionLabel("not_mergeable"), "merge できない");
   });
 });
 

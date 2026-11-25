@@ -13,6 +13,8 @@ export const sourceItems = sqliteTable(
     url: text().notNull(),
     state: text({ enum: ITEM_STATES }).notNull(),
     fingerprint: text().notNull(),
+    /** 作成者（GitHub の login など）。依存更新の bot の PR を見分けるため */
+    author: text(),
     triage: text({ enum: ITEM_TRIAGES }).notNull(),
     /** 仕分けたときの判定（方法・確率・理由・LLM に渡した入力）。対象外にしたものも後から見直せるようにする */
     judgment: text({ mode: "json" }),
@@ -88,3 +90,41 @@ export const syncCursors = sqliteTable("sync_cursors", {
   cursor: text({ mode: "json" }).notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const AGENT_RUN_STATUSES = ["running", "succeeded", "failed"] as const;
+
+/** Task ごとの AI Agent との会話（Agent Thread）。Claude Code の session を続けて使うため、id と作業場所を残す */
+export const agentThreads = sqliteTable("agent_threads", {
+  taskId: integer("task_id")
+    .primaryKey()
+    .references(() => tasks.id),
+  provider: text().notNull(),
+  sessionId: text("session_id").notNull(),
+  /** session は作業ディレクトリに結び付くので、続けるときは同じ場所で動かす */
+  workspace: text().notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/** AI に任せた作業 1 回ごとの記録 */
+export const agentRuns = sqliteTable(
+  "agent_runs",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id),
+    kind: text().notNull(),
+    status: text({ enum: AGENT_RUN_STATUSES }).notNull(),
+    /** どの状態の元の項目を調べたか。項目が変わったら調べ直すために使う */
+    subjectFingerprint: text("subject_fingerprint").notNull(),
+    /** 調べる前の Task の状態。失敗したときにここへ戻す */
+    previousStatus: text("previous_status").notNull(),
+    result: text({ mode: "json" }),
+    error: text(),
+    sessionId: text("session_id"),
+    costUsd: text("cost_usd"),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+  },
+  (table) => [index("agent_runs_task_id").on(table.taskId)],
+);

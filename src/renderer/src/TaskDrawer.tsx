@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MovableStatus, TaskDetail } from "../../shared/api.js";
 import { api } from "./api.js";
-import { describeChange, judgmentText, splitTitle, statusLabel } from "./task-text.js";
+import { conclusionLabel, describeChange, judgmentText, splitTitle, statusLabel } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
 
@@ -92,6 +92,8 @@ export function TaskDrawer(props: {
 
             {detail.brief && <p className="drawer-brief">{detail.brief}</p>}
 
+            {detail.agentRun && <AgentRunSection run={detail.agentRun} />}
+
             <section className="drawer-section" aria-labelledby="drawer-items">
               <h3 id="drawer-items" className="drawer-section-title">
                 元の項目
@@ -136,6 +138,45 @@ export function TaskDrawer(props: {
           </div>
         )}
       </aside>
+    </div>
+  );
+}
+
+type ReviewResult = { conclusion?: string; impact?: string; requiredChanges?: string; blockers?: string; configChanges?: string };
+
+function AgentRunSection({ run }: { run: NonNullable<TaskDetail["agentRun"]> }) {
+  const review = (run.result ?? {}) as ReviewResult;
+  return (
+    <section className="drawer-section" aria-labelledby="drawer-agent">
+      <h3 id="drawer-agent" className="drawer-section-title">
+        AI の調査（依存更新の PR）
+      </h3>
+      {run.status === "running" && <p className="field-hint">Claude Code が調べています（{dateTimeOf(run.startedAt)} から）。</p>}
+      {run.status === "failed" && <p className="problem">調べられませんでした: {run.error}</p>}
+      {run.status === "succeeded" && (
+        <div className="review">
+          {review.conclusion && <p className={`review-conclusion review-conclusion--${review.conclusion}`}>{conclusionLabel(review.conclusion)}</p>}
+          <ReviewField label="影響範囲" text={review.impact} />
+          <ReviewField label="必要な修正" text={review.requiredChanges} />
+          <ReviewField label="merge できない理由" text={review.blockers} />
+          <ReviewField label="設定ファイルの直し方" text={review.configChanges} />
+        </div>
+      )}
+      <p className="field-hint">
+        {run.finishedAt && `${dateTimeOf(run.finishedAt)} に終了。`}
+        {run.costUsd !== undefined && `費用 $${run.costUsd.toFixed(2)}。`}
+        {run.sessionId && <>session: <code className="session-id">{run.sessionId}</code></>}
+      </p>
+    </section>
+  );
+}
+
+function ReviewField({ label, text }: { label: string; text: string | undefined }) {
+  if (text === undefined || text.trim() === "") return null;
+  return (
+    <div className="review-field">
+      <span className="field-label">{label}</span>
+      <p className="review-text">{text}</p>
     </div>
   );
 }

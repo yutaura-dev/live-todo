@@ -29,6 +29,11 @@ const githubItem = (overrides: Partial<GitHubItem> = {}): GitHubItem => ({
 });
 
 describe("githubItemDraft", () => {
+  it("作成者を残す（依存更新の bot の PR を見分けるため）", () => {
+    assert.strictEqual(githubItemDraft(githubItem({ author: "renovate[bot]" })).author, "renovate[bot]");
+    assert.isUndefined(githubItemDraft(githubItem()).author);
+  });
+
   it.each([
     ["open", "open"],
     ["unknown", "open"],

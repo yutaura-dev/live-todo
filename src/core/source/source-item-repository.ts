@@ -14,6 +14,7 @@ export type SourceItemDraft = {
   url: string;
   state: ItemState;
   fingerprint: string;
+  author?: string;
 };
 
 export class SourceItemRepository extends Context.Service<SourceItemRepository, {
@@ -46,7 +47,14 @@ export class SourceItemRepository extends Context.Service<SourceItemRepository, 
 
       const upsertItem = Effect.fn("SourceItemRepository.upsertItem")(function* (draft: SourceItemDraft) {
         const now = yield* nowIso;
-        const content = { title: draft.title, url: draft.url, state: draft.state, fingerprint: draft.fingerprint, updatedAt: now };
+        const content = {
+          title: draft.title,
+          url: draft.url,
+          state: draft.state,
+          fingerprint: draft.fingerprint,
+          author: draft.author ?? null,
+          updatedAt: now,
+        };
         const rows = yield* db
           .insert(sourceItems)
           .values({ source: draft.source, externalId: draft.externalId, ...content, triage: "pending", firstSeenAt: now })

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { NodeFileSystem } from "@effect/platform-node";
+import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Redacted } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
@@ -10,12 +10,16 @@ import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
+import { AgentWorkspace } from "../core/agent/agent-workspace.js";
+import { backfillAuthorsFromJudgments } from "../core/agent/backfill-authors.js";
+import { ClaudeCode } from "../core/agent/claude-code.js";
+import { recoverInterruptedAgentRuns, runNextDependencyReview } from "../core/agent/dependency-triage.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
 import { Database, databaseMigrationsFrom } from "../core/db/database.js";
 import { SourceItemRepository } from "../core/source/source-item-repository.js";
-import { runJobs } from "../core/sync/scheduler.js";
+import { runJobs, type SyncJob } from "../core/sync/scheduler.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import { GitHubClient, GitHubRequestError } from "../sources/github/github-adapter.js";
 import { GitHubClientLive } from "../sources/github/github-client-live.js";
@@ -46,6 +50,12 @@ if (headless) app.setPath("userData", join(app.getPath("temp"), "live-todo-check
 // 開発中もリポジトリの中に置かない理由: 暗号化していても、誤ってコミットする経路を作らないため
 const secretsPath = join(app.getPath("userData"), "secrets.json");
 const tokenInfoPath = join(app.getPath("userData"), "github-tokens.json");
+// AI に調べさせるためにリポジトリを clone する場所。Claude Code の session はこの場所に結び付く
+const agentWorkspaceRoot = join(app.getPath("userData"), "agent-workspaces");
+// 依存更新の PR の調査に使うモデルと、1 回あたりの予算の上限
+const DEPENDENCY_REVIEW_MODEL = "sonnet";
+const DEPENDENCY_REVIEW_BUDGET_USD = 2;
+const AGENT_JOB_INTERVAL = "1 minute" as const;
 const LLM_SECRET_KEYS = ["llm.anthropic.api_key", "llm.openai.api_key"] as const;
 
 // safeStorage は app の ready 後でないと使えないので、呼ばれた時点で確かめる
@@ -60,7 +70,8 @@ const AppLayer = Layer.mergeAll(BoardService.layer.pipe(Layer.provideMerge(TaskR
   Layer.provideMerge(Database.layer),
   Layer.provideMerge(SqliteClient.layer({ filename: dbPath })),
   Layer.provideMerge(encryptedFileSecretStore({ path: secretsPath, cipher: keychainCipher })),
-  Layer.provideMerge(Layer.mergeAll(FetchHttpClient.layer, NodeFileSystem.layer)),
+  Layer.provideMerge(Layer.mergeAll(ClaudeCode.layer, AgentWorkspace.layer(agentWorkspaceRoot))),
+  Layer.provideMerge(Layer.mergeAll(FetchHttpClient.layer, NodeServices.layer)),
 );
 const runtime = ManagedRuntime.make(AppLayer);
 // 使うたびに作る理由: 中身はファイルの読み書きだけで、書くのはトークンを保存・削除したときに限られるため
@@ -97,8 +108,27 @@ const startSync = Effect.gen(function* () {
   }
   const jobs = (yield* Effect.forEach(config.accounts, makeGitHubJobs)).flat();
   syncProblem = undefined;
-  yield* Effect.log(`同期を始める: ${jobs.map((job) => job.name).join(", ")}`);
-  return yield* runJobs(jobs);
+
+  yield* backfillAuthorsFromJudgments;
+  const recovered = yield* recoverInterruptedAgentRuns;
+  if (recovered > 0) yield* Effect.log(`途中で止まった AI の調査を ${recovered} 件戻した`);
+  const reviewSources = config.accounts
+    .filter((account) => account.reviewDependencyPrs)
+    .flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]);
+  const agentJobs: ReadonlyArray<SyncJob<never, AgentWorkspace | ClaudeCode | Database | TaskRepository>> =
+    reviewSources.length === 0
+      ? []
+      : [
+          {
+            name: "agent:dependency-review",
+            interval: AGENT_JOB_INTERVAL,
+            run: runNextDependencyReview({ sources: reviewSources, model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD }),
+            backoffUntil: () => Option.none<DateTime.Utc>(),
+          },
+        ];
+
+  yield* Effect.log(`同期を始める: ${[...jobs, ...agentJobs].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(agentJobs)], { concurrency: 2, discard: true });
 }).pipe(
   // 設定やトークンがなくても画面は開けるようにする（同期だけが止まり、設定画面に理由を出す）
   Effect.catchCause((cause) =>

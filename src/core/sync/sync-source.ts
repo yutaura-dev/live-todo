@@ -17,6 +17,7 @@ export type ItemDraft = {
   state: Exclude<ItemState, "removed">;
   /** Source Item の内容の変化を検知するための値。変わると Activity（changed）になる */
   fingerprint: string;
+  author?: string;
 };
 
 export type SourceBinding<TItem, TCursor, EA, EJ, RJ> = {

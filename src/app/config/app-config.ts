@@ -35,6 +35,9 @@ const GitHubAccount = Schema.Struct({
   llmProfile: Schema.optional(Schema.String),
   initialLookbackDays: Schema.Int.pipe(Schema.withDecodingDefaultKey(Effect.succeed(14))),
   repositories: Schema.optional(RepositoryFilter),
+  // 既定で調べない理由: claude -p は Claude（Anthropic）にコードと PR を送る。会社のアカウントのデータを
+  // 許可していない LLM に送らないよう（charter の前提と制約）、アカウントごとに明示して有効にする
+  reviewDependencyPrs: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type GitHubAccount = typeof GitHubAccount.Type;
 

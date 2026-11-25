@@ -7,10 +7,19 @@ const STATUS_LABELS: Record<string, string> = {
   done: "完了",
   dismissed: "削除済み",
   archived: "元の項目が消えた",
+  agent_running: "AI が調査中",
 };
 
-const FIELD_LABELS: Record<string, string> = { status: "ステータス", title: "タイトル" };
-const ACTOR_LABELS: Record<string, string> = { user: "あなたが", sync: "同期で" };
+const CONCLUSION_LABELS: Record<string, string> = {
+  mergeable: "merge 可能",
+  mergeable_after_fix: "修正すれば merge 可能",
+  not_mergeable: "merge できない",
+};
+
+export const conclusionLabel = (conclusion: string) => CONCLUSION_LABELS[conclusion] ?? conclusion;
+
+const FIELD_LABELS: Record<string, string> = { status: "ステータス", title: "タイトル", brief: "今の状況" };
+const ACTOR_LABELS: Record<string, string> = { user: "あなたが", sync: "同期で", agent: "AI が", filter: "フィルタで" };
 
 const METHOD_LABELS: Record<string, string> = { rule: "規則で決まった", decisions: "OpenAI Decisions", structured: "LLM" };
 
