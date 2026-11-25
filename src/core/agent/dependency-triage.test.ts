@@ -10,7 +10,7 @@ import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
 import { AgentWorkspace } from "./agent-workspace.js";
-import { recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "./dependency-triage.js";
+import { backfillNextActions, recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "./dependency-triage.js";
 
 const REVIEW = {
   conclusion: "mergeable_after_fix",
@@ -20,6 +20,7 @@ const REVIEW = {
   configChanges: "",
   canMergeAsIs: false,
   mergeAsIsNote: "",
+  fixEffort: "normal",
 };
 
 const dependencyTask = (options: { status?: TaskStatus; author?: string; source?: string; state?: "open" | "resolved"; fingerprint?: string; url?: string } = {}) =>
@@ -115,6 +116,10 @@ describe("runDependencyReviews", () => {
       const task = Option.getOrThrow(yield* tasks.findTask(taskId));
       assert.strictEqual(task.status, "todo");
       assert.include(task.brief ?? "", "修正すれば merge 可能");
+      assert.deepStrictEqual(
+        (task.nextActions as { steps: { title: string }[] }).steps.map((step) => step.title),
+        ["修正を行い、PR に push する", "PR を merge する"],
+      );
       const changes = yield* tasks.listChanges(taskId);
       assert.isTrue(changes.some((change) => change.field === "brief" && change.seenAt === null && change.actor === "agent"));
       assert.isFalse(changes.some((change) => change.actor === "user"), "AI の操作をユーザーの判断として記録しない");
@@ -324,6 +329,28 @@ describe("requestDependencyReview", () => {
       const error = yield* Effect.flip(requestDependencyReview(taskId));
 
       assert.strictEqual(error._tag, "ReviewNotAvailableError");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("backfillNextActions", () => {
+  it.effect("調べ終わっていて次にやることがない Task に、最後の調査の結論から次にやることを作る", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      yield* (yield* Database).insert(agentRuns).values({
+        taskId,
+        kind: "dependency_review",
+        status: "succeeded",
+        subjectFingerprint: "v1",
+        subjectSha: "sha",
+        previousStatus: "todo",
+        result: { ...REVIEW, conclusion: "mergeable" },
+        startedAt: "2026-11-25T00:00:00.000Z",
+      });
+
+      assert.strictEqual(yield* backfillNextActions, 1);
+      const task = Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId));
+      assert.deepStrictEqual((task.nextActions as { steps: { title: string }[] }).steps.map((step) => step.title), ["PR を merge する"]);
+      assert.strictEqual(yield* backfillNextActions, 0);
     }).pipe(Effect.provide(TestDatabase)));
 });
 

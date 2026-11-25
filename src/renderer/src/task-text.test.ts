@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { conclusionLabel, describeChange, judgmentText, statusLabel, taskNumber } from "./task-text.js";
+import { conclusionLabel, describeChange, effortLabel, judgmentText, statusLabel, taskNumber } from "./task-text.js";
 
 const change = (overrides: Partial<Parameters<typeof describeChange>[0]>) => ({
   kind: "field_changed",
@@ -70,6 +70,12 @@ describe("conclusionLabel", () => {
     assert.strictEqual(conclusionLabel("mergeable"), "merge 可能");
     assert.strictEqual(conclusionLabel("mergeable_after_fix"), "修正すれば merge 可能");
     assert.strictEqual(conclusionLabel("not_mergeable"), "merge できない");
+  });
+});
+
+describe("effortLabel", () => {
+  it("手間を、簡単・普通・難しい・めんどくさいで書く", () => {
+    assert.deepStrictEqual(["easy", "normal", "hard", "tedious"].map(effortLabel), ["簡単", "普通", "難しい", "めんどくさい"]);
   });
 });
 

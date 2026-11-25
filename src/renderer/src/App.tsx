@@ -13,7 +13,7 @@ import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot }
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
 import { TaskDrawer } from "./TaskDrawer.js";
-import { splitTitle, taskNumber } from "./task-text.js";
+import { effortLabel, splitTitle, taskNumber } from "./task-text.js";
 
 const REFRESH_INTERVAL_MS = 15_000;
 const UNDO_VISIBLE_MS = 8_000;
@@ -311,7 +311,18 @@ function Card(props: {
           {card.agent?.state === "queued" ? `調査待ち（${card.agent.position} 番目）` : "Claude Code が調べています"}
         </p>
       )}
-      {card.status !== "agent_running" && card.brief && <p className="card-brief">{card.brief}</p>}
+      {card.status !== "agent_running" && card.nextActions && card.nextActions.length > 0 ? (
+        <ul className="card-next-actions">
+          {card.nextActions.map((action) => (
+            <li key={action.title}>
+              <span className={`effort effort--${action.effort}`}>{effortLabel(action.effort)}</span>
+              {action.title}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        card.status !== "agent_running" && card.brief && <p className="card-brief">{card.brief}</p>
+      )}
       {inTray && card.judgment && <Judgment judgment={card.judgment} />}
       <div className="card-actions" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
         {inTray && (

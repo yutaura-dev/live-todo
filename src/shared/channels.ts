@@ -13,4 +13,6 @@ export const IPC_CHANNELS = {
   mergePlan: "board:merge-plan",
   merge: "board:merge",
   requestReview: "board:request-review",
+  completeStep: "board:complete-step",
+  chooseOption: "board:choose-option",
 } as const;

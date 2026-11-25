@@ -13,7 +13,7 @@ import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
-import { recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
+import { backfillNextActions, recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
@@ -27,6 +27,7 @@ import type { GitHubTokenSummary, Outcome, SecretStatus, SettingsSnapshot } from
 import {
   decodeFilterPreviewRequest,
   decodeMergeRequest,
+  decodeStepRequest,
   decodeMoveRequest,
   decodeSecretInput,
   decodeSecretKey,
@@ -112,6 +113,7 @@ const startSync = Effect.gen(function* () {
   const jobs = (yield* Effect.forEach(config.accounts, makeGitHubJobs)).flat();
   syncProblem = undefined;
 
+  yield* backfillNextActions;
   const recovered = yield* recoverInterruptedAgentRuns;
   if (recovered > 0) yield* Effect.log(`途中で止まった AI の調査を ${recovered} 件戻した`);
   const reviewSources = config.accounts
@@ -326,6 +328,23 @@ const errorMessage = (error: unknown) =>
   typeof error === "object" && error !== null && "message" in error ? String(error.message) : String(error);
 
 function registerMerge() {
+  ipcMain.handle(IPC_CHANNELS.completeStep, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* decodeStepRequest(input);
+        yield* (yield* BoardService).completeStep(request.taskId, request.stepId);
+      }),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.chooseOption, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* decodeStepRequest(input);
+        if (request.optionKey === undefined) return;
+        yield* (yield* BoardService).chooseOption(request.taskId, request.stepId, request.optionKey);
+      }),
+    ),
+  );
   ipcMain.handle(IPC_CHANNELS.requestReview, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {

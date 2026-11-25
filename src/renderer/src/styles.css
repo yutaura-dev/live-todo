@@ -1124,6 +1124,105 @@ button:disabled {
   align-items: center;
 }
 
+.effort {
+  display: inline-block;
+  margin-inline-end: 6px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.effort--easy {
+  background: rgb(111 191 135 / 0.18);
+  color: var(--ok);
+}
+
+.effort--normal {
+  background: rgb(143 162 255 / 0.18);
+  color: var(--focus);
+}
+
+.effort--hard {
+  background: rgb(232 198 106 / 0.18);
+  color: var(--caution);
+}
+
+.effort--tedious {
+  background: rgb(224 128 107 / 0.18);
+  color: var(--rust);
+}
+
+.card-next-actions {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.step-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.step--current {
+  border-color: var(--primary);
+}
+
+.step--done {
+  opacity: 0.55;
+}
+
+.step-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+}
+
+.step-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.step-done {
+  color: var(--ok);
+  font-size: 11px;
+}
+
+.step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.step-actions--column {
+  display: grid;
+  justify-items: start;
+}
+
+.step-branch {
+  display: grid;
+  gap: 6px;
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--rule);
+}
+
 .toast {
   position: fixed;
   inset-block-end: 20px;

@@ -30,6 +30,7 @@ describe("decodeDependencyReview", () => {
     configChanges: "",
     canMergeAsIs: true,
     mergeAsIsNote: "fork からの PR を受け付けないなら、修正せずに merge してよい",
+    fixEffort: "normal",
   };
 
   it.effect("3 つの結論のどれかと、影響範囲・修正・理由・設定の直し方を受け取る", () =>
@@ -64,6 +65,7 @@ describe("DEPENDENCY_REVIEW_JSON_SCHEMA", () => {
       "configChanges",
       "canMergeAsIs",
       "mergeAsIsNote",
+      "fixEffort",
     ]);
     assert.deepStrictEqual(DEPENDENCY_REVIEW_JSON_SCHEMA.properties.conclusion.enum, ["mergeable", "mergeable_after_fix", "not_mergeable"]);
   });

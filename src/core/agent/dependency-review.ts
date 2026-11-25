@@ -18,6 +18,7 @@ const DependencyReview = Schema.Struct({
   // この 2 つは後から足した項目。足す前の回答は「そのまま merge しない」として読む
   canMergeAsIs: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   mergeAsIsNote: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  fixEffort: Schema.Literals(["easy", "normal", "hard", "tedious"]).pipe(Schema.withDecodingDefaultKey(Effect.succeed("normal" as const))),
 });
 export type DependencyReview = typeof DependencyReview.Type;
 export const decodeDependencyReview = Schema.decodeUnknownEffect(DependencyReview);
@@ -42,12 +43,18 @@ export const DEPENDENCY_REVIEW_JSON_SCHEMA = {
       type: "boolean",
       description: "mergeable_after_fix でも、条件付きで修正せずにそのまま merge してよいなら true。mergeable なら true、not_mergeable なら false",
     },
+    fixEffort: {
+      type: "string",
+      enum: ["easy", "normal", "hard", "tedious"],
+      description:
+        "修正にかかる手間。easy: 10 秒で終わる（1 行の書き換えなど）/ normal: 5 分あれば終わる / hard: 15 分あれば終わる / tedious: それ以上かかる。修正が要らなければ easy",
+    },
     mergeAsIsNote: {
       type: "string",
       description: "mergeable_after_fix で canMergeAsIs が true のとき、そのまま merge してよい条件（例: fork からの PR を受け付けないなら）。それ以外は空文字",
     },
   },
-  required: ["conclusion", "impact", "requiredChanges", "blockers", "configChanges", "canMergeAsIs", "mergeAsIsNote"],
+  required: ["conclusion", "impact", "requiredChanges", "blockers", "configChanges", "canMergeAsIs", "mergeAsIsNote", "fixEffort"],
   additionalProperties: false,
 } as const;
 

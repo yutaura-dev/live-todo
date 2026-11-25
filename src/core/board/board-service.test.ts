@@ -257,3 +257,69 @@ describe("AI の調査", () => {
       }),
     ));
 });
+
+describe("次にやること", () => {
+  const plan = {
+    steps: [
+      { id: "fix", kind: "fix_and_push", title: "修正を行い、PR に push する", effort: "normal", mode: "serial", status: "todo" },
+      { id: "merge", kind: "merge_pull_request", title: "PR を merge する", effort: "easy", mode: "serial", status: "todo" },
+    ],
+  };
+
+  it.effect("カードには、いま着手できる手順と手間を出す", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        yield* (yield* TaskRepository).updateTask(task.id, { nextActions: plan });
+
+        const board = yield* (yield* BoardService).board;
+
+        assert.deepStrictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.nextActions, [
+          { title: "修正を行い、PR に push する", effort: "normal" },
+        ]);
+      }),
+    ));
+
+  it.effect("手順を済ませると次の手順に進み、詳細には手順の並び全体を返す", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        yield* (yield* TaskRepository).updateTask(task.id, { nextActions: plan });
+        const service = yield* BoardService;
+
+        yield* service.completeStep(task.id, "fix");
+
+        const detail = yield* service.taskDetail(task.id);
+        assert.deepStrictEqual(detail.nextActions?.steps.map((step) => step.status), ["done", "todo"]);
+        assert.deepStrictEqual(detail.currentStepIds, ["merge"]);
+      }),
+    ));
+
+  it.effect("分かれ道を選ぶと、選んだ側の手順に進む", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        yield* (yield* TaskRepository).updateTask(task.id, {
+          nextActions: {
+            steps: [
+              {
+                id: "decide",
+                kind: "decision",
+                title: "決める",
+                effort: "easy",
+                mode: "serial",
+                status: "todo",
+                options: [{ key: "as_is", label: "そのまま", steps: [{ id: "as_is.merge", kind: "merge_pull_request", title: "PR を merge する", effort: "easy", mode: "serial", status: "todo" }] }],
+              },
+            ],
+          },
+        });
+        const service = yield* BoardService;
+
+        yield* service.chooseOption(task.id, "decide", "as_is");
+
+        const board = yield* service.board;
+        assert.deepStrictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.nextActions, [{ title: "PR を merge する", effort: "easy" }]);
+      }),
+    ));
+});

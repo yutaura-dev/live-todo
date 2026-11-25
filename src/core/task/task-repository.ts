@@ -10,7 +10,7 @@ export type TaskWithUnread = Task & { unreadChanges: number };
 export type TaskChange = typeof taskChanges.$inferSelect;
 
 export type NewTask = { title: string; status: TaskStatus };
-export type TaskPatch = Partial<Pick<Task, "title" | "brief" | "status">>;
+export type TaskPatch = Partial<Pick<Task, "title" | "brief" | "status" | "nextActions">>;
 
 export type TaskChangeInput = {
   kind: TaskChangeKind;

@@ -39,6 +39,11 @@ export const decodeMergeRequest = Schema.decodeUnknownEffect(
   }),
 );
 
+const StepId = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(100));
+export const decodeStepRequest = Schema.decodeUnknownEffect(
+  Schema.Struct({ taskId: TaskId, stepId: StepId, optionKey: Schema.optionalKey(StepId) }),
+);
+
 const MAX_PREVIEW_TARGETS = 100;
 export const decodeFilterPreviewRequest = Schema.decodeUnknownEffect(
   Schema.Struct({

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
-import { decodeMergeRequest, decodeFilterPreviewRequest, decodeMoveRequest, decodeSecretInput, decodeSecretKey, decodeTaskId, isAllowedExternalUrl } from "./ipc.js";
+import { decodeStepRequest, decodeMergeRequest, decodeFilterPreviewRequest, decodeMoveRequest, decodeSecretInput, decodeSecretKey, decodeTaskId, isAllowedExternalUrl } from "./ipc.js";
 
 describe("isAllowedExternalUrl", () => {
   it.each(["https://github.com/acme/app/pull/42", "https://github.com/acme/app/issues/7#issuecomment-1"])(
@@ -114,4 +114,24 @@ describe("decodeMergeRequest", () => {
     Effect.gen(function* () {
       assert.isTrue(Option.isNone(yield* Effect.option(decodeMergeRequest(input))));
     }));
+});
+
+describe("decodeStepRequest", () => {
+  it.effect("Task の id・手順の id・（分かれ道なら）選んだ選択肢を受け取る", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* decodeStepRequest({ taskId: 3, stepId: "decide", optionKey: "as_is" }), {
+        taskId: 3,
+        stepId: "decide",
+        optionKey: "as_is",
+      });
+      assert.deepStrictEqual(yield* decodeStepRequest({ taskId: 3, stepId: "fix.merge" }), { taskId: 3, stepId: "fix.merge" });
+    }));
+
+  it.effect.each([{ taskId: 3, stepId: "" }, { taskId: 3, stepId: "x".repeat(101) }, { taskId: "3", stepId: "a" }])(
+    "想定外の値はエラーにする: %j",
+    (input) =>
+      Effect.gen(function* () {
+        assert.isTrue(Option.isNone(yield* Effect.option(decodeStepRequest(input))));
+      }),
+  );
 });

@@ -1,8 +1,9 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns, agentThreads, sourceItems, taskLinks, tasks } from "../db/schema.js";
 import { TaskRepository } from "../task/task-repository.js";
+import { planFromDependencyReview } from "../task/next-actions.js";
 import type { TaskStatus } from "../task/task.js";
 import { ClaudeCode } from "./claude-code.js";
 import { AgentWorkspace } from "./agent-workspace.js";
@@ -176,7 +177,7 @@ const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
         .pipe(Effect.orDie);
       const current = Option.getOrThrow(yield* taskRepository.findTask(target.taskId));
       const brief = briefOf(review);
-      yield* taskRepository.updateTask(target.taskId, { brief });
+      yield* taskRepository.updateTask(target.taskId, { brief, nextActions: planFromDependencyReview(review) });
       // 結論が出たことを更新マークで知らせる
       yield* taskRepository.recordChange(target.taskId, { kind: "field_changed", field: "brief", before: current.brief, after: brief, unread: true, actor: "agent" });
       yield* moveTask(target.taskId, "agent_running", "todo");
@@ -235,6 +236,31 @@ const moveTask = (taskId: number, expected: TaskStatus, next: TaskStatus) =>
     yield* taskRepository.updateTask(taskId, { status: next });
     yield* taskRepository.recordChange(taskId, { kind: "field_changed", field: "status", before: current, after: next, unread: false, actor: "agent" });
   });
+
+/** 次にやることを作る前に調べ終わった Task に、最後の調査の結論から次にやることを作る */
+export const backfillNextActions = Effect.gen(function* () {
+  const db = yield* Database;
+  const taskRepository = yield* TaskRepository;
+  const runs = yield* db
+    .select({ taskId: agentRuns.taskId, result: agentRuns.result, nextActions: tasks.nextActions })
+    .from(agentRuns)
+    .innerJoin(tasks, eq(agentRuns.taskId, tasks.id))
+    .where(and(eq(agentRuns.kind, KIND), eq(agentRuns.status, "succeeded")))
+    .orderBy(desc(agentRuns.id))
+    .pipe(Effect.orDie);
+  const seen = new Set<number>();
+  let filled = 0;
+  for (const run of runs) {
+    if (seen.has(run.taskId)) continue;
+    seen.add(run.taskId);
+    if (run.nextActions !== null) continue;
+    const review = yield* decodeDependencyReview(run.result).pipe(Effect.option);
+    if (Option.isNone(review)) continue;
+    yield* taskRepository.updateTask(run.taskId, { nextActions: planFromDependencyReview(review.value) });
+    filled++;
+  }
+  return filled;
+});
 
 /**
  * アプリが途中で終わり、調査中・調査待ちのまま残ったものを取り消し、Task を元のレーンに戻す。

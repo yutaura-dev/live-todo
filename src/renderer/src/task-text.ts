@@ -37,6 +37,9 @@ export function splitTitle(title: string): { main: string; repository?: string }
   return match ? { main: match[1]!, repository: match[2]! } : { main: title };
 }
 
+const EFFORT_LABELS: Record<string, string> = { easy: "簡単", normal: "普通", hard: "難しい", tedious: "めんどくさい" };
+export const effortLabel = (effort: string) => EFFORT_LABELS[effort] ?? effort;
+
 /** Task の番号。作られた順の連番（id）を、GitHub の issue のように #42 と書く */
 export const taskNumber = (id: number) => `#${id}`;
 

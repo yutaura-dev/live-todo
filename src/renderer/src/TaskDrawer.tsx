@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { MergePlanView, MovableStatus, TaskDetail } from "../../shared/api.js";
+import type { MergePlanView, MovableStatus, Step, TaskDetail } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
-import { conclusionLabel, describeChange, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
+import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
 
@@ -206,15 +206,84 @@ function ReviewField({ label, text }: { label: string; text: string | undefined 
 
 const METHOD_LABELS: Record<string, string> = { squash: "squash", merge: "merge commit", rebase: "rebase" };
 
-/** Task の「次にやること」。依存更新の調査の結論から決める */
+/** Task の「次にやること」。手順の並びを表示し、いま着手できる手順を操作できるようにする */
 function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => Promise<void> }) {
-  const run = detail.agentRun;
-  const review = (run?.status === "succeeded" ? (run.result ?? {}) : {}) as ReviewResult;
+  const plan = detail.nextActions;
+  if (plan === undefined || detail.status === "done" || detail.status === "dismissed") return null;
+  const current = new Set(detail.currentStepIds ?? []);
+  return (
+    <section className="next-action" aria-labelledby="drawer-next">
+      <h3 id="drawer-next" className="drawer-section-title">
+        次にやること
+      </h3>
+      <StepList steps={plan.steps} current={current} detail={detail} onChanged={onMerged} />
+    </section>
+  );
+}
+
+function StepList(props: { steps: ReadonlyArray<Step>; current: Set<string>; detail: TaskDetail; onChanged: () => Promise<void> }) {
+  return (
+    <ol className="step-list">
+      {props.steps.map((step, index) => (
+        <StepItem key={step.id} step={step} parallel={index > 0 && step.mode === "parallel"} {...props} />
+      ))}
+    </ol>
+  );
+}
+
+function StepItem(props: { step: Step; parallel: boolean; current: Set<string>; detail: TaskDetail; onChanged: () => Promise<void> }) {
+  const { step, detail } = props;
+  const isCurrent = props.current.has(step.id);
+  const [problem, setProblem] = useState<string | null>(null);
+  const run = async (action: Promise<{ ok: true } | { ok: false; message: string }>) => {
+    const outcome = await action;
+    setProblem(outcome.ok ? null : outcome.message);
+    await props.onChanged();
+  };
+  const chosen = step.kind === "decision" ? step.options.find((option) => option.key === step.chosen) : undefined;
+
+  return (
+    <li className={`step step--${step.status}${isCurrent ? " step--current" : ""}`}>
+      <div className="step-head">
+        <span className={`effort effort--${step.effort}`}>{effortLabel(step.effort)}</span>
+        <span className="step-title">{step.title}</span>
+        {props.parallel && <span className="field-hint">前と並行してできる</span>}
+        {step.status === "done" && <span className="step-done">済み</span>}
+      </div>
+      {isCurrent && step.kind === "merge_pull_request" && <MergeFlow detail={detail} onMerged={props.onChanged} />}
+      {isCurrent && step.kind === "decision" && (
+        <div className="step-actions">
+          {step.options.map((option) => (
+            <button key={option.key} type="button" className="quiet-button" onClick={() => void run(api.chooseOption(detail.id, step.id, option.key))}>
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push") && (
+        <div className="step-actions">
+          {step.kind === "fix_and_push" && <span className="field-hint">アプリからの修正はまだできません。修正して push したら「済んだ」を押してください</span>}
+          <button type="button" className="quiet-button" onClick={() => void run(api.completeStep(detail.id, step.id))}>
+            済んだ
+          </button>
+        </div>
+      )}
+      {problem && <p className="problem">{problem}</p>}
+      {chosen && (
+        <div className="step-branch">
+          <span className="field-hint">選んだ: {chosen.label}</span>
+          <StepList steps={chosen.steps} current={props.current} detail={detail} onChanged={props.onChanged} />
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** merge の確認と実行。確認で承認した方法と commit だけで merge する */
+function MergeFlow({ detail, onMerged }: { detail: TaskDetail; onMerged: () => Promise<void> }) {
   const [plan, setPlan] = useState<MergePlanView | null>(null);
   const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "merged" } | { kind: "failed"; message: string }>({ kind: "idle" });
-
-  if (detail.status === "done" || detail.status === "dismissed" || review.conclusion === undefined) return null;
-  const canMerge = review.conclusion === "mergeable" || (review.conclusion === "mergeable_after_fix" && review.canMergeAsIs === true);
+  const review = (detail.agentRun?.status === "succeeded" ? (detail.agentRun.result ?? {}) : {}) as ReviewResult;
   const pullUrl = detail.items.find((item) => item.role === "tracks" && item.url.includes("/pull/"))?.url;
 
   const openConfirm = async () => {
@@ -238,49 +307,32 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
   };
 
   return (
-    <section className="next-action" aria-labelledby="drawer-next">
-      <h3 id="drawer-next" className="drawer-section-title">
-        次にやること
-      </h3>
-      {review.conclusion === "mergeable" && <p className="next-action-text">PR を merge する（AI の調査で merge 可能と判定）</p>}
-      {review.conclusion === "mergeable_after_fix" && (
-        <>
-          <p className="next-action-text">修正してから merge する。必要な修正は下の「AI の調査」を見てください</p>
-          {review.canMergeAsIs && review.mergeAsIsNote && <p className="field-hint">条件によっては、修正せずにそのまま merge してもよい: {review.mergeAsIsNote}</p>}
-        </>
-      )}
-      {canMerge && (
-        <>
-          {state.kind === "merged" ? (
-            <p className="next-action-done">merge しました</p>
-          ) : plan === null ? (
-            <button type="button" className={review.conclusion === "mergeable" ? "primary-button" : "quiet-button"} disabled={state.kind === "busy"} onClick={() => void openConfirm()}>
-              {review.conclusion === "mergeable" ? "merge する" : "そのまま merge する"}
+    <div className="step-actions step-actions--column">
+      {state.kind === "merged" ? (
+        <p className="next-action-done">merge しました</p>
+      ) : plan === null ? (
+        <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void openConfirm()}>
+          merge する
+        </button>
+      ) : (
+        <div className="merge-confirm" role="alertdialog" aria-labelledby="merge-confirm-title">
+          <p id="merge-confirm-title" className="merge-confirm-title">
+            {plan.repository} #{plan.number} を {METHOD_LABELS[plan.method]} で merge します
+          </p>
+          {review.conclusion === "mergeable_after_fix" && <p className="field-hint">修正せずに merge します。条件: {review.mergeAsIsNote}</p>}
+          <p className="field-hint">方法の理由: {plan.reason}</p>
+          <p className="field-hint">
+            調べたときの commit（<code className="session-id">{plan.sha.slice(0, 7)}</code>）から PR が変わっていれば、GitHub が merge を断ります。
+          </p>
+          <div className="merge-confirm-actions">
+            <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void merge()}>
+              merge する
             </button>
-          ) : (
-            <div className="merge-confirm" role="alertdialog" aria-labelledby="merge-confirm-title">
-              <p id="merge-confirm-title" className="merge-confirm-title">
-                {plan.repository} #{plan.number} を {METHOD_LABELS[plan.method]} で merge します
-              </p>
-              {review.conclusion === "mergeable_after_fix" && <p className="field-hint">修正せずに merge します。条件: {review.mergeAsIsNote}</p>}
-              <p className="field-hint">方法の理由: {plan.reason}</p>
-              <p className="field-hint">
-                調べたときの commit（<code className="session-id">{plan.sha.slice(0, 7)}</code>）から PR が変わっていれば、GitHub が merge を断ります。
-              </p>
-              <div className="merge-confirm-actions">
-                <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void merge()}>
-                  merge する
-                </button>
-                <button type="button" className="quiet-button" onClick={() => setPlan(null)}>
-                  やめる
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-      {review.conclusion === "not_mergeable" && (
-        <p className="next-action-text">merge しない。renovate / dependabot の設定を直すか、PR を閉じる。直し方は下の「AI の調査」を見てください</p>
+            <button type="button" className="quiet-button" onClick={() => setPlan(null)}>
+              やめる
+            </button>
+          </div>
+        </div>
       )}
       {state.kind === "failed" && (
         <>
@@ -293,7 +345,7 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
           )}
         </>
       )}
-    </section>
+    </div>
   );
 }
 

@@ -4,6 +4,7 @@ import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks } from "../db/schema.js";
 import { TaskRepository, type TaskWithUnread } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
+import { chooseOption, completeStep, currentSteps, decodePlan, type Effort, type NextActionPlan } from "../task/next-actions.js";
 
 export class TaskNotFoundError extends Schema.TaggedError<TaskNotFoundError>()("TaskNotFoundError", {
   taskId: Schema.Number,
@@ -29,6 +30,8 @@ export type BoardCard = {
   updatedAt: string;
   /** 今の状況と次の一手（AI の調査の結論など） */
   brief?: string;
+  /** いま着手できる次にやることと、その手間 */
+  nextActions?: ReadonlyArray<{ title: string; effort: Effort }>;
   /** AI が調査中のレーンにあるとき、調べている最中か、調査待ちの何番目か */
   agent?: { state: "running" } | { state: "queued"; position: number };
   /** tracks で紐づいた元の項目（PR / issue など）。手動で追加した Task にはない */
@@ -79,6 +82,10 @@ export type TaskDetail = {
   changes: TaskDetailChange[];
   /** 最後に AI に任せた作業 */
   agentRun?: TaskDetailAgentRun;
+  /** 次にやること（手順の並び全体） */
+  nextActions?: NextActionPlan;
+  /** いま着手できる手順の id */
+  currentStepIds?: string[];
 };
 
 export type Board = { columns: ReadonlyArray<{ id: BoardColumnId; title: string; cards: BoardCard[] }> };
@@ -102,6 +109,10 @@ export class BoardService extends Context.Service<BoardService, {
   moveTask(taskId: number, status: TaskStatus): Effect.Effect<void, TaskNotFoundError>;
   markSeen(taskId: number): Effect.Effect<void>;
   taskDetail(taskId: number): Effect.Effect<TaskDetail, TaskNotFoundError>;
+  /** 次にやることの手順を済ませる */
+  completeStep(taskId: number, stepId: string): Effect.Effect<void, TaskNotFoundError>;
+  /** 次にやることの分かれ道を選ぶ */
+  chooseOption(taskId: number, stepId: string, optionKey: string): Effect.Effect<void, TaskNotFoundError>;
 }>()("live-todo/core/board/BoardService") {
   static readonly layer = Layer.effect(
     BoardService,
@@ -147,6 +158,10 @@ export class BoardService extends Context.Service<BoardService, {
             updatedAt: task.updatedAt,
             ...(task.brief === null ? {} : { brief: task.brief }),
             ...(agentOf.has(task.id) ? { agent: agentOf.get(task.id)! } : {}),
+            ...Option.match(decodePlan(task.nextActions), {
+              onNone: () => ({}),
+              onSome: (plan) => ({ nextActions: currentSteps(plan).map((step) => ({ title: step.title, effort: step.effort })) }),
+            }),
             ...(item === undefined ? {} : { url: item.url, source: item.source }),
             ...Option.match(judgment, {
               onNone: () => ({}),
@@ -234,6 +249,10 @@ export class BoardService extends Context.Service<BoardService, {
             occurredAt: change.occurredAt,
             unread: change.seenAt === null,
           })),
+          ...Option.match(decodePlan(task.nextActions), {
+            onNone: () => ({}),
+            onSome: (plan) => ({ nextActions: plan, currentStepIds: currentSteps(plan).map((step) => step.id) }),
+          }),
           ...(lastRun === undefined
             ? {}
             : {
@@ -251,7 +270,22 @@ export class BoardService extends Context.Service<BoardService, {
         } satisfies TaskDetail;
       });
 
-      return BoardService.of({ board, moveTask, markSeen: tasks.markChangesSeen, taskDetail });
+      const updatePlan = Effect.fnUntraced(function* (taskId: number, change: (plan: NextActionPlan) => NextActionPlan) {
+        const found = yield* tasks.findTask(taskId);
+        if (Option.isNone(found)) return yield* new TaskNotFoundError({ taskId });
+        const plan = decodePlan(found.value.nextActions);
+        if (Option.isNone(plan)) return;
+        yield* tasks.updateTask(taskId, { nextActions: change(plan.value) });
+      });
+
+      return BoardService.of({
+        board,
+        moveTask,
+        markSeen: tasks.markChangesSeen,
+        taskDetail,
+        completeStep: (taskId, stepId) => updatePlan(taskId, (plan) => completeStep(plan, stepId)),
+        chooseOption: (taskId, stepId, optionKey) => updatePlan(taskId, (plan) => chooseOption(plan, stepId, optionKey)),
+      });
     }),
   );
 }

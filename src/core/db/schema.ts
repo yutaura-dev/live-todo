@@ -41,6 +41,8 @@ export const tasks = sqliteTable("tasks", {
   id: integer().primaryKey({ autoIncrement: true }),
   title: text().notNull(),
   brief: text(),
+  /** 次にやること（手順の並び。src/core/task/next-actions.ts） */
+  nextActions: text("next_actions", { mode: "json" }),
   status: text({ enum: TASK_STATUSES }).notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),

@@ -2,6 +2,7 @@ import type { Board } from "../core/board/board-service.js";
 import type { AccountFilterPreview } from "../app/settings/filter-preview.js";
 
 export type { Board, BoardCard, BoardColumnId, CardJudgment, TaskDetail, TaskDetailChange, TaskDetailItem } from "../core/board/board-service.js";
+export type { Effort, NextActionPlan, Step } from "../core/task/next-actions.js";
 import type { TaskDetail } from "../core/board/board-service.js";
 export type { AccountFilterPreview, TargetCheck } from "../app/settings/filter-preview.js";
 export type { FilterReason } from "../sources/github/repository-filter.js";
@@ -74,6 +75,10 @@ export interface LiveTodoApi {
   merge(taskId: number, approved: { method: MergeMethod; sha: string }): Promise<Outcome>;
   /** AI にもう一度調べてもらう（調査待ちに入れ直す） */
   requestReview(taskId: number): Promise<Outcome>;
+  /** 次にやることの手順を済ませる */
+  completeStep(taskId: number, stepId: string): Promise<Outcome>;
+  /** 次にやることの分かれ道を選ぶ */
+  chooseOption(taskId: number, stepId: string, optionKey: string): Promise<Outcome>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;
