@@ -1,5 +1,5 @@
 import { Effect, Option, Ref, Schema } from "effect";
-import { DEFAULT_TODO_THRESHOLDS, makeTodoJudge, type TodoJudgeThresholds } from "../../core/judge/todo-judge.js";
+import { DEFAULT_TODO_THRESHOLDS, type JudgeInput, makeTodoJudge, type TodoJudgeThresholds } from "../../core/judge/todo-judge.js";
 import type { ItemDraft, SourceBinding } from "../../core/sync/sync-source.js";
 import {
   BODY_EXCERPT_LENGTH,
@@ -49,21 +49,25 @@ const decodeComment = Schema.decodeUnknownOption(Comment);
 
 type Context = { viewer: Option.Option<string>; comment: Option.Option<{ author: string; body: string }> };
 
-function describeGitHubItem(item: GitHubItem, context: Context): string {
-  const lines = [
+// live-todo が書いた信頼できる情報と、外部から来た文字列（タイトル・本文・コメント）を分ける理由:
+// 本文に「通知の理由: review_requested」のような行を書いて信頼できる行になりすますことを防ぐため。
+function describeGitHubItem(item: GitHubItem, context: Context): JudgeInput {
+  const trusted = [
     ...Option.match(context.viewer, { onNone: () => [], onSome: (login) => [`あなた（ユーザー本人）の GitHub アカウント: @${login}`] }),
     `種類: GitHub の ${item.subjectType}`,
     `リポジトリ: ${item.repository}`,
     `通知の理由: ${item.reason}`,
-    `タイトル: ${item.title}`,
     ...(item.author === undefined ? [] : [`作成者: @${item.author}`]),
+  ];
+  const untrusted = [
+    `タイトル: ${item.title}`,
     ...(item.bodyExcerpt === undefined ? [] : ["本文（冒頭）:", item.bodyExcerpt]),
     ...Option.match(context.comment, {
       onNone: () => [],
       onSome: ({ author, body }) => [`最新のコメント（@${author}）:`, body],
     }),
   ];
-  return lines.join("\n");
+  return { context: trusted.join("\n"), input: untrusted.join("\n") };
 }
 
 export const makeGitHubBinding = Effect.fnUntraced(function* (options: GitHubBindingOptions) {

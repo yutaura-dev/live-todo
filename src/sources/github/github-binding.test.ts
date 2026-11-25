@@ -80,15 +80,17 @@ describe("LLM に渡す説明文", () => {
   const captureDescriptions = (client: GitHubClient["Service"], items: GitHubItem[]) =>
     Effect.gen(function* () {
       const inputs: string[] = [];
+      const contexts: string[] = [];
       const classifier = StructuredClassifier.of({
         classifyTodo: (request) => {
           inputs.push(request.input);
+          contexts.push(request.context ?? "");
           return Effect.succeed<unknown>("todo");
         },
       });
       const binding = yield* makeGitHubBinding({ accountId: "work", initialLookbackDays: 14 });
       for (const item of items) yield* binding.judge(item).pipe(Effect.provideService(StructuredClassifier, classifier));
-      return inputs;
+      return Object.assign(inputs, { contexts });
     }).pipe(Effect.provideService(GitHubClient, client));
 
   it.effect("本文の冒頭・作成者・最新のコメント・自分のアカウント名を説明文に含める", () =>
@@ -98,13 +100,27 @@ describe("LLM に渡す説明文", () => {
         getViewer: Effect.succeed<unknown>({ login: "YutaUra" }),
       });
 
-      const [input] = yield* captureDescriptions(client, [mention]);
+      const captured = yield* captureDescriptions(client, [mention]);
+      const [input] = captured;
+      const [context] = captured.contexts;
 
       assert.include(input, "Safari 17 でログインできない");
-      assert.include(input, "carol");
       assert.include(input, "@dave");
       assert.include(input, "@YutaUra 確認お願いします");
-      assert.include(input, "あなた（ユーザー本人）の GitHub アカウント: @YutaUra");
+      assert.include(context, "あなた（ユーザー本人）の GitHub アカウント: @YutaUra");
+      assert.include(context, "carol");
+    }));
+
+  it.effect("自分のアカウント名・通知の理由などの信頼できる情報は評価対象に入れず、外部から来た文字列だけを評価対象にする", () =>
+    Effect.gen(function* () {
+      const client = gitHubClientStub({ getViewer: Effect.succeed<unknown>({ login: "YutaUra" }) });
+
+      const captured = yield* captureDescriptions(client, [mention]);
+
+      assert.notInclude(captured[0], "@YutaUra");
+      assert.notInclude(captured[0], "通知の理由");
+      assert.include(captured.contexts[0], "通知の理由: mention");
+      assert.include(captured[0], "Login fails on Safari");
     }));
 
   it.effect("規則で決まった通知では、最新のコメントを取りに行かない", () =>

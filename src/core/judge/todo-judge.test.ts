@@ -16,7 +16,7 @@ const thresholds = { todo: 0.8, review: 0.4 };
 
 const options = {
   rules: [(item: Item) => item.reviewRequested === true],
-  describe: (item: Item) => Effect.succeed(item.text),
+  describe: (item: Item) => Effect.succeed({ input: item.text }),
   question: QUESTION,
   thresholds,
 };
@@ -158,13 +158,25 @@ describe("説明文の作り方", () => {
         ...options,
         describe: (item: Item) => Effect.sync(() => {
           described++;
-          return item.text;
+          return { input: item.text };
         }),
       });
 
       yield* judge({ text: "PR", reviewRequested: true }).pipe(Effect.provideService(StructuredClassifier, structuredReturning("todo")));
 
       assert.strictEqual(described, 0);
+    }));
+});
+
+describe("信頼できる情報", () => {
+  it.effect("説明文が context を返したら、評価対象とは別に classifier へ渡す", () =>
+    Effect.gen(function* () {
+      const structured = structuredReturning("todo");
+      const judge = yield* makeTodoJudge({ ...options, describe: (item: Item) => Effect.succeed({ input: item.text, context: "自分: @me" }) });
+
+      yield* judge({ text: "本文" }).pipe(Effect.provideService(StructuredClassifier, structured));
+
+      expect(structured.classifyTodo).toHaveBeenCalledWith({ input: "本文", question: QUESTION, context: "自分: @me" });
     }));
 });
 

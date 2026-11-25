@@ -10,7 +10,15 @@ export class InvalidThresholdsError extends Schema.TaggedError<InvalidThresholds
   review: Schema.Number,
 }) {}
 
-export type JudgeRequest = { input: string; question: string };
+export type JudgeRequest = {
+  /** 評価対象。外部から来た文字列を含むので、データとして扱う */
+  input: string;
+  question: string;
+  /** live-todo が書いた信頼できる情報（自分のアカウント名・通知の理由など）。評価対象とは分けて渡す */
+  context?: string;
+};
+
+export type JudgeInput = { input: string; context?: string };
 
 export type DecisionAnswer = { type: "predicate"; probability: number } | { type: "refusal" };
 
@@ -38,7 +46,7 @@ export const DEFAULT_TODO_THRESHOLDS: TodoJudgeThresholds = { todo: 0.8, review:
 export type TodoJudgeOptions<TItem> = {
   rules: readonly ((item: TItem) => boolean)[];
   /** LLM に渡す説明文。規則で決まった項目では呼ばない（説明文の材料を取りに行くのを LLM に回すときに限る） */
-  describe: (item: TItem) => Effect.Effect<string>;
+  describe: (item: TItem) => Effect.Effect<JudgeInput>;
   question: string;
   thresholds: TodoJudgeThresholds;
 };
@@ -76,7 +84,12 @@ export const makeTodoJudge = Effect.fnUntraced(function* <TItem>(
         return { verdict: "todo", method: "rule" } as const;
       }
 
-      const request = { input: yield* describe(item), question };
+      const described = yield* describe(item);
+      const request: JudgeRequest = {
+        input: described.input,
+        question,
+        ...(described.context === undefined ? {} : { context: described.context }),
+      };
 
       // Decisions provider を必須の依存にしない理由:
       // 使えるかどうかは LLM Profile の capability で決まり、提供されていなければ fallback に落とすため（ADR-0003）。
