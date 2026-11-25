@@ -415,7 +415,6 @@ button {
 }
 
 .preview-status {
-  min-block-size: 1.4em;
   margin: 0;
   font-size: 12px;
   color: var(--muted);
@@ -751,4 +750,129 @@ button:disabled {
   .column {
     transition: none;
   }
+}
+
+.settings-body > * {
+  max-inline-size: 760px;
+}
+
+.settings-title {
+  font-size: 15px;
+}
+
+.settings-path {
+  margin: 2px 0 12px;
+  font-size: 11px;
+}
+
+.settings-section {
+  gap: 8px;
+  margin-block-end: 22px;
+}
+
+.section-title {
+  padding-block-end: 4px;
+  font-size: 13px;
+}
+
+.account {
+  padding: 8px 12px;
+}
+
+.account-name {
+  font-size: 14px;
+}
+
+.account-body {
+  gap: 10px;
+  padding-block-start: 10px;
+}
+
+.settings input,
+.settings select,
+.settings textarea {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.settings .field-label {
+  font-size: 12px;
+}
+
+.settings .field-hint {
+  font-size: 11px;
+}
+
+.settings .quiet-button,
+.settings .dismiss-button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.settings .primary-button {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.secret-field {
+  grid-template-columns: 9em auto minmax(10em, 1fr) auto auto;
+  gap: 6px 10px;
+}
+
+.filter-grid {
+  gap: 2px 12px;
+}
+
+.judge {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.judge-options {
+  gap: 6px;
+}
+
+.judge-option {
+  padding: 6px 10px;
+}
+
+.judge-option-label {
+  font-size: 12px;
+}
+
+.judge .field select,
+.judge .field input {
+  justify-self: start;
+  min-inline-size: 18em;
+}
+
+.preview {
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.repository-list ul,
+.target-results {
+  max-block-size: 180px;
+}
+
+.repository-list li,
+.target-result {
+  font-size: 11px;
+}
+
+.target-result {
+  padding: 4px 8px;
+}
+
+.add-account {
+  gap: 8px;
+}
+
+.settings-footer {
+  padding-block-start: 8px;
+}
+
+.preview-status:empty {
+  display: none;
 }

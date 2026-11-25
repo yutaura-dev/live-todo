@@ -210,14 +210,14 @@ function AccountEditor(props: {
           <span className="field-label">除くリポジトリ</span>
           <span className="field-hint">含めるリストより優先する</span>
         </label>
-        <textarea id={`${id}-include`} rows={4} value={include} onChange={(event) => updateFilter(event.target.value, exclude)} placeholder="acme/*" />
-        <textarea id={`${id}-exclude`} rows={4} value={exclude} onChange={(event) => updateFilter(include, event.target.value)} placeholder="acme/legacy" />
+        <textarea id={`${id}-include`} rows={3} value={include} onChange={(event) => updateFilter(event.target.value, exclude)} placeholder="acme/*" />
+        <textarea id={`${id}-exclude`} rows={3} value={exclude} onChange={(event) => updateFilter(include, event.target.value)} placeholder="acme/legacy" />
       </div>
 
       <label className="field">
         <span className="field-label">含まれるか確かめたい PR・issue・リポジトリ</span>
         <span className="field-hint">1 行に 1 つ。URL か owner/repo#番号</span>
-        <textarea rows={2} value={targets} onChange={(event) => setTargets(event.target.value)} placeholder="https://github.com/acme/app/pull/42" />
+        <textarea rows={1} value={targets} onChange={(event) => setTargets(event.target.value)} placeholder="https://github.com/acme/app/pull/42" />
       </label>
       <p className="preview-status" role="status">
         {previewing ? "判定しています" : previewProblem ?? ""}
