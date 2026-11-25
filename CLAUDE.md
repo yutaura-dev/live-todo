@@ -35,6 +35,8 @@
 | Decisions provider | 確率付きの判定 API（Jev / OpenAI Decisions / Gemini Decisions） |
 | 要確認 | 判定の確率が閾値の中間、または refusal だった Task の置き場 |
 | SnapshotDiffer | 全件取得の結果を前回の fingerprint と比べて SourceChange に変換する共通処理 |
+| Watcher | 見張りの共通部分。WatchProvider（見張る対象の一覧）と Condition（困った状態か）から Condition Item を作る（[ADR-0008](docs/decisions/0008-watchers.md)） |
+| Condition Item | 条件が成り立っている間は open、解消したら resolved になる Source Item。source 名は `<source>:watch` |
 
 ## AI 協働ルール
 

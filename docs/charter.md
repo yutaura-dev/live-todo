@@ -1,6 +1,6 @@
 > **Stability**: 🪨 stable
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0004](decisions/0004-epic-and-custom-labels.md)
+> **直近の変更 ADR**: [ADR-0008](decisions/0008-watchers.md)
 
 # Charter — live-todo
 
@@ -30,6 +30,7 @@
 - ユーザーが定義したルールで、カスタムラベルを付ける
 - Task を Epic → Task の 2 段で管理する。Epic は自動で作り、Task を振り分ける
 - ポーリングで Source の状況変化を検知し、Task を自動で更新する
+- 自分が関わるものを見張り、通知が来ない困った状態（PR の conflict など）や、何も起きないこと（返信待ちなど）を Task にする
 - GitHub Projects のようなカンバン UI で Task を管理する。手動での Task 追加もできる
 - Task ごとに AI Agent と会話・依頼ができ、AI が片付けられる Task は先回りして処理する（Pre-work）
 - LLM プロバイダ（Claude / OpenAI / Gemini / Azure OpenAI / Bedrock など）を選べる

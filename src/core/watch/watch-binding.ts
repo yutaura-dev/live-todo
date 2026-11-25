@@ -1,0 +1,31 @@
+import { Effect, Schema } from "effect";
+import type { TodoJudgment } from "../judge/todo-judge.js";
+import type { SourceBinding } from "../sync/sync-source.js";
+import { type Condition, type ConditionItem, makeWatcher, type WatchCursor, type WatchProvider } from "./watcher.js";
+
+const WatchCursorSchema = Schema.Struct({ holding: Schema.Array(Schema.String) });
+
+// 判定を常に規則で todo にする理由: Condition は「成り立ったらやることがある状態」として定義するものなので、
+// 成り立った時点で todo であることは決まっている。LLM に問い直すとコストがかかるうえ、取りこぼしの原因になる。
+const CONDITION_JUDGMENT: TodoJudgment = { verdict: "todo", method: "rule" };
+
+export function watchBinding<TSubject, E>(
+  provider: WatchProvider<TSubject, E>,
+  conditions: ReadonlyArray<Condition<TSubject>>,
+): SourceBinding<ConditionItem, WatchCursor, E, never, never> {
+  return {
+    // 通常の取得と source 名を分ける理由: カーソルの形が違い（通知の since と、成り立っている条件の一覧）、
+    // 同じ source 名にすると互いのカーソルを上書きしてしまうため。
+    source: `${provider.source}:watch`,
+    adapter: makeWatcher(provider, conditions),
+    cursorSchema: WatchCursorSchema,
+    externalIdOf: (item) => item.externalId,
+    toItemDraft: (item) => ({
+      title: item.title,
+      url: item.url,
+      state: item.holds ? "open" : "resolved",
+      fingerprint: item.holds ? "holds" : "clear",
+    }),
+    judge: () => Effect.succeed(CONDITION_JUDGMENT),
+  };
+}
