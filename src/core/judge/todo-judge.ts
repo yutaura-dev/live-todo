@@ -34,9 +34,11 @@ export class StructuredClassifier extends Context.Service<StructuredClassifier, 
 
 export type TodoVerdict = "todo" | "needs_review" | "not_todo";
 
+/** LLM や Decisions で判定したときは、渡した入力（request）を含める。同じ入力で判定し直して比べられるようにするため */
 export type TodoJudgment =
-  | { verdict: TodoVerdict; method: "rule" | "structured" }
-  | { verdict: TodoVerdict; method: "decisions"; probability?: number };
+  | { verdict: TodoVerdict; method: "rule" }
+  | { verdict: TodoVerdict; method: "structured"; reason?: string; request: JudgeRequest }
+  | { verdict: TodoVerdict; method: "decisions"; probability?: number; request: JudgeRequest };
 
 export type TodoJudgeThresholds = { todo: number; review: number };
 
@@ -55,14 +57,19 @@ export type TodoJudge<TItem> = (item: TItem) => Effect.Effect<TodoJudgment, Judg
 
 const isProbability = Schema.is(Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })));
 
-const StructuredAnswer = Schema.Literals(["todo", "not_todo", "uncertain"]);
+const StructuredVerdict = Schema.Literals(["todo", "not_todo", "uncertain"]);
+// 理由を返さない classifier（ConservativeClassifier など）もあるので、verdict だけの答えも受け付ける
+const StructuredAnswer = Schema.Union([
+  StructuredVerdict,
+  Schema.Struct({ verdict: StructuredVerdict, reason: Schema.optional(Schema.String) }),
+]);
 const decodeStructuredAnswer = Schema.decodeUnknownOption(StructuredAnswer);
 
 const STRUCTURED_VERDICTS = {
   todo: "todo",
   not_todo: "not_todo",
   uncertain: "needs_review",
-} as const satisfies Record<typeof StructuredAnswer.Type, TodoVerdict>;
+} as const satisfies Record<typeof StructuredVerdict.Type, TodoVerdict>;
 
 export const makeTodoJudge = Effect.fnUntraced(function* <TItem>(
   options: TodoJudgeOptions<TItem>,
@@ -97,20 +104,25 @@ export const makeTodoJudge = Effect.fnUntraced(function* <TItem>(
       if (Option.isSome(decisions)) {
         const answer = yield* decisions.value.judgePredicate(request);
         if (answer.type !== "predicate" || !isProbability(answer.probability)) {
-          return { verdict: "needs_review", method: "decisions" } as const;
+          return { verdict: "needs_review", method: "decisions", request } as const;
         }
         return {
           verdict: verdictFromProbability(answer.probability),
           method: "decisions",
           probability: answer.probability,
+          request,
         } as const;
       }
 
       const structured = yield* StructuredClassifier;
       const answer = decodeStructuredAnswer(yield* structured.classifyTodo(request));
+      if (Option.isNone(answer)) return { verdict: "needs_review", method: "structured", request } as const;
+      const { verdict, reason } = typeof answer.value === "string" ? { verdict: answer.value, reason: undefined } : answer.value;
       return {
-        verdict: Option.match(answer, { onNone: () => "needs_review", onSome: (value) => STRUCTURED_VERDICTS[value] }),
+        verdict: STRUCTURED_VERDICTS[verdict],
         method: "structured",
+        request,
+        ...(reason === undefined ? {} : { reason }),
       } as const;
     });
 

@@ -62,7 +62,7 @@ export const LlmStructuredClassifier = Layer.effect(
         );
       if (response === undefined) return UNJUDGEABLE;
       yield* Effect.logDebug("LLM の判定").pipe(Effect.annotateLogs({ verdict: response.value.verdict, reason: response.value.reason }));
-      return response.value.verdict;
+      return { verdict: response.value.verdict, reason: response.value.reason };
     });
 
     return StructuredClassifier.of({ classifyTodo });

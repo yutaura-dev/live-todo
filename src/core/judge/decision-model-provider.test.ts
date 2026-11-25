@@ -87,7 +87,7 @@ describe("DecisionModelDecisionsProvider", () => {
 
       const result = yield* judge("明日までにレビューしてください");
 
-      assert.deepStrictEqual(result, { verdict: "todo", method: "decisions", probability: 0.85 });
+      assert.deepInclude(result, { verdict: "todo", method: "decisions", probability: 0.85 });
     }).pipe(
       Effect.provide(Layer.mergeAll(answering({ todo: { _tag: "Probability", probability: 0.85 } }).layer, ConservativeClassifier)),
     ));

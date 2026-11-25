@@ -20,7 +20,8 @@ export class SourceItemRepository extends Context.Service<SourceItemRepository, 
   findItem(source: string, externalId: string): Effect.Effect<Option.Option<SourceItem>>;
   /** 新しい Item は triage を pending で作る。既存の Item は triage と初めて見た時刻を保ったまま更新する */
   upsertItem(draft: SourceItemDraft): Effect.Effect<SourceItem>;
-  setTriage(itemId: number, triage: ItemTriage): Effect.Effect<void>;
+  /** judgment: 仕分けたときの判定。対象外にしたものも含めて記録する */
+  setTriage(itemId: number, triage: ItemTriage, judgment?: unknown): Effect.Effect<void>;
   recordActivity(itemId: number, kind: ActivityKind): Effect.Effect<void>;
   listActivities(itemId: number): Effect.Effect<ReadonlyArray<Activity>>;
   loadCursor(source: string): Effect.Effect<Option.Option<unknown>>;
@@ -54,8 +55,11 @@ export class SourceItemRepository extends Context.Service<SourceItemRepository, 
         return yield* returnedRow(rows);
       }, Effect.orDie);
 
-      const setTriage = Effect.fn("SourceItemRepository.setTriage")(function* (itemId: number, triage: ItemTriage) {
-        yield* db.update(sourceItems).set({ triage }).where(eq(sourceItems.id, itemId));
+      const setTriage = Effect.fn("SourceItemRepository.setTriage")(function* (itemId: number, triage: ItemTriage, judgment?: unknown) {
+        yield* db
+          .update(sourceItems)
+          .set(judgment === undefined ? { triage } : { triage, judgment })
+          .where(eq(sourceItems.id, itemId));
       }, Effect.orDie);
 
       const recordActivity = Effect.fn("SourceItemRepository.recordActivity")(function* (itemId: number, kind: ActivityKind) {

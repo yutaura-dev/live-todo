@@ -14,6 +14,8 @@ export const sourceItems = sqliteTable(
     state: text({ enum: ITEM_STATES }).notNull(),
     fingerprint: text().notNull(),
     triage: text({ enum: ITEM_TRIAGES }).notNull(),
+    /** 仕分けたときの判定（方法・確率・理由・LLM に渡した入力）。対象外にしたものも後から見直せるようにする */
+    judgment: text({ mode: "json" }),
     firstSeenAt: text("first_seen_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

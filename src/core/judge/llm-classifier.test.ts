@@ -37,13 +37,13 @@ const judge = (input: string) =>
   });
 
 describe("LlmStructuredClassifier", () => {
-  it.effect.each(["todo", "not_todo", "uncertain"] as const)("LLM が答えた %s をそのまま返す", (verdict) =>
+  it.effect.each(["todo", "not_todo", "uncertain"] as const)("LLM が答えた %s を、理由と一緒に返す", (verdict) =>
     Effect.gen(function* () {
       const classifier = yield* StructuredClassifier;
 
       const result = yield* classifier.classifyTodo({ input: "レビューお願いします", question: QUESTION });
 
-      assert.strictEqual(result, verdict);
+      assert.deepStrictEqual(result, { verdict, reason: "理由" });
     }).pipe(Effect.provide(replying({ reason: "理由", verdict }).layer)));
 
   it.effect("評価対象の内容と質問をプロンプトに含める", () => {
@@ -95,14 +95,14 @@ describe("LlmStructuredClassifier", () => {
     Effect.gen(function* () {
       const result = yield* judge("雑談");
 
-      assert.deepStrictEqual(result, { verdict: "needs_review", method: "structured" });
+      assert.deepInclude(result, { verdict: "needs_review", method: "structured" });
     }).pipe(Effect.provide(fakeModel(() => Effect.succeed([{ type: "text", text: "たぶん対応が必要です" }])).layer)));
 
   it.effect("内容のポリシーで拒否されたら、同期を止めずに要確認にする", () =>
     Effect.gen(function* () {
       const result = yield* judge("...");
 
-      assert.deepStrictEqual(result, { verdict: "needs_review", method: "structured" });
+      assert.deepInclude(result, { verdict: "needs_review", method: "structured" });
     }).pipe(Effect.provide(failingWith(new AiError.ContentPolicyError({ description: "refused" })).layer)));
 
   it.effect("レート制限の失敗は JudgeRequestError にして、同期をやり直させる", () =>

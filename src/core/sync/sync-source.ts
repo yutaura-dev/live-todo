@@ -138,14 +138,14 @@ const triage = Effect.fnUntraced(function* (item: SourceItem, judgment: TodoJudg
   const tasks = yield* TaskRepository;
 
   if (judgment.verdict === "not_todo") {
-    yield* items.setTriage(item.id, "ignored");
+    yield* items.setTriage(item.id, "ignored", judgment);
     summary.itemsIgnored++;
     return;
   }
 
   const task = yield* tasks.createTask({ title: item.title, status: STATUS_ON_CREATE[judgment.verdict] });
   yield* tasks.linkItem(task.id, item.id, "tracks");
-  yield* items.setTriage(item.id, "linked");
+  yield* items.setTriage(item.id, "linked", judgment);
   yield* tasks.recordChange(task.id, { kind: "created", after: { judgment }, unread: false });
   summary.tasksCreated++;
 });

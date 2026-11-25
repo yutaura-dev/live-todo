@@ -67,7 +67,7 @@ describe("Decisions provider による判定", () => {
         { decisions: decisionsReturning({ type: "predicate", probability }), structured: structuredReturning("todo") },
       );
 
-      assert.deepStrictEqual(result, { verdict, method: "decisions", probability });
+      assert.deepInclude(result, { verdict, method: "decisions", probability });
     }));
 
   it.effect("評価対象の内容を input に、質問を question に渡す", () =>
@@ -86,7 +86,7 @@ describe("Decisions provider による判定", () => {
         { decisions: decisionsReturning({ type: "refusal" }), structured: structuredReturning("todo") },
       );
 
-      assert.deepStrictEqual(result, { verdict: "needs_review", method: "decisions" });
+      assert.deepInclude(result, { verdict: "needs_review", method: "decisions" });
     }));
 
   it.effect.each([Number.NaN, -0.1, 1.1])("0 から 1 の範囲外の確率 %s が返ったら要確認にする", (probability) =>
@@ -96,7 +96,7 @@ describe("Decisions provider による判定", () => {
         { decisions: decisionsReturning({ type: "predicate", probability }), structured: structuredReturning("todo") },
       );
 
-      assert.deepStrictEqual(result, { verdict: "needs_review", method: "decisions" });
+      assert.deepInclude(result, { verdict: "needs_review", method: "decisions" });
     }));
 
   it.effect("Decisions provider が使えるときは structured output を呼ばない", () =>
@@ -130,14 +130,14 @@ describe("structured output による判定（Decisions provider が使えない
     Effect.gen(function* () {
       const result = yield* judgeWith({ text: "..." }, { structured: structuredReturning(answer) });
 
-      assert.deepStrictEqual(result, { verdict, method: "structured" });
+      assert.deepInclude(result, { verdict, method: "structured" });
     }));
 
   it.effect("想定外の値が返ったら要確認にする", () =>
     Effect.gen(function* () {
       const result = yield* judgeWith({ text: "..." }, { structured: structuredReturning("maybe") });
 
-      assert.deepStrictEqual(result, { verdict: "needs_review", method: "structured" });
+      assert.deepInclude(result, { verdict: "needs_review", method: "structured" });
     }));
 
   it.effect("評価対象の内容を渡す", () =>
@@ -177,6 +177,28 @@ describe("信頼できる情報", () => {
       yield* judge({ text: "本文" }).pipe(Effect.provideService(StructuredClassifier, structured));
 
       expect(structured.classifyTodo).toHaveBeenCalledWith({ input: "本文", question: QUESTION, context: "自分: @me" });
+    }));
+});
+
+describe("判定の記録", () => {
+  it.effect("LLM や Decisions で判定したときは、渡した入力を判定の結果に含める（同じ入力で判定し直せるように）", () =>
+    Effect.gen(function* () {
+      const judge = yield* makeTodoJudge(options);
+
+      const result = yield* judge({ text: "請求書を送ってください" }).pipe(Effect.provideService(StructuredClassifier, structuredReturning("todo")));
+
+      assert.deepInclude(result, { request: { input: "請求書を送ってください", question: QUESTION } });
+    }));
+
+  it.effect("structured output が理由を返したら、判定の結果に含める", () =>
+    Effect.gen(function* () {
+      const judge = yield* makeTodoJudge(options);
+
+      const result = yield* judge({ text: "雑談" }).pipe(
+        Effect.provideService(StructuredClassifier, structuredReturning({ verdict: "not_todo", reason: "共有だけ" })),
+      );
+
+      assert.deepInclude(result, { verdict: "not_todo", method: "structured", reason: "共有だけ" });
     }));
 });
 

@@ -24,7 +24,9 @@ const batches = (...changes: SourceChange<Item>[][]) =>
   adapterReturning(...changes.map((batch, index) => ({ changes: batch, nextCursor: { page: index + 1 } })));
 
 function judgeReturning(verdict: TodoVerdict) {
-  return vi.fn((_: Item) => Effect.succeed<TodoJudgment>({ verdict, method: "structured" }));
+  return vi.fn((value: Item) =>
+    Effect.succeed<TodoJudgment>({ verdict, method: "structured", request: { input: value.title, question: "q" } }),
+  );
 }
 
 function bindingWith(
@@ -120,6 +122,7 @@ describe("新しい Item", () => {
       const found = yield* (yield* SourceItemRepository).findItem("test", "a");
       assert.isUndefined(yield* taskOfItem("a"));
       assert.strictEqual(Option.getOrUndefined(found)?.triage, "ignored");
+      assert.deepInclude(Option.getOrUndefined(found)?.judgment, { verdict: "not_todo", method: "structured" });
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("初めて見た時点で解決済みなら、Task を作らず判定もしない", () =>
@@ -139,6 +142,14 @@ describe("新しい Item", () => {
       yield* syncTimes(binding, 2);
 
       assert.strictEqual((yield* taskOfItem("a"))?.status, "todo");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("Task を作った Item にも、判定の結果を記録する", () =>
+    Effect.gen(function* () {
+      yield* syncSource(bindingWith(batches([upserted(item())]), judgeReturning("needs_review")));
+
+      const found = yield* (yield* SourceItemRepository).findItem("test", "a");
+      assert.deepInclude(Option.getOrUndefined(found)?.judgment, { verdict: "needs_review", method: "structured" });
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("新しく作った Task には更新マークを付けない", () =>
@@ -240,7 +251,7 @@ describe("失敗時", () => {
       const judge = vi.fn((value: Item) =>
         value.id === "b"
           ? Effect.fail(new JudgeRequestError({ message: "network" }))
-          : Effect.succeed<TodoJudgment>({ verdict: "todo", method: "structured" }),
+          : Effect.succeed<TodoJudgment>({ verdict: "todo", method: "structured", request: { input: value.title, question: "q" } }),
       );
 
       const error = yield* Effect.flip(
