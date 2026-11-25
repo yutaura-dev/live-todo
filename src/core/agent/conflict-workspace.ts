@@ -38,7 +38,8 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
   /** 印が残っていないこと・ほかのファイルを変えていないことを確かめて、手元で commit する。差分は PR のブランチから見た変化 */
   commit(cwd: string, conflicted: ReadonlyArray<string>): Effect.Effect<{ commitSha: string; diff: string }, ConflictWorkspaceError>;
   /** ユーザーが承認したあとだけ呼ぶ。PR のブランチが直し始めたときから動いていたら push しない（force はしない） */
-  push(cwd: string, repository: string, headRef: string, expectedHeadSha: string, token: string): Effect.Effect<void, ConflictWorkspaceError>;
+  /** commitSha: 承認画面で見せた commit。その commit を名指しで push する */
+  push(cwd: string, repository: string, headRef: string, expectedHeadSha: string, commitSha: string, token: string): Effect.Effect<void, ConflictWorkspaceError>;
 }>()("live-todo/core/agent/ConflictWorkspace") {
   static readonly layer = (root: string) =>
     Layer.effect(
@@ -105,7 +106,10 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
           return { commitSha, diff: truncateDiff(diff) };
         });
 
-        const push = Effect.fn("ConflictWorkspace.push")(function* (cwd: string, repository: string, headRef: string, expectedHeadSha: string, token: string) {
+        const push = Effect.fn("ConflictWorkspace.push")(function* (cwd: string, repository: string, headRef: string, expectedHeadSha: string, commitSha: string, token: string) {
+          // 承認した commit が、直し始めたときの PR の head にベースを取り込んだものかを確かめる
+          const parent = (yield* git(cwd, ["rev-parse", `${commitSha}^1`], "承認した commit が見つからない。もう一度直してください")).trim();
+          if (parent !== expectedHeadSha) return yield* new ConflictWorkspaceError({ message: "承認した commit が、直し始めたときの PR のブランチから作られていない" });
           // origin ではなく URL を指す（設定の書き換えで、トークンを別の宛先に送らせない）
           const url = `https://github.com/${repository}.git`;
           const env = gitPushEnv(token);
@@ -114,7 +118,7 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
             return yield* new ConflictWorkspaceError({ message: "直し始めたあとに PR のブランチへ commit が足された。もう一度直してください" });
           }
           const code = yield* spawner
-            .exitCode(ChildProcess.make("git", trustedGitArgs(gitDirOf(cwd), cwd, ["push", "--no-verify", url, `HEAD:refs/heads/${headRef}`]), { env, extendEnv: true }))
+            .exitCode(ChildProcess.make("git", trustedGitArgs(gitDirOf(cwd), cwd, ["push", "--no-verify", url, `${commitSha}:refs/heads/${headRef}`]), { env, extendEnv: true }))
             .pipe(Effect.mapError(fail("push できない")));
           if (code !== 0) return yield* new ConflictWorkspaceError({ message: `push できない（終了コード ${code}）。トークンに PR のブランチへ書き込む権限があるか確かめてください` });
         });

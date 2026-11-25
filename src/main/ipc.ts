@@ -40,6 +40,10 @@ export const decodeMergeRequest = Schema.decodeUnknownEffect(
 );
 
 const StepId = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(100));
+export const decodeConflictPushRequest = Schema.decodeUnknownEffect(
+  Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), commitSha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)) }),
+);
+
 export const decodeStepRequest = Schema.decodeUnknownEffect(
   Schema.Struct({ taskId: TaskId, stepId: StepId, optionKey: Schema.optionalKey(StepId) }),
 );

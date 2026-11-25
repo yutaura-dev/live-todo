@@ -32,7 +32,7 @@ const conflictTask = Effect.gen(function* () {
 
 const doubles = (options: { claudeFails?: boolean; commitFails?: string; pushFails?: string } = {}) => {
   const requests: ClaudeRequest[] = [];
-  const pushes: Array<{ cwd: string; headRef: string; expectedHeadSha: string; token: string }> = [];
+  const pushes: Array<{ cwd: string; headRef: string; expectedHeadSha: string; commitSha: string; token: string }> = [];
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.provideService(
@@ -62,9 +62,9 @@ const doubles = (options: { claudeFails?: boolean; commitFails?: string; pushFai
             options.commitFails === undefined
               ? Effect.succeed({ commitSha: "b".repeat(40), diff: "diff --git a/a.json b/a.json" })
               : Effect.fail(new ConflictWorkspaceError({ message: options.commitFails })),
-          push: (cwd, _repository, headRef, expectedHeadSha, token) =>
+          push: (cwd, _repository, headRef, expectedHeadSha, commitSha, token) =>
             Effect.suspend(() => {
-              pushes.push({ cwd, headRef, expectedHeadSha, token });
+              pushes.push({ cwd, headRef, expectedHeadSha, commitSha, token });
               return options.pushFails === undefined ? Effect.void : Effect.fail(new ConflictWorkspaceError({ message: options.pushFails }));
             }),
         }),
@@ -145,10 +145,10 @@ describe("直した内容を push する", () => {
       const agent = doubles();
       yield* agent.provide(finishConflictResolution(yield* startConflictResolution(taskId), {}));
 
-      yield* agent.provide(pushConflictResolution(taskId, tokenFor));
+      yield* agent.provide(pushConflictResolution(taskId, "b".repeat(40), tokenFor));
 
       assert.deepStrictEqual(agent.pushes, [
-        { cwd: `/w/task-${taskId}/conflict`, headRef: "feature/x", expectedHeadSha: "a".repeat(40), token: "token-of-personal" },
+        { cwd: `/w/task-${taskId}/conflict`, headRef: "feature/x", expectedHeadSha: "a".repeat(40), commitSha: "b".repeat(40), token: "token-of-personal" },
       ]);
       assert.deepStrictEqual(yield* currentKinds(taskId), []);
       const [approval] = yield* (yield* Database).select().from(approvals).where(eq(approvals.taskId, taskId));
@@ -161,7 +161,7 @@ describe("直した内容を push する", () => {
       const agent = doubles({ pushFails: "PR のブランチが進んでいる" });
       yield* agent.provide(finishConflictResolution(yield* startConflictResolution(taskId), {}));
 
-      const error = yield* agent.provide(pushConflictResolution(taskId, tokenFor)).pipe(Effect.flip);
+      const error = yield* agent.provide(pushConflictResolution(taskId, "b".repeat(40), tokenFor)).pipe(Effect.flip);
 
       assert.include(error.message, "PR のブランチが進んでいる");
       assert.deepStrictEqual(yield* currentKinds(taskId), ["push_conflict_resolution"]);
@@ -172,12 +172,24 @@ describe("直した内容を push する", () => {
       assert.isDefined(approval);
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("確認画面で見せた commit が、最新の直した記録と違えば push しない（見ていない内容を push しない）", () =>
+    Effect.gen(function* () {
+      const taskId = yield* conflictTask;
+      const agent = doubles();
+      yield* agent.provide(finishConflictResolution(yield* startConflictResolution(taskId), {}));
+
+      const error = yield* agent.provide(pushConflictResolution(taskId, "c".repeat(40), tokenFor)).pipe(Effect.flip);
+
+      assert.include(error.message, "もう一度確かめて");
+      assert.lengthOf(agent.pushes, 0);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("直した記録がなければ push しない", () =>
     Effect.gen(function* () {
       const taskId = yield* conflictTask;
       const agent = doubles();
 
-      const error = yield* agent.provide(pushConflictResolution(taskId, tokenFor)).pipe(Effect.flip);
+      const error = yield* agent.provide(pushConflictResolution(taskId, "b".repeat(40), tokenFor)).pipe(Effect.flip);
 
       assert.include(error.message, "直した記録がない");
       assert.lengthOf(agent.pushes, 0);

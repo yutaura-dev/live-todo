@@ -35,6 +35,7 @@ import { GitHubClient, GitHubRequestError } from "../sources/github/github-adapt
 import { GitHubClientLive } from "../sources/github/github-client-live.js";
 import type { GitHubTokenSummary, Outcome, SecretStatus, SettingsSnapshot } from "../shared/api.js";
 import {
+  decodeConflictPushRequest,
   decodeFilterPreviewRequest,
   decodeMergeRequest,
   decodeStepRequest,
@@ -403,8 +404,8 @@ function registerConflictResolution() {
   ipcMain.handle(IPC_CHANNELS.pushConflictResolution, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {
-        const taskId = yield* decodeTaskId(input);
-        yield* pushConflictResolution(taskId, (accountId) =>
+        const request = yield* decodeConflictPushRequest(input);
+        yield* pushConflictResolution(request.taskId, request.commitSha, (accountId) =>
           Effect.gen(function* () {
             // push のときだけ平文に戻し、git の環境変数にだけ渡す
             return Redacted.value(yield* (yield* SecretStore).require(yield* decodeSecretKey(`github.${accountId}.token`)));

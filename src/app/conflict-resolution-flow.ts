@@ -179,7 +179,11 @@ export const latestConflictResolution = Effect.fnUntraced(function* (taskId: num
  * 外部への書き込み。ユーザーが差分を確かめて承認したあとにだけ呼ぶ。承認を記録してから、
  * 直し始めたときの head から PR のブランチが動いていないことを確かめて push する
  */
-export const pushConflictResolution = Effect.fnUntraced(function* <E, R>(taskId: number, tokenFor: (accountId: string) => Effect.Effect<string, E, R>) {
+export const pushConflictResolution = Effect.fnUntraced(function* <E, R>(
+  taskId: number,
+  approvedCommitSha: string,
+  tokenFor: (accountId: string) => Effect.Effect<string, E, R>,
+) {
   const db = yield* Database;
   const tasks = yield* TaskRepository;
   const workspace = yield* ConflictWorkspace;
@@ -187,6 +191,7 @@ export const pushConflictResolution = Effect.fnUntraced(function* <E, R>(taskId:
   if (Option.isNone(latest)) return yield* failure("コンフリクトを直した記録がない");
   const pull = yield* trackedPull(taskId);
   const { runId, headSha, result } = latest.value;
+  if (result.commitSha !== approvedCommitSha) return yield* failure("確認したあとに直し直された。もう一度確かめてから push してください");
   const token = yield* tokenFor(pull.accountId);
   const record = {
     taskId,
@@ -195,7 +200,7 @@ export const pushConflictResolution = Effect.fnUntraced(function* <E, R>(taskId:
     payload: { runId, headRef: result.headRef, commitSha: result.commitSha, baseSha: headSha },
     approvedAt: yield* nowIso,
   };
-  const pushed = yield* workspace.push(result.cwd, result.repository, result.headRef, headSha, token).pipe(Effect.result);
+  const pushed = yield* workspace.push(result.cwd, result.repository, result.headRef, headSha, result.commitSha, token).pipe(Effect.result);
   const executedAt = yield* nowIso;
   if (pushed._tag === "Failure") {
     yield* db.insert(approvals).values({ ...record, status: "failed", error: pushed.failure.message, executedAt }).pipe(Effect.orDie);

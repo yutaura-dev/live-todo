@@ -426,7 +426,8 @@ function ConflictPushFlow({ taskId, onPushed }: { taskId: number; onPushed: () =
   if ("error" in view) return <p className="problem">{view.error}</p>;
   const push = async () => {
     setState({ kind: "busy" });
-    const outcome = await api.pushConflictResolution(taskId);
+    if ("error" in view) return;
+    const outcome = await api.pushConflictResolution(taskId, view.commitSha);
     if (outcome.ok) await onPushed();
     else setState({ kind: "failed", message: outcome.message });
   };

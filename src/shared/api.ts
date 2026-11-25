@@ -98,7 +98,7 @@ export interface LiveTodoApi {
   resolveConflicts(taskId: number): Promise<Outcome>;
   conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;
   /** 直した内容を PR のブランチに push する。外部への書き込み。差分を確かめて承認したあとにだけ呼ぶ */
-  pushConflictResolution(taskId: number): Promise<Outcome>;
+  pushConflictResolution(taskId: number, commitSha: string): Promise<Outcome>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;
