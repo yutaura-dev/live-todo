@@ -36,6 +36,11 @@ export type EvalReport = {
   brierScore?: number;
   /** これより低い確率だけを対象外にすれば、取りこぼしが出ない閾値。確率がある判定方法だけ */
   safeReviewThreshold?: number;
+  /**
+   * todo と対象外を確率で区別できているか（1: 完全に区別できる / 0.5: 当てずっぽう）。
+   * Brier score は区別できているかと確率の目盛りのずれをまとめて測るので、区別だけを別に見る。
+   */
+  auc?: number;
 };
 
 export function evaluate(cases: readonly EvalCase[], predictions: Readonly<Record<string, EvalPrediction>>): EvalReport {
@@ -46,6 +51,7 @@ export function evaluate(cases: readonly EvalCase[], predictions: Readonly<Recor
   let correct = 0;
   const brier: number[] = [];
   const todoProbabilities: number[] = [];
+  const notTodoProbabilities: number[] = [];
   const results: CaseResult[] = [];
 
   for (const evalCase of cases) {
@@ -56,6 +62,7 @@ export function evaluate(cases: readonly EvalCase[], predictions: Readonly<Recor
       const truth = evalCase.expected === "todo" ? 1 : 0;
       brier.push((prediction.probability - truth) ** 2);
       if (evalCase.expected === "todo") todoProbabilities.push(prediction.probability);
+      else notTodoProbabilities.push(prediction.probability);
     }
 
     let outcome: CaseOutcome;
@@ -95,7 +102,21 @@ export function evaluate(cases: readonly EvalCase[], predictions: Readonly<Recor
     accuracyOnDecided: decided === 0 ? 0 : correct / decided,
     ...(brier.length === 0 ? {} : { brierScore: brier.reduce((sum, value) => sum + value, 0) / brier.length }),
     ...(todoProbabilities.length === 0 ? {} : { safeReviewThreshold: Math.min(...todoProbabilities) }),
+    ...(todoProbabilities.length === 0 || notTodoProbabilities.length === 0
+      ? {}
+      : { auc: aucOf(todoProbabilities, notTodoProbabilities) }),
   };
+}
+
+function aucOf(positives: readonly number[], negatives: readonly number[]): number {
+  let wins = 0;
+  for (const positive of positives) {
+    for (const negative of negatives) {
+      if (positive > negative) wins += 1;
+      else if (positive === negative) wins += 0.5;
+    }
+  }
+  return wins / (positives.length * negatives.length);
 }
 
 /** 書き出し直したときに、すでに付けた正解を残す。並びは新しく書き出した順 */

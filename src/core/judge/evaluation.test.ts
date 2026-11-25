@@ -41,6 +41,38 @@ describe("evaluate", () => {
   });
 });
 
+describe("AUC（todo と対象外を確率で区別できているか）", () => {
+  it("正解が todo の件すべてに、対象外の件より高い確率が付いていれば 1", () => {
+    const report = evaluate([evalCase("a", "todo"), evalCase("b", "todo"), evalCase("c", "not_todo")], {
+      a: { verdict: "needs_review", probability: 0.24 },
+      b: { verdict: "needs_review", probability: 0.65 },
+      c: { verdict: "needs_review", probability: 0.05 },
+    });
+
+    assert.strictEqual(report.auc, 1);
+  });
+
+  it("並びが逆なら 0、同じ確率は半分として数える", () => {
+    const reversed = evaluate([evalCase("a", "todo"), evalCase("b", "not_todo")], {
+      a: { verdict: "needs_review", probability: 0.1 },
+      b: { verdict: "needs_review", probability: 0.9 },
+    });
+    const tied = evaluate([evalCase("a", "todo"), evalCase("b", "not_todo")], {
+      a: { verdict: "needs_review", probability: 0.5 },
+      b: { verdict: "needs_review", probability: 0.5 },
+    });
+
+    assert.strictEqual(reversed.auc, 0);
+    assert.strictEqual(tied.auc, 0.5);
+  });
+
+  it("正解が片方しかないときは出さない（区別を測れないため）", () => {
+    const report = evaluate([evalCase("a", "todo")], { a: { verdict: "todo", probability: 0.9 } });
+
+    assert.isUndefined(report.auc);
+  });
+});
+
 describe("1 件ごとの結果", () => {
   it("正解・判定・確率を 1 件ごとに並べ、外れた件に印を付ける", () => {
     const report = evaluate([evalCase("a", "todo"), evalCase("b", "not_todo")], {
