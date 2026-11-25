@@ -1,7 +1,9 @@
-import { Effect, Schema } from "effect";
+import { Effect, Option, Ref, Schema } from "effect";
 import { DEFAULT_TODO_THRESHOLDS, makeTodoJudge, type TodoJudgeThresholds } from "../../core/judge/todo-judge.js";
 import type { ItemDraft, SourceBinding } from "../../core/sync/sync-source.js";
 import {
+  BODY_EXCERPT_LENGTH,
+  GitHubClient,
   type GitHubAdapterOptions,
   type GitHubItem,
   GitHubNotificationSchema,
@@ -37,20 +39,78 @@ export function githubItemDraft(item: GitHubItem): ItemDraft {
   };
 }
 
-function describeGitHubItem(item: GitHubItem): string {
-  return [
+const Viewer = Schema.Struct({ login: Schema.String });
+const Comment = Schema.Struct({
+  user: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
+  body: Schema.optional(Schema.NullOr(Schema.String)),
+});
+const decodeViewer = Schema.decodeUnknownOption(Viewer);
+const decodeComment = Schema.decodeUnknownOption(Comment);
+
+type Context = { viewer: Option.Option<string>; comment: Option.Option<{ author: string; body: string }> };
+
+function describeGitHubItem(item: GitHubItem, context: Context): string {
+  const lines = [
+    ...Option.match(context.viewer, { onNone: () => [], onSome: (login) => [`あなた（ユーザー本人）の GitHub アカウント: @${login}`] }),
     `種類: GitHub の ${item.subjectType}`,
     `リポジトリ: ${item.repository}`,
     `通知の理由: ${item.reason}`,
     `タイトル: ${item.title}`,
-  ].join("\n");
+    ...(item.author === undefined ? [] : [`作成者: @${item.author}`]),
+    ...(item.bodyExcerpt === undefined ? [] : ["本文（冒頭）:", item.bodyExcerpt]),
+    ...Option.match(context.comment, {
+      onNone: () => [],
+      onSome: ({ author, body }) => [`最新のコメント（@${author}）:`, body],
+    }),
+  ];
+  return lines.join("\n");
 }
 
 export const makeGitHubBinding = Effect.fnUntraced(function* (options: GitHubBindingOptions) {
   const adapter = yield* makeGitHubAdapter(options);
+  const client = yield* GitHubClient;
+
+  // 成功したときだけ覚える理由: 一時的な失敗を覚えてしまうと、そのプロセスの間ずっと自分のアカウント名なしで
+  // 判定することになるため。失敗したら次の判定でまた取りに行く。
+  const viewerCache = yield* Ref.make(Option.none<string>());
+  const viewer = Effect.gen(function* () {
+    const cached = yield* Ref.get(viewerCache);
+    if (Option.isSome(cached)) return cached;
+    const fetched = yield* client.getViewer.pipe(
+      Effect.map((raw) => Option.map(decodeViewer(raw), ({ login }) => login)),
+      Effect.catch(() => Effect.succeed(Option.none<string>())),
+    );
+    if (Option.isSome(fetched)) yield* Ref.set(viewerCache, fetched);
+    return fetched;
+  });
+
+  // コメントが取れなくても判定は止めない理由: コメントは判定の材料を増やすためのもので、取れなければ
+  // コメントなしの説明文で判定すればよい。
+  const latestComment = (url: string) =>
+    client.getComment(url).pipe(
+      Effect.map((raw) =>
+        Option.flatMap(Option.flatMap(raw, decodeComment), (comment) =>
+          comment.body == null || comment.body === ""
+            ? Option.none()
+            : Option.some({ author: comment.user?.login ?? "unknown", body: comment.body.slice(0, BODY_EXCERPT_LENGTH) }),
+        ),
+      ),
+      Effect.catch((error) =>
+        Effect.logWarning("最新のコメントを取得できないため、コメントなしで判定する").pipe(
+          Effect.annotateLogs({ url, reason: error.message }),
+          Effect.as(Option.none<{ author: string; body: string }>()),
+        ),
+      ),
+    );
+
+  const describe = (item: GitHubItem) =>
+    Effect.gen(function* () {
+      const comment = item.latestCommentUrl === undefined ? Option.none() : yield* latestComment(item.latestCommentUrl);
+      return describeGitHubItem(item, { viewer: yield* viewer, comment });
+    });
   const judge = yield* makeTodoJudge({
     rules: githubTodoRules,
-    describe: describeGitHubItem,
+    describe,
     question: GITHUB_TODO_QUESTION,
     thresholds: options.thresholds ?? DEFAULT_TODO_THRESHOLDS,
   });

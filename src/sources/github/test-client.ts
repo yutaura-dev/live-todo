@@ -10,5 +10,7 @@ export const gitHubClientStub = (overrides: Partial<GitHubClient["Service"]> = {
     getPullRequest: () => Effect.succeed(Option.none()),
     listCheckRuns: () => Effect.succeed<unknown>({ check_runs: [] }),
     listReviews: () => Effect.succeed<unknown>([]),
+    getComment: () => Effect.succeed(Option.none()),
+    getViewer: Effect.succeed<unknown>({ login: "me" }),
     ...overrides,
   });

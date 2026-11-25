@@ -29,7 +29,7 @@ const judge = (input: string) =>
   Effect.gen(function* () {
     const todoJudge = yield* makeTodoJudge({
       rules: [],
-      describe: (value: string) => value,
+      describe: (value: string) => Effect.succeed(value),
       question: QUESTION,
       thresholds: { todo: 0.8, review: 0.4 },
     });

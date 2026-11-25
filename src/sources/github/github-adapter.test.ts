@@ -146,6 +146,35 @@ describe("通知から GitHubItem への変換", () => {
     }));
 });
 
+describe("判定の材料", () => {
+  it.effect("PR / issue の本文の冒頭・作成者と、最新のコメントの URL を Item に持たせる", () =>
+    Effect.gen(function* () {
+      const longBody = "あ".repeat(1500);
+      const commented = { ...notifications[1]!, subject: { ...notifications[1]!.subject, latest_comment_url: "https://api.github.com/repos/acme/app/issues/comments/555" } };
+      const client = clientWith({
+        notifications: [commented],
+        subjects: { [ISSUE_URL]: { ...openIssue, body: longBody, user: { login: "alice" } } },
+      });
+
+      const { changes } = yield* fetchWith(client, null);
+
+      const [item] = upsertedItems(changes);
+      assert.strictEqual(item?.author, "alice");
+      assert.strictEqual(item?.bodyExcerpt?.length, 1000);
+      assert.strictEqual(item?.latestCommentUrl, "https://api.github.com/repos/acme/app/issues/comments/555");
+    }));
+
+  it.effect("最新のコメントの URL が対象そのものを指していたら（コメントがまだない）持たせない", () =>
+    Effect.gen(function* () {
+      const fresh = { ...notifications[0]!, subject: { ...notifications[0]!.subject, latest_comment_url: PULL_URL } };
+      const client = clientWith({ notifications: [fresh], subjects: allSubjectsOpen });
+
+      const { changes } = yield* fetchWith(client, null);
+
+      assert.isUndefined(upsertedItems(changes)[0]?.latestCommentUrl);
+    }));
+});
+
 describe("次回のカーソル", () => {
   it.effect("取得した通知のうち最も新しい updated_at を次回のカーソルにする", () =>
     Effect.gen(function* () {

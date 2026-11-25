@@ -16,7 +16,7 @@ const thresholds = { todo: 0.8, review: 0.4 };
 
 const options = {
   rules: [(item: Item) => item.reviewRequested === true],
-  describe: (item: Item) => item.text,
+  describe: (item: Item) => Effect.succeed(item.text),
   question: QUESTION,
   thresholds,
 };
@@ -147,6 +147,24 @@ describe("structured output による判定（Decisions provider が使えない
       yield* judgeWith({ text: "請求書を送ってください" }, { structured });
 
       expect(structured.classifyTodo).toHaveBeenCalledWith({ input: "請求書を送ってください", question: QUESTION });
+    }));
+});
+
+describe("説明文の作り方", () => {
+  it.effect("規則で決まった項目では、説明文を作らない（説明文の材料を取りに行かない）", () =>
+    Effect.gen(function* () {
+      let described = 0;
+      const judge = yield* makeTodoJudge({
+        ...options,
+        describe: (item: Item) => Effect.sync(() => {
+          described++;
+          return item.text;
+        }),
+      });
+
+      yield* judge({ text: "PR", reviewRequested: true }).pipe(Effect.provideService(StructuredClassifier, structuredReturning("todo")));
+
+      assert.strictEqual(described, 0);
     }));
 });
 

@@ -31,6 +31,10 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   getSubject(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
   /** 自分が author の open な PR（Search API: is:pr is:open author:@me） */
   readonly searchMyOpenPullRequests: Effect.Effect<unknown, GitHubClientError>;
+  /** 通知の latest_comment_url が指すコメント。見つからなければ Option.none */
+  getComment(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
+  /** トークンの持ち主（自分）のアカウント */
+  readonly getViewer: Effect.Effect<unknown, GitHubClientError>;
   /** 対象が削除された・見られなくなったときは Option.none を返す */
   getPullRequest(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
   listCheckRuns(repository: string, sha: string): Effect.Effect<unknown, GitHubClientError>;
@@ -41,7 +45,12 @@ export const GitHubNotificationSchema = Schema.Struct({
   id: Schema.String,
   reason: Schema.String,
   updated_at: Schema.String,
-  subject: Schema.Struct({ title: Schema.String, url: Schema.NullOr(Schema.String), type: Schema.String }),
+  subject: Schema.Struct({
+    title: Schema.String,
+    url: Schema.NullOr(Schema.String),
+    type: Schema.String,
+    latest_comment_url: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  }),
   repository: Schema.Struct({ full_name: Schema.String, html_url: Schema.String }),
 });
 export type GitHubNotification = typeof GitHubNotificationSchema.Type;
@@ -50,6 +59,8 @@ const GitHubSubjectDetail = Schema.Struct({
   state: Schema.String,
   merged: Schema.optional(Schema.Boolean),
   html_url: Schema.String,
+  body: Schema.optional(Schema.NullOr(Schema.String)),
+  user: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
 });
 type GitHubSubjectDetail = typeof GitHubSubjectDetail.Type;
 
@@ -72,7 +83,14 @@ export type GitHubItem = {
   htmlUrl: string;
   state: GitHubItemState;
   updatedAt: string;
+  /** 以下は LLM に判定を頼むときの材料 */
+  author?: string;
+  bodyExcerpt?: string;
+  latestCommentUrl?: string;
 };
+
+// LLM に渡す本文を冒頭に絞る理由: 判定には冒頭で足りることが多く、長い PR の説明をそのまま渡すと料金が増えるため。
+export const BODY_EXCERPT_LENGTH = 1000;
 
 /**
  * backfill: 前回の取得がページ数の上限で打ち切られ、since から before までの古い通知を取り残している。
@@ -131,10 +149,20 @@ export const makeGitHubAdapter = Effect.fnUntraced(function* (options: GitHubAda
       return { kind: "removed", externalId: apiUrl } satisfies SourceChange<GitHubItem>;
     }
     const detail = yield* decodeSubjectDetail(raw.value);
+    const latestCommentUrl = notification.subject.latest_comment_url;
 
     return {
       kind: "upserted",
-      item: { ...base, externalId: apiUrl, htmlUrl: detail.html_url, state: stateOf(detail) },
+      item: {
+        ...base,
+        externalId: apiUrl,
+        htmlUrl: detail.html_url,
+        state: stateOf(detail),
+        ...(detail.user == null ? {} : { author: detail.user.login }),
+        ...(detail.body == null || detail.body === "" ? {} : { bodyExcerpt: detail.body.slice(0, BODY_EXCERPT_LENGTH) }),
+        // 新しい PR の通知では latest_comment_url が対象そのものを指す（コメントがまだない）ので持たせない
+        ...(latestCommentUrl == null || latestCommentUrl === apiUrl ? {} : { latestCommentUrl }),
+      },
     } satisfies SourceChange<GitHubItem>;
   });
 

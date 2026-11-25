@@ -9,7 +9,7 @@ import { TaskRepository } from "../../core/task/task-repository.js";
 import notifications from "./__fixtures__/notifications.json" with { type: "json" };
 import mergedPull from "./__fixtures__/pull-42-merged.json" with { type: "json" };
 import closedIssue from "./__fixtures__/issue-7-closed.json" with { type: "json" };
-import { GitHubClient, type GitHubItem } from "./github-adapter.js";
+import { GitHubClient, type GitHubItem, GitHubRequestError } from "./github-adapter.js";
 import { githubItemDraft, makeGitHubBinding } from "./github-binding.js";
 import { gitHubClientStub } from "./test-client.js";
 
@@ -64,6 +64,80 @@ describe("makeGitHubBinding", () => {
 
       assert.strictEqual(binding.source, "github:work");
     }).pipe(Effect.provideService(GitHubClient, gitHubClientStub())));
+});
+
+describe("LLM に渡す説明文", () => {
+  const mention = githubItem({
+    externalId: "https://api.github.com/repos/acme/app/issues/7",
+    reason: "mention",
+    subjectType: "Issue",
+    title: "Login fails on Safari",
+    author: "carol",
+    bodyExcerpt: "Safari 17 でログインできない",
+    latestCommentUrl: "https://api.github.com/repos/acme/app/issues/comments/555",
+  });
+
+  const captureDescriptions = (client: GitHubClient["Service"], items: GitHubItem[]) =>
+    Effect.gen(function* () {
+      const inputs: string[] = [];
+      const classifier = StructuredClassifier.of({
+        classifyTodo: (request) => {
+          inputs.push(request.input);
+          return Effect.succeed<unknown>("todo");
+        },
+      });
+      const binding = yield* makeGitHubBinding({ accountId: "work", initialLookbackDays: 14 });
+      for (const item of items) yield* binding.judge(item).pipe(Effect.provideService(StructuredClassifier, classifier));
+      return inputs;
+    }).pipe(Effect.provideService(GitHubClient, client));
+
+  it.effect("本文の冒頭・作成者・最新のコメント・自分のアカウント名を説明文に含める", () =>
+    Effect.gen(function* () {
+      const client = gitHubClientStub({
+        getComment: () => Effect.succeed(Option.some<unknown>({ user: { login: "dave" }, body: "@YutaUra 確認お願いします" })),
+        getViewer: Effect.succeed<unknown>({ login: "YutaUra" }),
+      });
+
+      const [input] = yield* captureDescriptions(client, [mention]);
+
+      assert.include(input, "Safari 17 でログインできない");
+      assert.include(input, "carol");
+      assert.include(input, "@dave");
+      assert.include(input, "@YutaUra 確認お願いします");
+      assert.include(input, "あなた（ユーザー本人）の GitHub アカウント: @YutaUra");
+    }));
+
+  it.effect("規則で決まった通知では、最新のコメントを取りに行かない", () =>
+    Effect.gen(function* () {
+      const getComment = vi.fn(() => Effect.succeed(Option.none<unknown>()));
+      const client = gitHubClientStub({ getComment });
+
+      yield* captureDescriptions(client, [githubItem({ reason: "review_requested", latestCommentUrl: "https://api.github.com/x" })]);
+
+      expect(getComment).not.toHaveBeenCalled();
+    }));
+
+  it.effect("最新のコメントが取れなくても、コメントなしの説明文で判定を続ける", () =>
+    Effect.gen(function* () {
+      const client = gitHubClientStub({
+        getComment: () => Effect.fail(new GitHubRequestError({ message: "500", status: 500 })),
+      });
+
+      const inputs = yield* captureDescriptions(client, [mention]);
+
+      assert.strictEqual(inputs.length, 1);
+      assert.include(inputs[0], "Safari 17 でログインできない");
+    }));
+
+  it.effect("自分のアカウント名は、何件判定しても 1 回だけ取りに行く", () =>
+    Effect.gen(function* () {
+      const getViewer = vi.fn(() => ({ login: "YutaUra" }));
+      const client = gitHubClientStub({ getViewer: Effect.sync(getViewer) });
+
+      yield* captureDescriptions(client, [mention, { ...mention, externalId: "other" }]);
+
+      expect(getViewer).toHaveBeenCalledTimes(1);
+    }));
 });
 
 describe("GitHub の通知から Task まで", () => {

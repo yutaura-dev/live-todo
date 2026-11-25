@@ -37,7 +37,8 @@ export const DEFAULT_TODO_THRESHOLDS: TodoJudgeThresholds = { todo: 0.8, review:
 
 export type TodoJudgeOptions<TItem> = {
   rules: readonly ((item: TItem) => boolean)[];
-  describe: (item: TItem) => string;
+  /** LLM に渡す説明文。規則で決まった項目では呼ばない（説明文の材料を取りに行くのを LLM に回すときに限る） */
+  describe: (item: TItem) => Effect.Effect<string>;
   question: string;
   thresholds: TodoJudgeThresholds;
 };
@@ -75,7 +76,7 @@ export const makeTodoJudge = Effect.fnUntraced(function* <TItem>(
         return { verdict: "todo", method: "rule" } as const;
       }
 
-      const request = { input: describe(item), question };
+      const request = { input: yield* describe(item), question };
 
       // Decisions provider を必須の依存にしない理由:
       // 使えるかどうかは LLM Profile の capability で決まり、提供されていなければ fallback に落とすため（ADR-0003）。

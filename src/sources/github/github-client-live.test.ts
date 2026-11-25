@@ -159,6 +159,26 @@ describe("GitHubClientLive", () => {
       assert.isTrue(Option.isNone(missing));
     }));
 
+  it.effect("自分のアカウントは /user から取得する", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({ body: { login: "YutaUra" } }));
+
+      const viewer = yield* withClient(layer, (client) => client.getViewer);
+
+      assert.deepStrictEqual(viewer, { login: "YutaUra" });
+      assert.strictEqual(requests[0]?.url.pathname, "/user");
+    }));
+
+  it.effect("コメントは、通知に含まれる API の URL から取得する", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({ body: { body: "hi" } }));
+
+      const comment = yield* withClient(layer, (client) => client.getComment("https://api.github.com/repos/acme/app/issues/comments/555"));
+
+      assert.deepStrictEqual(comment, Option.some({ body: "hi" }));
+      assert.strictEqual(requests[0]?.url.pathname, "/repos/acme/app/issues/comments/555");
+    }));
+
   it.effect("api.github.com 以外の URL には、トークンを送らずエラーにする", () =>
     Effect.gen(function* () {
       const { requests, layer } = fakeGitHub(() => ({ body: {} }));

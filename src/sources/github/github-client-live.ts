@@ -180,6 +180,19 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
           ),
         getSubject: getOptional,
         getPullRequest: getOptional,
+        getComment: getOptional,
+        getViewer: resolveUrl("/user").pipe(
+          Effect.flatMap((url) =>
+            getOptional(url.toString()).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new GitHubRequestError({ message: "自分のアカウントを取得できない: GET /user", status: 404 })),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+        ),
         searchMyOpenPullRequests: resolveUrl("/search/issues", {
           q: "is:pr is:open author:@me archived:false",
           per_page: PER_PAGE,
