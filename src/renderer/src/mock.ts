@@ -1,4 +1,4 @@
-import type { Board, BoardCard, LiveTodoApi, MovableStatus } from "../../shared/api.js";
+import type { Board, BoardCard, ConfigDocument, LiveTodoApi, MovableStatus } from "../../shared/api.js";
 
 const now = Date.now();
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
@@ -24,6 +24,12 @@ const board = (): Board => ({
   columns: COLUMNS.map((column) => ({ ...column, cards: cards.filter((card) => card.status === column.id) })),
 });
 
+let config: ConfigDocument = {
+  llmProfiles: { personal: { provider: "anthropic", model: "claude-haiku-5-5", decisions: { provider: "openai", model: "gpt-6-luna" } } },
+  defaultLlmProfile: "personal",
+  accounts: [{ kind: "github", id: "personal", repositories: { include: ["acme/*"], exclude: ["acme/legacy", "acem/*"] } }],
+};
+
 export const mockApi: LiveTodoApi = {
   board: async () => board(),
   moveTask: async (taskId: number, status: MovableStatus) => {
@@ -35,4 +41,36 @@ export const mockApi: LiveTodoApi = {
   openExternal: async (url: string) => {
     console.info("open", url);
   },
+  settings: async () => ({
+    configPath: "/Users/me/live-todo/config.json",
+    config,
+    problems: [],
+    secrets: { "github.personal.token": "saved", "llm.anthropic.api_key": "env", "llm.openai.api_key": "missing" },
+    encryptionAvailable: true,
+  }),
+  saveConfig: async (next) => {
+    config = next;
+    return { ok: true };
+  },
+  setSecret: async () => ({ ok: true }),
+  removeSecret: async () => ({ ok: true }),
+  previewFilter: async (request) => ({
+    included: [
+      { repository: "acme/app", included: true, reason: { kind: "included_by", pattern: "acme/*" } },
+      { repository: "acme/web", included: true, reason: { kind: "included_by", pattern: "acme/*" } },
+    ],
+    excluded: [
+      { repository: "acme/legacy", included: false, reason: { kind: "excluded_by", pattern: "acme/legacy" } },
+      { repository: "me/dotfiles", included: false, reason: { kind: "not_in_include" } },
+    ],
+    unusedPatterns: ["acem/*"],
+    targets: request.targets.map((input) =>
+      input.includes("legacy")
+        ? { input, target: { repository: "acme/legacy", kind: "pull", number: 9 }, decision: { included: false, reason: { kind: "excluded_by", pattern: "acme/legacy" } } }
+        : input.startsWith("acme/") || input.includes("github.com/acme/")
+          ? { input, target: { repository: "acme/app", kind: "issue", number: 3 }, decision: { included: true, reason: { kind: "included_by", pattern: "acme/*" } } }
+          : { input },
+    ),
+    remote: { status: "loaded", truncated: false },
+  }),
 };

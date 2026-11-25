@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import type { Board, BoardCard, BoardColumnId, MovableStatus } from "../../shared/api.js";
 import { api, isMock } from "./api.js";
+import { Settings } from "./Settings.js";
 
 const REFRESH_INTERVAL_MS = 15_000;
 
@@ -22,7 +23,11 @@ function splitTitle(title: string): { main: string; repository?: string } {
 
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
 
+type View = "board" | "settings";
+const viewFromHash = (): View => (window.location.hash === "#settings" ? "settings" : "board");
+
 export function App() {
+  const [view, setView] = useState<View>(viewFromHash);
   const [board, setBoard] = useState<Board | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -91,19 +96,30 @@ export function App() {
     <div className="app">
       <header className="masthead">
         <h1 className="wordmark">live-todo</h1>
+        <nav className="views" aria-label="画面">
+          <button type="button" className="view-tab" aria-current={view === "board" ? "page" : undefined} onClick={() => setView("board")}>
+            カンバン
+          </button>
+          <button type="button" className="view-tab" aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}>
+            設定
+          </button>
+        </nav>
         <p className="sync-note">
           {isMock ? "見本のデータを表示しています" : loadedAt ? `${timeOf(loadedAt)} に読み込み` : "読み込んでいます"}
         </p>
-        <button type="button" className="quiet-button" onClick={() => void load()}>
-          再読み込み
-        </button>
+        {view === "board" && (
+          <button type="button" className="quiet-button" onClick={() => void load()}>
+            再読み込み
+          </button>
+        )}
       </header>
       {problem && (
         <p className="problem" role="alert">
           {problem}
         </p>
       )}
-      {board && (
+      {view === "settings" && <Settings />}
+      {view === "board" && board && (
         <DndContext sensors={sensors} onDragEnd={onDragEnd}>
           <main className="board">
             {board.columns.map((column) => (

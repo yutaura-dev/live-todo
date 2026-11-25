@@ -213,6 +213,10 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
             Effect.map(({ items }) => ({ check_runs: items })),
           );
         },
+        listMyRepositories: resolveUrl("/user/repos", { sort: "pushed", per_page: PER_PAGE }).pipe(
+          Effect.flatMap((url) => collectPages(url, arrayItems)),
+          Effect.map(({ items, truncated }) => ({ repositories: items, truncated })),
+        ),
         listReviews: (pullApiUrl) =>
           resolveUrl(`${pullApiUrl}/reviews`, { per_page: PER_PAGE }).pipe(
             Effect.flatMap((url) => collectPages(url, arrayItems)),

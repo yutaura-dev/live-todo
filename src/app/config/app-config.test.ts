@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, FileSystem } from "effect";
-import { decodeAppConfig, InvalidAppConfigError, loadAppConfigFile } from "./app-config.js";
+import { NodeFileSystem } from "@effect/platform-node";
+import { Effect, FileSystem, Option } from "effect";
+import { decodeAppConfig, InvalidAppConfigError, loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "./app-config.js";
 
 const validConfig = {
   llmProfiles: {
@@ -136,4 +137,52 @@ describe("loadAppConfigFile", () => {
 
       assert.instanceOf(error, InvalidAppConfigError);
     }).pipe(Effect.provide(withFile("{ not json"))));
+});
+
+describe("saveAppConfigFile", () => {
+  const inTempDir = <A, E>(use: (path: string) => Effect.Effect<A, E, FileSystem.FileSystem>) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      return yield* use(`${yield* fs.makeTempDirectoryScoped()}/config.json`);
+    }).pipe(Effect.provide(NodeFileSystem.layer));
+
+  it.effect("正しい設定を保存し、読み直すと同じ設定になる", () =>
+    inTempDir((path) =>
+      Effect.gen(function* () {
+        yield* saveAppConfigFile(path, validConfig);
+
+        const config = yield* loadAppConfigFile(path);
+        assert.deepStrictEqual(config.accounts[0]?.repositories, { include: ["acme/*"], exclude: ["acme/legacy"] });
+        assert.strictEqual(config.accounts[1]?.llmProfile, "personal");
+      }),
+    ));
+
+  it.effect("正しくない設定は保存せず、前の設定を残す", () =>
+    inTempDir((path) =>
+      Effect.gen(function* () {
+        yield* saveAppConfigFile(path, validConfig);
+
+        const error = yield* Effect.flip(saveAppConfigFile(path, { ...validConfig, defaultLlmProfile: "missing" }));
+
+        assert.instanceOf(error, InvalidAppConfigError);
+        assert.strictEqual((yield* loadAppConfigFile(path)).defaultLlmProfile, "work");
+      }),
+    ));
+});
+
+describe("readAppConfigDocument", () => {
+  it.effect("設定ファイルがなければ none を返す（設定画面で一から作れるように）", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const document = yield* readAppConfigDocument(`${yield* fs.makeTempDirectoryScoped()}/config.json`);
+
+      assert.isTrue(Option.isNone(document));
+    }).pipe(Effect.provide(NodeFileSystem.layer)));
+
+  it.effect("検証に通らない設定でも、JSON として読めればそのまま返す（画面で直せるように）", () =>
+    Effect.gen(function* () {
+      const document = yield* readAppConfigDocument("/config.json");
+
+      assert.deepStrictEqual(document, Option.some({ accounts: "broken" }));
+    }).pipe(Effect.provide(FileSystem.layerNoop({ exists: () => Effect.succeed(true), readFileString: () => Effect.succeed('{"accounts":"broken"}') }))));
 });

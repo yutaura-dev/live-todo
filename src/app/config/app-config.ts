@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Schema } from "effect";
+import { Effect, FileSystem, Option, Schema } from "effect";
 import { isRepositoryPattern } from "../../sources/github/repository-filter.js";
 
 export class InvalidAppConfigError extends Schema.TaggedError<InvalidAppConfigError>()("InvalidAppConfigError", {
@@ -92,6 +92,29 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
     return yield* new InvalidAppConfigError({ message: issues.join("\n") });
   }
   return { ...file, accounts };
+});
+
+/** 設定画面に出すための、検証前の設定。ファイルがなければ none */
+export const readAppConfigDocument = Effect.fnUntraced(function* (path: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const missing = (error: { message: string }) => new InvalidAppConfigError({ message: `設定ファイルを読めない: ${path}: ${error.message}` });
+  if (!(yield* fs.exists(path).pipe(Effect.mapError(missing)))) return Option.none<unknown>();
+  const text = yield* fs.readFileString(path).pipe(Effect.mapError(missing));
+  const json = yield* parseJson(text).pipe(
+    Effect.mapError((error) => new InvalidAppConfigError({ message: `設定ファイルが JSON として読めない: ${path}: ${error.message}` })),
+  );
+  return Option.some(json);
+});
+
+/** 検証に通った設定だけを書く。一時ファイルから置き換えるので、書いている途中で落ちても前の設定が残る */
+export const saveAppConfigFile = Effect.fnUntraced(function* (path: string, input: unknown) {
+  yield* decodeAppConfig(input);
+  const fs = yield* FileSystem.FileSystem;
+  const temporary = `${path}.tmp`;
+  yield* fs.writeFileString(temporary, `${JSON.stringify(input, null, 2)}\n`).pipe(
+    Effect.flatMap(() => fs.rename(temporary, path)),
+    Effect.mapError((error) => new InvalidAppConfigError({ message: `設定ファイルを書けない: ${path}: ${error.message}` })),
+  );
 });
 
 export const loadAppConfigFile = Effect.fnUntraced(function* (path: string) {

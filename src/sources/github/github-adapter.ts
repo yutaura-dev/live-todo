@@ -39,6 +39,8 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   getPullRequest(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
   listCheckRuns(repository: string, sha: string): Effect.Effect<unknown, GitHubClientError>;
   listReviews(pullApiUrl: string): Effect.Effect<unknown, GitHubClientError>;
+  /** 自分が見られるリポジトリ（設定画面でフィルタの効き方を見せるため）。truncated: ページ数の上限で打ち切った */
+  readonly listMyRepositories: Effect.Effect<{ repositories: unknown; truncated: boolean }, GitHubClientError>;
 }>()("live-todo/sources/github/GitHubClient") {}
 
 export const GitHubNotificationSchema = Schema.Struct({

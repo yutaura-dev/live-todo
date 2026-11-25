@@ -299,6 +299,313 @@ button {
   margin-block-start: 4px;
 }
 
+.views {
+  display: flex;
+  gap: 4px;
+  margin-inline-start: 12px;
+}
+
+.view-tab {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.view-tab[aria-current="page"] {
+  background: var(--tray);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.settings {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-block-size: 0;
+}
+
+.settings-body {
+  overflow-y: auto;
+  padding-inline-end: 8px;
+}
+
+.settings-body > * {
+  max-inline-size: 960px;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.settings-path,
+.settings-loading {
+  margin: 4px 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 14px;
+  margin-block-end: 32px;
+}
+
+.section-title {
+  margin: 0;
+  padding-block-end: 6px;
+  border-block-end: 1px solid var(--rule);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.account {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.account-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.account-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: end;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+textarea {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  resize: vertical;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+}
+
+.secret-field {
+  display: grid;
+  grid-template-columns: 10em auto minmax(12em, 1fr) auto auto;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.secret-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.secret-status--saved {
+  color: #2f5d3a;
+}
+
+.secret-status--missing {
+  color: var(--rust);
+}
+
+.secret-message {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.secret-list {
+  display: grid;
+  gap: 10px;
+}
+
+.preview-button {
+  justify-self: start;
+}
+
+.preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--paper);
+  border-radius: 6px;
+}
+
+.preview-note,
+.preview-warning {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.preview-warning {
+  color: #6b4a00;
+}
+
+.preview-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.repository-list-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.repository-list ul,
+.target-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  max-block-size: 260px;
+  overflow-y: auto;
+}
+
+.repository-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.repository-name {
+  font-weight: 600;
+}
+
+.repository-reason {
+  color: var(--muted);
+  text-align: end;
+}
+
+.target-result {
+  display: grid;
+  grid-template-columns: 6em 1fr;
+  gap: 2px 10px;
+  padding: 6px 10px;
+  background: var(--card);
+  border-inline-start: 3px solid var(--rule);
+  font-size: 12px;
+}
+
+.target-result--in {
+  border-inline-start-color: #2f5d3a;
+}
+
+.target-result--out {
+  border-inline-start-color: var(--rust);
+}
+
+.target-verdict {
+  font-weight: 600;
+}
+
+.target-input {
+  overflow-wrap: anywhere;
+}
+
+.target-reason {
+  grid-column: 2;
+  color: var(--muted);
+}
+
+.add-account {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+}
+
+.profile-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.profile-table th,
+.profile-table td {
+  padding: 6px 12px 6px 0;
+  text-align: start;
+}
+
+.profile-table thead th {
+  color: var(--muted);
+  font-weight: 300;
+  font-size: 12px;
+}
+
+.checkbox {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.llm-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-footer {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--rule);
+}
+
+.save-state {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 @media (max-width: 1180px) {
   .board {
     grid-template-columns: repeat(3, minmax(0, 1fr));

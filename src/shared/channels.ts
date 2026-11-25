@@ -4,4 +4,9 @@ export const IPC_CHANNELS = {
   move: "board:move",
   seen: "board:seen",
   openExternal: "external:open",
+  settings: "settings:get",
+  saveConfig: "settings:save-config",
+  setSecret: "settings:set-secret",
+  removeSecret: "settings:remove-secret",
+  previewFilter: "settings:preview-filter",
 } as const;

@@ -81,6 +81,21 @@ describe("GitHubClientLive", () => {
       assert.strictEqual(requests.length, 2);
     }));
 
+  it.effect("自分が見られるリポジトリを、最近 push された順に複数ページまとめて取得する", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub((url) =>
+        url.searchParams.get("page") === "2"
+          ? { body: [{ full_name: "acme/web" }] }
+          : { body: [{ full_name: "acme/app" }], headers: { link: '<https://api.github.com/user/repos?page=2>; rel="next"' } },
+      );
+
+      const result = yield* withClient(layer, (client) => client.listMyRepositories);
+
+      assert.deepStrictEqual(result, { repositories: [{ full_name: "acme/app" }, { full_name: "acme/web" }], truncated: false });
+      assert.strictEqual(requests[0]?.url.pathname, "/user/repos");
+      assert.strictEqual(requests[0]?.url.searchParams.get("sort"), "pushed");
+    }));
+
   it.effect("before を指定したら、その時刻より前の通知に絞って取得する", () =>
     Effect.gen(function* () {
       const { requests, layer } = fakeGitHub(() => ({ body: [] }));
