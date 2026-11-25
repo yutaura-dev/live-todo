@@ -7,6 +7,9 @@ import { LlmStructuredClassifier } from "../core/judge/llm-classifier.js";
 import { StructuredClassifier } from "../core/judge/todo-judge.js";
 import type { LlmProfile } from "./config/app-config.js";
 
+// 判定は verdict と 1 文の理由だけなので、出力トークンに上限を付けて料金の上振れを防ぐ。
+const MAX_JUDGMENT_OUTPUT_TOKENS = 256;
+
 export class UnsupportedLlmProviderError extends Schema.TaggedError<UnsupportedLlmProviderError>()(
   "UnsupportedLlmProviderError",
   { provider: Schema.String },
@@ -27,7 +30,7 @@ export const makeStructuredClassifier = Effect.fnUntraced(function* (profile: Ll
       const apiKey = yield* secrets.require("llm.anthropic.api_key");
       return yield* buildClassifier(
         LlmStructuredClassifier.pipe(
-          Layer.provide(AnthropicLanguageModel.model(profile.model)),
+          Layer.provide(AnthropicLanguageModel.model(profile.model, { max_tokens: MAX_JUDGMENT_OUTPUT_TOKENS })),
           Layer.provide(AnthropicClient.layer({ apiKey })),
         ),
       );

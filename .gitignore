@@ -8,7 +8,10 @@ node_modules/
 
 # local app config（形式は config.example.json）とローカル DB
 /config.json
+/config.*.json
+!/config.example.json
 /live-todo.db*
+/live-todo-*.db*
 
 # env files
 .env

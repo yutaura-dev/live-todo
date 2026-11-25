@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer } from "effect";
-import { FetchHttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { EnvSecretStore, MissingSecretError } from "../core/config/secret-store.js";
 import { makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
 
@@ -33,6 +33,28 @@ describe("makeStructuredClassifier", () => {
 
       assert.isFunction(classifier.classifyTodo);
     }).pipe(withEnv({ LIVE_TODO_SECRET_LLM_ANTHROPIC_API_KEY: "sk-test" })));
+
+  it.effect("Anthropic への判定のリクエストには、出力トークンの上限を付ける", () => {
+    const bodies: unknown[] = [];
+    const http = HttpClient.make((request) => {
+      if (request.body._tag === "Uint8Array") bodies.push(JSON.parse(new TextDecoder().decode(request.body.body)));
+      return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}", { status: 500 })));
+    });
+    return Effect.gen(function* () {
+      const classifier = yield* makeStructuredClassifier({ provider: "anthropic", model: "claude-haiku-5-5" });
+
+      yield* Effect.exit(classifier.classifyTodo({ input: "x", question: "q" }));
+
+      assert.deepInclude(bodies[0], { model: "claude-haiku-5-5", max_tokens: 256 });
+    }).pipe(
+      Effect.provide(EnvSecretStore),
+      Effect.provideService(HttpClient.HttpClient, http),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromEnv({ env: { LIVE_TODO_SECRET_LLM_ANTHROPIC_API_KEY: "sk-test" } }),
+      ),
+    );
+  });
 
   it.effect("まだ対応していない provider は、起動時にエラーにする", () =>
     Effect.gen(function* () {

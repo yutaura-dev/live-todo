@@ -1,6 +1,6 @@
 import { NodeFileSystem, NodeRuntime } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Cause, Config, Effect, Exit, Layer } from "effect";
+import { Cause, Config, Effect, Exit, Layer, References } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { EnvSecretStore } from "../core/config/secret-store.js";
 import { Database, DatabaseMigrations } from "../core/db/database.js";
@@ -33,6 +33,9 @@ const printTasks = Effect.gen(function* () {
   }
 });
 
+// 判定の理由など debug のログを見たいときは LIVE_TODO_LOG_LEVEL=Debug を付けて実行する
+const logLevel = Config.LogLevel("LIVE_TODO_LOG_LEVEL").pipe(Config.withDefault("Info"));
+
 const program = Effect.gen(function* () {
   const configPath = yield* Config.String("LIVE_TODO_CONFIG").pipe(Config.withDefault("./config.json"));
   const config = yield* loadAppConfigFile(configPath);
@@ -56,4 +59,9 @@ const program = Effect.gen(function* () {
   Effect.provide(Layer.mergeAll(EnvSecretStore, FetchHttpClient.layer, NodeFileSystem.layer)),
 );
 
-NodeRuntime.runMain(program);
+NodeRuntime.runMain(
+  Effect.gen(function* () {
+    const level = yield* logLevel;
+    return yield* program.pipe(Effect.provideService(References.MinimumLogLevel, level));
+  }),
+);
