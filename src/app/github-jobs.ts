@@ -15,6 +15,7 @@ import { DecisionsProvider, type JudgeRequestError, StructuredClassifier } from 
 import { judgeThresholdsFor, makeDecisionsProvider, makeStructuredClassifier } from "./llm.js";
 import { backfillGitHubPullAuthors } from "./github-author-backfill.js";
 import { checkWaitConditions } from "./wait-watch.js";
+import { refreshTrackedItems } from "./item-refresh.js";
 import type { ResolvedAccount } from "./config/app-config.js";
 
 export const NOTIFICATION_SYNC_INTERVAL = "1 minute";
@@ -24,6 +25,8 @@ export const WATCH_SYNC_INTERVAL = "5 minutes";
 export const AUTHOR_BACKFILL_INTERVAL = "1 day";
 // 待つ手順の条件は、待っている Task ごとに 1 回 API を呼ぶだけなので、見張りと同じ間隔にする
 export const WAIT_CHECK_INTERVAL = "5 minutes";
+// 通知の来ない状態の変化（自分で merge した PR など）を拾う。終わっていない Task の項目ごとに 1 回 API を呼ぶ
+export const ITEM_REFRESH_INTERVAL = "5 minutes";
 
 export type GitHubJobError = GitHubAdapterError | JudgeRequestError;
 export type GitHubJobRequirements = SourceItemRepository | TaskRepository | SqlClient.SqlClient | Database;
@@ -65,6 +68,7 @@ export const makeGitHubJobs = Effect.fnUntraced(function* (account: ResolvedAcco
   const jobs: ReadonlyArray<SyncJob<GitHubJobError, GitHubJobRequirements>> = [
     { name: notifications.source, interval: NOTIFICATION_SYNC_INTERVAL, run: withJudges(syncSource(notifications)), backoffUntil: githubBackoffUntil },
     { name: watch.source, interval: WATCH_SYNC_INTERVAL, run: syncSource(watch), backoffUntil: githubBackoffUntil },
+    { name: `github:${account.id}:refresh`, interval: ITEM_REFRESH_INTERVAL, run: refreshTrackedItems(account.id, client), backoffUntil: githubBackoffUntil },
     { name: `github:${account.id}:waits`, interval: WAIT_CHECK_INTERVAL, run: checkWaitConditions(account.id, client), backoffUntil: githubBackoffUntil },
     {
       name: `github:${account.id}:authors`,

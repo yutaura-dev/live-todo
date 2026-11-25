@@ -50,7 +50,7 @@ const withEnv = (env: Record<string, string>) =>
 const TOKEN_ENV = { LIVE_TODO_SECRET_GITHUB_WORK_TOKEN: "ghp_test" };
 
 describe("makeGitHubJobs", () => {
-  it.effect("アカウントごとに、通知の同期・見張り・待つ手順の確認・作成者の埋め直しのジョブを、それぞれの間隔で作る", () =>
+  it.effect("アカウントごとに、通知の同期・見張り・項目の状態の読み直し・待つ手順の確認・作成者の埋め直しのジョブを、それぞれの間隔で作る", () =>
     Effect.gen(function* () {
       const jobs = yield* makeGitHubJobs(yield* account);
 
@@ -59,6 +59,7 @@ describe("makeGitHubJobs", () => {
         [
           ["github:work", Duration.toMillis("1 minute")],
           ["github:work:watch", Duration.toMillis("5 minutes")],
+          ["github:work:refresh", Duration.toMillis("5 minutes")],
           ["github:work:waits", Duration.toMillis("5 minutes")],
           ["github:work:authors", Duration.toMillis("1 day")],
         ],

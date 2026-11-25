@@ -135,6 +135,28 @@ const applyChange = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
   }
 });
 
+/**
+ * 取得し直した状態だけを、保存済みの項目に反映する（通知が来ないまま merge されたときなど）。
+ * 同期と同じく、状態が変われば Activity を残し、追っている Task の状態を合わせる。変わったら true
+ */
+export const applyItemState = Effect.fnUntraced(function* (source: string, externalId: string, state: ItemState) {
+  const items = yield* SourceItemRepository;
+  const previous = yield* items.findItem(source, externalId);
+  if (Option.isNone(previous) || previous.value.state === state) return false;
+  const { title, url, fingerprint, author } = previous.value;
+  return yield* withTransaction(
+    Effect.gen(function* () {
+      const item = yield* items.upsertItem({ source, externalId, title, url, fingerprint, state, ...(author === null ? {} : { author }) });
+      const kinds = detectActivities(previous, item);
+      for (const kind of kinds) yield* items.recordActivity(item.id, kind);
+      if (item.triage === "linked" && kinds.some((kind) => STATUS_AFFECTING_ACTIVITIES.has(kind))) {
+        yield* reconcileStatus(item, { activities: 0, tasksCreated: 0, tasksUpdated: 0, itemsIgnored: 0 });
+      }
+      return true;
+    }),
+  );
+});
+
 const triage = Effect.fnUntraced(function* (item: SourceItem, judgment: TodoJudgment | undefined, summary: SyncSummary) {
   // 判定がない（初めて見た時点で解決済みなど）Item は pending のまま残し、再オープンされたときに判定する。
   if (item.state !== "open" || judgment === undefined) return;
