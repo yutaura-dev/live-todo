@@ -119,7 +119,7 @@ describe("mergeDataset", () => {
 });
 
 describe("labelFromUserActions（使っているときの操作から正解を読み取る）", () => {
-  const change = (after: string, actor: "sync" | "user") => ({ kind: "field_changed" as const, field: "status", after, actor });
+  const change = (after: string, actor: "sync" | "user" | "filter") => ({ kind: "field_changed" as const, field: "status", after, actor });
 
   it("ユーザーが dismissed にしたら not_todo", () => {
     assert.strictEqual(labelFromUserActions([change("dismissed", "user")]), "not_todo");
@@ -131,6 +131,10 @@ describe("labelFromUserActions（使っているときの操作から正解を�
 
   it("同期による変化（マージで自動的に done になったなど）は、ユーザーの判断として数えない", () => {
     assert.isNull(labelFromUserActions([change("done", "sync")]));
+  });
+
+  it("フィルタで除外して片付けたものは、ユーザーの判断として数えない（対象外が正解になるわけではない）", () => {
+    assert.isNull(labelFromUserActions([change("dismissed", "filter")]));
   });
 
   it("ユーザーが何度か変えたら、最後の操作で決める", () => {

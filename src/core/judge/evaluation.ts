@@ -1,3 +1,4 @@
+import type { ChangeActor } from "../task/task.js";
 import type { JudgeRequest, TodoVerdict } from "./todo-judge.js";
 
 export type EvalLabel = "todo" | "not_todo";
@@ -131,7 +132,7 @@ export function mergeDataset(
   return exported.map((entry) => ({ ...entry, expected: labels.get(entry.id) ?? entry.expected ?? null }));
 }
 
-export type StatusChangeRecord = { kind: string; field?: string | null; after: unknown; actor: "sync" | "user" };
+export type StatusChangeRecord = { kind: string; field?: string | null; after: unknown; actor: ChangeActor };
 
 const LABEL_OF_STATUS: Readonly<Record<string, EvalLabel>> = {
   dismissed: "not_todo",

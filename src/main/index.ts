@@ -5,6 +5,7 @@ import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Opt
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
+import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
@@ -90,6 +91,10 @@ let syncProblem: string | undefined;
 
 const startSync = Effect.gen(function* () {
   const config = yield* loadAppConfigFile(configPath);
+  for (const account of config.accounts) {
+    const dismissed = yield* dismissTasksOutsideFilter(account.id, account.repositories ?? {});
+    if (dismissed > 0) yield* Effect.log(`フィルタで除外したリポジトリの Task を ${dismissed} 件片付けた`).pipe(Effect.annotateLogs({ account: account.id }));
+  }
   const jobs = (yield* Effect.forEach(config.accounts, makeGitHubJobs)).flat();
   syncProblem = undefined;
   yield* Effect.log(`同期を始める: ${jobs.map((job) => job.name).join(", ")}`);

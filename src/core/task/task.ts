@@ -7,5 +7,6 @@ export type TaskChangeKind = (typeof TASK_CHANGE_KINDS)[number];
 export const LINK_ROLES = ["tracks", "context"] as const;
 export type LinkRole = (typeof LINK_ROLES)[number];
 
-export const CHANGE_ACTORS = ["sync", "user"] as const;
+/** filter: フィルタで除外したリポジトリの Task を片付けた（ユーザーの判断ではないので、判定の正解には使わない） */
+export const CHANGE_ACTORS = ["sync", "user", "filter"] as const;
 export type ChangeActor = (typeof CHANGE_ACTORS)[number];
