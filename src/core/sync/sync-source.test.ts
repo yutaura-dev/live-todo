@@ -105,6 +105,7 @@ describe("新しい Item", () => {
   it.effect.each([
     ["todo", "todo"],
     ["needs_review", "needs_review"],
+    ["not_todo", "needs_review"],
   ] as const)("判定が %s なら、ステータス %s の Task を作って tracks で紐づける", ([verdict, status]) =>
     Effect.gen(function* () {
       yield* syncSource(bindingWith(batches([upserted(item())]), judgeReturning(verdict)));
@@ -115,13 +116,13 @@ describe("新しい Item", () => {
       assert.deepStrictEqual(yield* (yield* TaskRepository).trackedItemStates(task!.id), ["open"]);
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("判定が not_todo なら Task を作らず、Item を対象外として残す", () =>
+  it.effect("判定が not_todo でも隠さず、要確認の Task にして判定を記録する（使いながら正解を集めるため）", () =>
     Effect.gen(function* () {
       yield* syncSource(bindingWith(batches([upserted(item())]), judgeReturning("not_todo")));
 
       const found = yield* (yield* SourceItemRepository).findItem("test", "a");
-      assert.isUndefined(yield* taskOfItem("a"));
-      assert.strictEqual(Option.getOrUndefined(found)?.triage, "ignored");
+      assert.strictEqual((yield* taskOfItem("a"))?.status, "needs_review");
+      assert.strictEqual(Option.getOrUndefined(found)?.triage, "linked");
       assert.deepInclude(Option.getOrUndefined(found)?.judgment, { verdict: "not_todo", method: "structured" });
     }).pipe(Effect.provide(TestDatabase)));
 
@@ -234,7 +235,7 @@ describe("Item の変化と Task の更新", () => {
       expect(judge).toHaveBeenCalledTimes(1);
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("対象外にした Item は、内容が変わっても判定し直さない", () =>
+  it.effect("not_todo と判定した Item は、内容が変わっても判定し直さない", () =>
     Effect.gen(function* () {
       const judge = judgeReturning("not_todo");
       const binding = bindingWith(batches([upserted(item())], [upserted(item({ version: 2 }))]), judge);

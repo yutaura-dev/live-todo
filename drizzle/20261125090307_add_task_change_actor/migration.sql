@@ -1,0 +1,1 @@
+ALTER TABLE `task_changes` ADD `actor` text DEFAULT 'sync' NOT NULL;

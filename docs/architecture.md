@@ -169,6 +169,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 
 | 判定 | 閾値 | 結果 |
 |------|------|------|
+| LLM / Decisions の not_todo | — | **当面は隠さず要確認の Task にする**。判定は Source Item に記録し、ユーザーが dismissed にした操作などを正解として集めてから閾値を決める |
 | todo 判定（Decisions の確率） | 0.8 以上 / 0.05 以上 0.8 未満 / 0.05 未満 | todo / 要確認 / 対象外。LLM Profile の `decisions.thresholds` で変えられる。本物で試したとき、Haiku が todo と判定した自分の PR に Decisions が 0.2 前後を付けたため、確率の当たり具合を確かめるまでは対象外を 0.05 未満に絞る |
 | カスタムラベル（自然文ルール） | 0.8 以上 | 付与 |
 | 未分類 Task とのまとまり（predicate） | 0.8 以上の Task が 1 件以上 | Epic を作る |

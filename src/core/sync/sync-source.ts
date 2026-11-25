@@ -35,10 +35,13 @@ export type SyncSummary = {
   itemsIgnored: number;
 };
 
+// not_todo も要確認の Task にする理由: 判定の当たり具合を確かめる前に黙って隠すと、自分の todo を取りこぼしても
+// 気づけない。使いながらユーザーが dismissed にした操作を正解として集め、閾値を決めてから隠すようにする。
 const STATUS_ON_CREATE = {
   todo: "todo",
   needs_review: "needs_review",
-} as const satisfies Record<Exclude<TodoVerdict, "not_todo">, TaskStatus>;
+  not_todo: "needs_review",
+} as const satisfies Record<TodoVerdict, TaskStatus>;
 
 const STATUS_AFFECTING_ACTIVITIES: ReadonlySet<ActivityKind> = new Set(["resolved", "reopened", "removed"]);
 
@@ -136,12 +139,6 @@ const triage = Effect.fnUntraced(function* (item: SourceItem, judgment: TodoJudg
   if (item.state !== "open" || judgment === undefined) return;
   const items = yield* SourceItemRepository;
   const tasks = yield* TaskRepository;
-
-  if (judgment.verdict === "not_todo") {
-    yield* items.setTriage(item.id, "ignored", judgment);
-    summary.itemsIgnored++;
-    return;
-  }
 
   const task = yield* tasks.createTask({ title: item.title, status: STATUS_ON_CREATE[judgment.verdict] });
   yield* tasks.linkItem(task.id, item.id, "tracks");

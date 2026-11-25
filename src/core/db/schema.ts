@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { ACTIVITY_KINDS, ITEM_STATES, ITEM_TRIAGES } from "../source/source-item.js";
-import { LINK_ROLES, TASK_CHANGE_KINDS, TASK_STATUSES } from "../task/task.js";
+import { CHANGE_ACTORS, LINK_ROLES, TASK_CHANGE_KINDS, TASK_STATUSES } from "../task/task.js";
 
 export const sourceItems = sqliteTable(
   "source_items",
@@ -75,6 +75,8 @@ export const taskChanges = sqliteTable(
     field: text(),
     before: text({ mode: "json" }),
     after: text({ mode: "json" }),
+    /** 誰が変えたか。ユーザーの操作だけを、判定の正解として集めるため */
+    actor: text({ enum: CHANGE_ACTORS }).notNull().default("sync"),
     occurredAt: text("occurred_at").notNull(),
     seenAt: text("seen_at"),
   },

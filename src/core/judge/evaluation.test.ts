@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { type EvalCase, evaluate, mergeDataset } from "./evaluation.js";
+import { type EvalCase, evaluate, labelFromUserActions, mergeDataset } from "./evaluation.js";
 
 const request = { input: "x", question: "q" };
 const evalCase = (id: string, expected: "todo" | "not_todo"): EvalCase => ({ id, title: id, request, expected });
@@ -87,6 +87,20 @@ describe("1 件ごとの結果", () => {
   });
 });
 
+describe("mergeDataset（操作から読み取った正解）", () => {
+  it("手で付けた正解がない件にだけ、操作から読み取った正解を使う", () => {
+    const merged = mergeDataset(
+      [{ id: "a", title: "A", request, expected: "not_todo" }],
+      [
+        { id: "a", title: "A", request, expected: "todo" },
+        { id: "b", title: "B", request, expected: "todo" },
+      ],
+    );
+
+    assert.deepStrictEqual(merged.map((entry) => entry.expected), ["not_todo", "todo"]);
+  });
+});
+
 describe("mergeDataset", () => {
   it("書き出し直しても、すでに付けた正解は残し、新しい件は正解なしで足す", () => {
     const merged = mergeDataset(
@@ -101,5 +115,29 @@ describe("mergeDataset", () => {
       { id: "a", title: "A（更新）", request: { input: "y", question: "q" }, expected: "todo" },
       { id: "b", title: "B", request, expected: null },
     ]);
+  });
+});
+
+describe("labelFromUserActions（使っているときの操作から正解を読み取る）", () => {
+  const change = (after: string, actor: "sync" | "user") => ({ kind: "field_changed" as const, field: "status", after, actor });
+
+  it("ユーザーが dismissed にしたら not_todo", () => {
+    assert.strictEqual(labelFromUserActions([change("dismissed", "user")]), "not_todo");
+  });
+
+  it.each(["todo", "in_progress", "done"])("ユーザーが %s にしたら todo", (status) => {
+    assert.strictEqual(labelFromUserActions([change(status, "user")]), "todo");
+  });
+
+  it("同期による変化（マージで自動的に done になったなど）は、ユーザーの判断として数えない", () => {
+    assert.isNull(labelFromUserActions([change("done", "sync")]));
+  });
+
+  it("ユーザーが何度か変えたら、最後の操作で決める", () => {
+    assert.strictEqual(labelFromUserActions([change("dismissed", "user"), change("todo", "user")]), "todo");
+  });
+
+  it("ユーザーが何もしていなければ正解なし（放置は正解として数えない）", () => {
+    assert.isNull(labelFromUserActions([]));
   });
 });

@@ -1,12 +1,12 @@
 import { NodeFileSystem, NodeRuntime } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { isNotNull } from "drizzle-orm";
+import { asc, eq, isNotNull } from "drizzle-orm";
 import { Config, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { EnvSecretStore } from "../core/config/secret-store.js";
 import { Database } from "../core/db/database.js";
-import { sourceItems } from "../core/db/schema.js";
-import { type DatasetEntry, type EvalCase, type EvalPrediction, evaluate, mergeDataset } from "../core/judge/evaluation.js";
+import { sourceItems, taskChanges, taskLinks } from "../core/db/schema.js";
+import { type DatasetEntry, type EvalCase, type EvalPrediction, evaluate, labelFromUserActions, mergeDataset } from "../core/judge/evaluation.js";
 import { DecisionsProvider, makeTodoJudge, StructuredClassifier } from "../core/judge/todo-judge.js";
 import { loadAppConfigFile } from "./config/app-config.js";
 import { judgeThresholdsFor, makeDecisionsProvider, makeStructuredClassifier } from "./llm.js";
@@ -32,12 +32,19 @@ const readDataset = Effect.gen(function* () {
 const exportDataset = Effect.gen(function* () {
   const db = yield* Database;
   const rows = yield* db.select().from(sourceItems).where(isNotNull(sourceItems.judgment));
-  const exported = rows.flatMap((row) =>
-    Option.match(decodeStored(row.judgment), {
-      onNone: () => [],
-      onSome: ({ request }) => [{ id: `${row.source}|${row.externalId}`, title: row.title, request }],
-    }),
-  );
+  const exported = [];
+  for (const row of rows) {
+    const stored = decodeStored(row.judgment);
+    if (Option.isNone(stored)) continue;
+    // 紐づいた Task へのユーザーの操作（dismissed にした・自分で状態を動かした）から正解を読み取る
+    const changes = yield* db
+      .select({ kind: taskChanges.kind, field: taskChanges.field, after: taskChanges.after, actor: taskChanges.actor })
+      .from(taskLinks)
+      .innerJoin(taskChanges, eq(taskChanges.taskId, taskLinks.taskId))
+      .where(eq(taskLinks.sourceItemId, row.id))
+      .orderBy(asc(taskChanges.id));
+    exported.push({ id: `${row.source}|${row.externalId}`, title: row.title, request: stored.value.request, expected: labelFromUserActions(changes) });
+  }
   const merged = mergeDataset(yield* readDataset, exported);
   const fs = yield* FileSystem.FileSystem;
   const path = yield* datasetPath;

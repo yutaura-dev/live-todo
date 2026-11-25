@@ -94,6 +94,17 @@ describe("TaskRepository", () => {
       assert.deepInclude(change, { kind: "field_changed", field: "status", before: "todo", after: "done" });
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("変更を記録するときに誰が変えたか（同期かユーザーか）を残し、指定しなければ同期とする", () =>
+    Effect.gen(function* () {
+      const tasks = yield* TaskRepository;
+      const task = yield* tasks.createTask({ title: "a", status: "todo" });
+
+      yield* tasks.recordChange(task.id, { kind: "field_changed", field: "status", before: "todo", after: "done", unread: true });
+      yield* tasks.recordChange(task.id, { kind: "field_changed", field: "status", before: "done", after: "dismissed", unread: false, actor: "user" });
+
+      assert.deepStrictEqual((yield* tasks.listChanges(task.id)).map((change) => change.actor), ["sync", "user"]);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("既読にすると、その Task の未読の変更がなくなる", () =>
     Effect.gen(function* () {
       const tasks = yield* TaskRepository;

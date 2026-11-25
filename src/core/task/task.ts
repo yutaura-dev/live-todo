@@ -6,3 +6,6 @@ export type TaskChangeKind = (typeof TASK_CHANGE_KINDS)[number];
 
 export const LINK_ROLES = ["tracks", "context"] as const;
 export type LinkRole = (typeof LINK_ROLES)[number];
+
+export const CHANGE_ACTORS = ["sync", "user"] as const;
+export type ChangeActor = (typeof CHANGE_ACTORS)[number];

@@ -119,11 +119,33 @@ function aucOf(positives: readonly number[], negatives: readonly number[]): numb
   return wins / (positives.length * negatives.length);
 }
 
-/** 書き出し直したときに、すでに付けた正解を残す。並びは新しく書き出した順 */
+/**
+ * 書き出し直したときに、すでに付けた正解を残す。並びは新しく書き出した順。
+ * 書き出す側が使っているときの操作から読み取った正解（expected）を持っていれば、手で付けた正解がない件にだけ使う。
+ */
 export function mergeDataset(
   existing: readonly DatasetEntry[],
-  exported: readonly Omit<DatasetEntry, "expected">[],
+  exported: readonly (Omit<DatasetEntry, "expected"> & { expected?: EvalLabel | null })[],
 ): DatasetEntry[] {
   const labels = new Map(existing.map((entry) => [entry.id, entry.expected]));
-  return exported.map((entry) => ({ ...entry, expected: labels.get(entry.id) ?? null }));
+  return exported.map((entry) => ({ ...entry, expected: labels.get(entry.id) ?? entry.expected ?? null }));
+}
+
+export type StatusChangeRecord = { kind: string; field?: string | null; after: unknown; actor: "sync" | "user" };
+
+const LABEL_OF_STATUS: Readonly<Record<string, EvalLabel>> = {
+  dismissed: "not_todo",
+  todo: "todo",
+  in_progress: "todo",
+  done: "todo",
+};
+
+/**
+ * 使っているときの操作から、判定の正解を読み取る。ユーザーが最後にステータスを変えた操作で決める。
+ * 同期による変化（マージで自動的に done になったなど）や、何もしていない（放置）は正解として数えない。
+ */
+export function labelFromUserActions(changes: readonly StatusChangeRecord[]): EvalLabel | null {
+  const userStatusChanges = changes.filter((change) => change.actor === "user" && change.kind === "field_changed" && change.field === "status");
+  const last = userStatusChanges.at(-1);
+  return typeof last?.after === "string" ? (LABEL_OF_STATUS[last.after] ?? null) : null;
 }

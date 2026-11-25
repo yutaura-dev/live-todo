@@ -3,7 +3,7 @@ import { Context, DateTime, Effect, Layer, Option } from "effect";
 import { Database, returnedRow } from "../db/database.js";
 import { sourceItems, taskChanges, taskLinks, tasks } from "../db/schema.js";
 import type { ItemState } from "../source/source-item.js";
-import type { LinkRole, TaskChangeKind, TaskStatus } from "./task.js";
+import type { ChangeActor, LinkRole, TaskChangeKind, TaskStatus } from "./task.js";
 
 export type Task = typeof tasks.$inferSelect;
 export type TaskWithUnread = Task & { unreadChanges: number };
@@ -19,6 +19,8 @@ export type TaskChangeInput = {
   after?: unknown;
   /** false にすると更新マークの対象にしない（作成時の記録など） */
   unread: boolean;
+  /** 誰が変えたか。指定しなければ同期（sync） */
+  actor?: ChangeActor;
 };
 
 export class TaskRepository extends Context.Service<TaskRepository, {
@@ -85,6 +87,7 @@ export class TaskRepository extends Context.Service<TaskRepository, {
           field: change.field ?? null,
           before: change.before ?? null,
           after: change.after ?? null,
+          actor: change.actor ?? "sync",
           occurredAt: now,
           seenAt: change.unread ? null : now,
         });

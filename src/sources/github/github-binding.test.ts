@@ -197,7 +197,7 @@ describe("GitHub の通知から Task まで", () => {
       for (let index = 0; index < times; index++) yield* syncSource(binding);
     }).pipe(Effect.provideService(GitHubClient, client), Effect.provideService(StructuredClassifier, classifier));
 
-  it.effect("レビュー依頼と CI の通知は LLM を呼ばずに Task にし、メンションは判定に従う", () =>
+  it.effect("レビュー依頼と CI の通知は LLM を呼ばずに Task にし、LLM が not_todo と答えたメンションも隠さず要確認にする", () =>
     Effect.gen(function* () {
       const classifier = classifierAnswering("not_todo");
       const client = clientServing({ [PULL_URL]: openPull, [ISSUE_URL]: openIssue }, [notifications]);
@@ -206,7 +206,7 @@ describe("GitHub の通知から Task まで", () => {
 
       assert.deepStrictEqual(yield* tasksByUrl, {
         [PULL_URL]: "todo",
-        [ISSUE_URL]: "(ignored)",
+        [ISSUE_URL]: "needs_review",
         "github:thread:1003": "todo",
       });
       expect(classifier.classifyTodo).toHaveBeenCalledTimes(1);
