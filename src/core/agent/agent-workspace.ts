@@ -78,6 +78,14 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
             return yield* new AgentWorkspaceError({ message: "PR の情報を集めている間に PR が更新された" });
           }
           const contextDir = `${taskRoot}/context`;
+          const optional = (args: string[]) =>
+            spawner.string(ChildProcess.make("gh", args)).pipe(Effect.orElseSucceed(() => "（取得できなかった）"));
+          const openPulls = yield* optional(commands.openPulls);
+          const dashboard = yield* optional(commands.dashboard);
+          yield* Effect.all([
+            fs.writeFileString(`${contextDir}/open-prs.json`, openPulls).pipe(Effect.ignore),
+            fs.writeFileString(`${contextDir}/dependency-dashboard.md`, dashboard).pipe(Effect.ignore),
+          ]);
           yield* Effect.all([
             fs.makeDirectory(contextDir, { recursive: true }),
             fs.writeFileString(`${contextDir}/pr.json`, view),

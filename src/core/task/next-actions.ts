@@ -8,7 +8,9 @@ export const EFFORTS = ["easy", "normal", "hard", "tedious"] as const;
 export type Effort = (typeof EFFORTS)[number];
 
 type StepBase = { id: string; title: string; effort: Effort; mode: "serial" | "parallel"; status: "todo" | "done" };
-export type ActionStep = StepBase & { kind: "manual" | "merge_pull_request" | "fix_and_push" };
+/** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
+export type ActionStep = StepBase & { kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" };
+export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push"] as const;
 export type DecisionStep = StepBase & {
   kind: "decision";
   options: ReadonlyArray<{ key: string; label: string; steps: ReadonlyArray<Step> }>;
@@ -48,7 +50,9 @@ function mapSteps(steps: ReadonlyArray<Step>, change: (step: Step) => Step): Ste
 
 /** Task の難易度。いま着手できる手順のうち、いちばん手間の少ないもの（直列なら先頭、並列ならその中で最も簡単なもの） */
 export function taskEffort(plan: NextActionPlan): Effort | undefined {
-  const efforts = currentSteps(plan).map((step) => EFFORTS.indexOf(step.effort));
+  const efforts = currentSteps(plan)
+    .filter((step) => step.kind !== "wait")
+    .map((step) => EFFORTS.indexOf(step.effort));
   return efforts.length === 0 ? undefined : EFFORTS[Math.min(...efforts)];
 }
 
@@ -70,12 +74,55 @@ export const chooseOption = (plan: NextActionPlan, id: string, key: string): Nex
   steps: mapSteps(plan.steps, (step) => (step.id === id && step.kind === "decision" ? { ...step, chosen: key, status: "done" } : step)),
 });
 
-/** 依存更新の PR の調査の結論から、次にやることを決める */
+/** AI が考えた手順。type がなければ手作業 */
+export type ProposedStep = {
+  title: string;
+  effort: Effort;
+  mode: "serial" | "parallel";
+  type?: ActionStep["kind"] | undefined;
+  options?: ReadonlyArray<{ label: string; steps: ReadonlyArray<Omit<ProposedStep, "options">> }> | undefined;
+};
+
+/** AI が考えた手順の並びを、手順の並びに変える。id は位置から決める */
+export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>): NextActionPlan {
+  const steps = proposed.map((step, index): Step => {
+    const id = `s${index + 1}`;
+    const base = { id, title: step.title, effort: step.effort, mode: step.mode, status: "todo" as const };
+    if (step.options === undefined || step.options.length === 0) return { ...base, kind: step.type ?? "manual" };
+    return {
+      ...base,
+      kind: "decision",
+      options: step.options.map((option, optionIndex) => {
+        const key = `o${optionIndex + 1}`;
+        return {
+          key,
+          label: option.label,
+          steps: option.steps.map((child, childIndex) => ({
+            id: `${id}.${key}.s${childIndex + 1}`,
+            kind: child.type ?? ("manual" as const),
+            title: child.title,
+            effort: child.effort,
+            mode: child.mode,
+            status: "todo" as const,
+          })),
+        };
+      }),
+    };
+  });
+  return { steps };
+}
+
+/**
+ * 依存更新の PR の調査から、次にやることを決める。AI が考えた手順があればそれを使い、
+ * なければ（その項目を足す前の調査）結論から決まった型で作る。
+ */
 export function planFromDependencyReview(review: {
   conclusion: "mergeable" | "mergeable_after_fix" | "not_mergeable";
   canMergeAsIs: boolean;
   fixEffort?: Effort | undefined;
+  nextActions?: ReadonlyArray<ProposedStep> | undefined;
 }): NextActionPlan {
+  if (review.nextActions !== undefined && review.nextActions.length > 0) return planFromProposedSteps(review.nextActions);
   const merge = (prefix: string): ActionStep => ({
     id: `${prefix}merge`,
     kind: "merge_pull_request",
@@ -127,7 +174,7 @@ const StepBaseSchema = {
   mode: Schema.Literals(["serial", "parallel"]),
   status: Schema.Literals(["todo", "done"]),
 };
-const ActionStepSchema = Schema.Struct({ ...StepBaseSchema, kind: Schema.Literals(["manual", "merge_pull_request", "fix_and_push"]) });
+const ActionStepSchema = Schema.Struct({ ...StepBaseSchema, kind: Schema.Literals(ACTION_KINDS) });
 interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchema> {
   readonly kind: "decision";
   readonly options: ReadonlyArray<{ readonly key: string; readonly label: string; readonly steps: ReadonlyArray<StepEncoded> }>;

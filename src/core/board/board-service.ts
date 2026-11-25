@@ -33,7 +33,7 @@ export type BoardCard = {
   /** Task の難易度（いま着手できる手順のうち、いちばん手間の少ないもの） */
   effort?: Effort;
   /** いま着手できる次にやることと、その手間 */
-  nextActions?: ReadonlyArray<{ title: string; effort: Effort }>;
+  nextActions?: ReadonlyArray<{ title: string; effort: Effort; kind: string }>;
   /** AI が調査中のレーンにあるとき、調べている最中か、調査待ちの何番目か */
   agent?: { state: "running"; kind: string } | { state: "queued"; kind: string; position: number };
   /** tracks で紐づいた元の項目（PR / issue など）。手動で追加した Task にはない */
@@ -171,7 +171,7 @@ export class BoardService extends Context.Service<BoardService, {
               onSome: (plan) => {
                 const effort = taskEffort(plan);
                 return {
-                  nextActions: currentSteps(plan).map((step) => ({ title: step.title, effort: step.effort })),
+                  nextActions: currentSteps(plan).map((step) => ({ title: step.title, effort: step.effort, kind: step.kind })),
                   ...(effort === undefined ? {} : { effort }),
                 };
               },

@@ -21,6 +21,7 @@ const REVIEW = {
   canMergeAsIs: false,
   mergeAsIsNote: "",
   fixEffort: "normal",
+  nextActions: [],
 };
 
 const dependencyTask = (options: { status?: TaskStatus; author?: string; source?: string; state?: "open" | "resolved"; fingerprint?: string; url?: string } = {}) =>
@@ -201,6 +202,24 @@ describe("runDependencyReviews", () => {
 
       yield* TestClock.adjust("2 minutes");
       assert.deepStrictEqual(yield* withAgent().provide(run), [{ taskId, succeeded: true }]);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("AI が考えた次にやることの項目がない古い回答は、調べ直す", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      const { nextActions: _omitted, ...old } = REVIEW;
+      yield* (yield* Database).insert(agentRuns).values({
+        taskId,
+        kind: "dependency_review",
+        status: "succeeded",
+        subjectFingerprint: "v1",
+        subjectSha: "head-sha-1",
+        previousStatus: "todo",
+        result: old,
+        startedAt: "2026-11-25T00:00:00.000Z",
+      });
+
+      assert.lengthOf(yield* withAgent().provide(run), 1);
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("同じ状態の PR は二度調べない（失敗したものも、PR が変わるまでやり直さない）", () =>

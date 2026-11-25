@@ -271,7 +271,11 @@ function StepItem(props: {
   return (
     <li className={`step step--${step.status}${isCurrent ? " step--current" : ""}`}>
       <div className="step-head">
-        <span className={`effort effort--${step.effort}`}>{effortLabel(step.effort)}</span>
+        {step.kind === "wait" ? (
+          <span className="effort effort--wait">待ち</span>
+        ) : (
+          <span className={`effort effort--${step.effort}`}>{effortLabel(step.effort)}</span>
+        )}
         <span className="step-title">{step.title}</span>
         {props.parallel && <span className="field-hint">前と並行してできる</span>}
         {step.status === "done" && (
@@ -293,11 +297,11 @@ function StepItem(props: {
           ))}
         </div>
       )}
-      {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push") && (
+      {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push" || step.kind === "wait") && (
         <div className="step-actions">
           {step.kind === "fix_and_push" && <span className="field-hint">アプリからの修正はまだできません。修正して push したら「済んだ」を押してください</span>}
           <button type="button" className="quiet-button" onClick={() => void run(api.completeStep(detail.id, step.id))}>
-            済んだ
+            {step.kind === "wait" ? "待ち終わった" : "済んだ"}
           </button>
         </div>
       )}

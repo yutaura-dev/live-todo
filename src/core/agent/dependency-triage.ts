@@ -19,7 +19,9 @@ import {
 const KIND = "dependency_review";
 // 失敗を繰り返して使用量を使い切らないよう、失敗してから調べ直すまでの間
 export const RETRY_FAILED_AFTER_MILLIS = 60 * 60 * 1000;
-const hasCurrentReviewShape = (result: unknown) => typeof result === "object" && result !== null && "canMergeAsIs" in result;
+// 後から足した項目（そのまま merge してよいか・AI が考えた次にやること）がない調査は、調べ直す
+const hasCurrentReviewShape = (result: unknown) =>
+  typeof result === "object" && result !== null && "canMergeAsIs" in result && "nextActions" in result;
 const PROVIDER = "claude-code";
 // 自分で手を付けた（進行中）ものや終わったものには割り込まない
 const ELIGIBLE_STATUSES: ReadonlyArray<TaskStatus> = ["needs_review", "todo"];

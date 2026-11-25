@@ -10,6 +10,14 @@ describe("pullRequestCommands", () => {
     assert.deepStrictEqual(commands.diff, ["pr", "diff", "https://github.com/acme/app/pull/42"]);
     assert.deepStrictEqual(commands.head, ["pr", "view", "https://github.com/acme/app/pull/42", "--json", "headRefOid"]);
   });
+
+  it("リポジトリで開いている PR と、renovate の Dependency Dashboard も読み取りだけで集める", () => {
+    const commands = pullRequestCommands("https://github.com/acme/app/pull/42");
+
+    assert.deepStrictEqual(commands.openPulls.slice(0, 4), ["pr", "list", "--repo", "acme/app"]);
+    assert.deepStrictEqual(commands.dashboard.slice(0, 4), ["issue", "list", "--repo", "acme/app"]);
+    assert.include(commands.dashboard.join(" "), "Dependency Dashboard");
+  });
 });
 
 describe("headShaOf", () => {

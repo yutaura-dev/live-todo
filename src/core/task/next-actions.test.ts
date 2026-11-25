@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { chooseOption, completeStep, currentSteps, type NextActionPlan, planFromDependencyReview, reopenStep } from "./next-actions.js";
+import { chooseOption, completeStep, currentSteps, type NextActionPlan, planFromDependencyReview, reopenStep, taskEffort } from "./next-actions.js";
 
 const review = (overrides: Record<string, unknown> = {}) => ({
   conclusion: "mergeable" as const,
@@ -46,6 +46,45 @@ describe("planFromDependencyReview", () => {
     const plan = planFromDependencyReview(review({ conclusion: "not_mergeable" }));
 
     assert.deepStrictEqual(titles(plan), ["renovate / dependabot の設定を直す（normal）", "PR を閉じる（easy）"]);
+  });
+});
+
+describe("AI が考えた次にやること（依存更新の PR）", () => {
+  it("回答に次にやることがあれば、決まった型ではなくそれを使う（待つ・手作業・merge などの種類つき）", () => {
+    const plan = planFromDependencyReview(
+      review({
+        conclusion: "not_mergeable",
+        nextActions: [
+          { title: "Dependency Dashboard で CLI v3 の PR を作らせる", type: "manual", effort: "easy", mode: "serial", options: [] },
+          { title: "CLI v3 の PR が出るのを待つ", type: "wait", effort: "easy", mode: "serial", options: [] },
+          { title: "CLI v3 と action v2 をまとめて移行する", type: "manual", effort: "tedious", mode: "serial", options: [] },
+        ],
+      }),
+    );
+
+    assert.deepStrictEqual(plan.steps.map((step) => step.kind), ["manual", "wait", "manual"]);
+    assert.deepStrictEqual(titles(plan), ["Dependency Dashboard で CLI v3 の PR を作らせる（easy）"]);
+  });
+
+  it("merge の手順は、アプリから merge できる手順にする", () => {
+    const plan = planFromDependencyReview(
+      review({ nextActions: [{ title: "PR を merge する", type: "merge_pull_request", effort: "easy", mode: "serial", options: [] }] }),
+    );
+
+    assert.strictEqual(currentSteps(plan)[0]?.kind, "merge_pull_request");
+  });
+});
+
+describe("待つ手順", () => {
+  const wait = { id: "w", kind: "wait" as const, title: "待つ", effort: "easy" as const, mode: "serial" as const, status: "todo" as const };
+
+  it("いま着手できるのが待つ手順だけなら、Task の難易度はない（Todo の最後に並ぶ）", () => {
+    assert.isUndefined(taskEffort({ steps: [wait] }));
+  });
+
+  it("並列で着手できる手順があれば、待つ手順は難易度に数えない", () => {
+    const easy = { ...wait, id: "e", kind: "manual" as const, effort: "normal" as const, mode: "parallel" as const };
+    assert.strictEqual(taskEffort({ steps: [wait, easy] }), "normal");
   });
 });
 

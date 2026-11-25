@@ -31,11 +31,13 @@ describe("decodeDependencyReview", () => {
     canMergeAsIs: true,
     mergeAsIsNote: "fork からの PR を受け付けないなら、修正せずに merge してよい",
     fixEffort: "normal",
+    nextActions: [{ title: "修正する", type: "fix_and_push", effort: "normal", mode: "serial", options: [] }],
   };
 
   it.effect("3 つの結論のどれかと、影響範囲・修正・理由・設定の直し方を受け取る", () =>
     Effect.gen(function* () {
-      assert.deepStrictEqual(yield* decodeDependencyReview(valid), valid);
+      const review: unknown = yield* decodeDependencyReview(valid);
+      assert.deepStrictEqual(review, valid);
     }));
 
   it.effect("そのまま merge してよいかの項目がない古い回答は、そのまま merge しない（false）として読む", () =>
@@ -66,6 +68,7 @@ describe("DEPENDENCY_REVIEW_JSON_SCHEMA", () => {
       "canMergeAsIs",
       "mergeAsIsNote",
       "fixEffort",
+      "nextActions",
     ]);
     assert.deepStrictEqual(DEPENDENCY_REVIEW_JSON_SCHEMA.properties.conclusion.enum, ["mergeable", "mergeable_after_fix", "not_mergeable"]);
   });
@@ -86,6 +89,11 @@ describe("dependencyReviewPrompt", () => {
 
   it("書き込みをしないよう伝える（ツールでも禁じているが、試みて止まるのを避ける）", () => {
     assert.include(prompt, "書き込み");
+  });
+
+  it("リポジトリで開いている PR と Dependency Dashboard を見て、待つべきか・先にやることがあるかを考えるよう伝える", () => {
+    assert.include(prompt, "/work/task-1/context/open-prs.json");
+    assert.include(prompt, "/work/task-1/context/dependency-dashboard.md");
   });
 
   it("アプリが集めておいた PR の情報（本文・CI・差分）を読むよう伝える", () => {

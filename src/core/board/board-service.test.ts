@@ -291,7 +291,7 @@ describe("次にやること", () => {
         const board = yield* (yield* BoardService).board;
 
         assert.deepStrictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.nextActions, [
-          { title: "修正を行い、PR に push する", effort: "normal" },
+          { title: "修正を行い、PR に push する", effort: "normal", kind: "fix_and_push" },
         ]);
       }),
     ));
@@ -375,7 +375,7 @@ describe("次にやること", () => {
         yield* service.chooseOption(task.id, "decide", "as_is");
 
         const board = yield* service.board;
-        assert.deepStrictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.nextActions, [{ title: "PR を merge する", effort: "easy" }]);
+        assert.deepStrictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.nextActions, [{ title: "PR を merge する", effort: "easy", kind: "merge_pull_request" }]);
       }),
     ));
 });

@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { EFFORTS, type NextActionPlan, type Step } from "../task/next-actions.js";
+import { EFFORTS, type NextActionPlan, planFromProposedSteps } from "../task/next-actions.js";
 
 const ProposedStep = Schema.Struct({
   title: Schema.NonEmptyString,
@@ -59,34 +59,8 @@ export const NEXT_ACTION_PLAN_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** AI が返した手順を、手順の並びに変える。id は位置から決める */
-export function planFromProposal(proposal: ProposedPlan): NextActionPlan {
-  const steps = proposal.steps.map((step, index): Step => {
-    const id = `s${index + 1}`;
-    const base = { id, title: step.title, effort: step.effort, mode: step.mode, status: "todo" as const };
-    if (step.options.length === 0) return { ...base, kind: "manual" };
-    return {
-      ...base,
-      kind: "decision",
-      options: step.options.map((option, optionIndex) => {
-        const key = `o${optionIndex + 1}`;
-        return {
-          key,
-          label: option.label,
-          steps: option.steps.map((child, childIndex) => ({
-            id: `${id}.${key}.s${childIndex + 1}`,
-            kind: "manual" as const,
-            title: child.title,
-            effort: child.effort,
-            mode: child.mode,
-            status: "todo" as const,
-          })),
-        };
-      }),
-    };
-  });
-  return { steps };
-}
+/** AI が返した手順を、手順の並びに変える */
+export const planFromProposal = (proposal: ProposedPlan): NextActionPlan => planFromProposedSteps(proposal.steps);
 
 export function nextActionPrompt(subject: { title: string; contextDir: string }): string {
   return [

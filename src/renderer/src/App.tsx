@@ -358,7 +358,11 @@ function Card(props: {
         <ul className="card-next-actions">
           {card.nextActions.map((action) => (
             <li key={action.title}>
-              <span className={`effort effort--${action.effort}`}>{effortLabel(action.effort)}</span>
+              {action.kind === "wait" ? (
+                <span className="effort effort--wait">待ち</span>
+              ) : (
+                <span className={`effort effort--${action.effort}`}>{effortLabel(action.effort)}</span>
+              )}
               {action.title}
             </li>
           ))}
