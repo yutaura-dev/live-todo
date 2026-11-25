@@ -12,23 +12,30 @@ const TOKEN = "ghp_test_token";
 /** 受け取ったリクエストを記録し、URL に応じた応答を返す偽の GitHub */
 function fakeGitHub(route: (url: URL) => Reply) {
   const requests: { url: URL; headers: Record<string, string> }[] = [];
-  const http = HttpClient.make((request, url) => {
-    requests.push({ url, headers: { ...request.headers } });
-    const reply = route(url);
-    return Effect.succeed(
-      HttpClientResponse.fromWeb(
+  const concurrency = { inFlight: 0, max: 0 };
+  const http = HttpClient.make((request, url) =>
+    Effect.gen(function* () {
+      requests.push({ url, headers: { ...request.headers } });
+      concurrency.inFlight++;
+      concurrency.max = Math.max(concurrency.max, concurrency.inFlight);
+      // 応答を返す前に他の fiber に順番を譲り、並行に送っていれば同時に処理中になるようにする
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      concurrency.inFlight--;
+      const reply = route(url);
+      return HttpClientResponse.fromWeb(
         request,
         new Response(reply.body === undefined ? null : JSON.stringify(reply.body), {
           status: reply.status ?? 200,
           headers: { "content-type": "application/json", ...reply.headers },
         }),
-      ),
-    );
-  });
+      );
+    }),
+  );
   const layer = GitHubClientLive({ token: Redacted.make(TOKEN) }).pipe(
     Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
   );
-  return { requests, layer };
+  return { requests, concurrency, layer };
 }
 
 const withClient = <A, E>(layer: Layer.Layer<GitHubClient>, use: (client: GitHubClient["Service"]) => Effect.Effect<A, E>) =>
@@ -170,5 +177,67 @@ describe("GitHubClientLive", () => {
       assert.instanceOf(error, GitHubRequestError);
       assert.include(error.message, "401");
       assert.notInclude(error.message, TOKEN);
+    }));
+
+  it.effect("同じクライアントへのリクエストは、同時に呼ばれても 1 つずつ順番に送る", () =>
+    Effect.gen(function* () {
+      const { concurrency, requests, layer } = fakeGitHub(() => ({ body: { number: 1 } }));
+
+      yield* withClient(layer, (client) =>
+        Effect.all(
+          [1, 2, 3].map((number) => client.getPullRequest(`https://api.github.com/repos/acme/app/pulls/${number}`)),
+          { concurrency: "unbounded" },
+        ),
+      );
+
+      assert.strictEqual(requests.length, 3);
+      assert.strictEqual(concurrency.max, 1);
+    }));
+
+  it.effect("レート制限を受けたあとは、解除時刻まで API に送らずに同じエラーを返す", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-11-25T00:00:00Z"));
+      const { requests, layer } = fakeGitHub(() => ({
+        status: 403,
+        body: { message: "API rate limit exceeded" },
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Date.parse("2026-11-25T01:00:00Z") / 1000) },
+      }));
+
+      const errors = yield* withClient(layer, (client) =>
+        Effect.all([Effect.flip(client.searchMyOpenPullRequests), Effect.flip(client.listReviews("https://api.github.com/repos/acme/app/pulls/42"))]),
+      );
+
+      assert.strictEqual(requests.length, 1);
+      for (const error of errors) {
+        assert.instanceOf(error, GitHubRateLimitedError);
+        assert.strictEqual(error.resetAt, "2026-11-25T01:00:00.000Z");
+      }
+    }));
+
+  it.effect("解除時刻を過ぎたら、また API に送る", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-11-25T00:00:00Z"));
+      let limited = true;
+      const { requests, layer } = fakeGitHub(() =>
+        limited
+          ? {
+              status: 403,
+              body: {},
+              headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Date.parse("2026-11-25T01:00:00Z") / 1000) },
+            }
+          : { body: { items: [] } },
+      );
+
+      const result = yield* withClient(layer, (client) =>
+        Effect.gen(function* () {
+          yield* Effect.flip(client.searchMyOpenPullRequests);
+          limited = false;
+          yield* TestClock.setTime(Date.parse("2026-11-25T01:00:00Z"));
+          return yield* client.searchMyOpenPullRequests;
+        }),
+      );
+
+      assert.deepStrictEqual(result, { items: [] });
+      assert.strictEqual(requests.length, 2);
     }));
 });

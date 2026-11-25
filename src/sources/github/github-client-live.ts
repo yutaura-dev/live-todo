@@ -1,4 +1,4 @@
-import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { DateTime, Effect, Layer, Option, Redacted, Ref, Schema, Semaphore } from "effect";
 import { Headers, HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 import { type GitHubClientError, GitHubClient, GitHubRateLimitedError, GitHubRequestError } from "./github-adapter.js";
 
@@ -28,6 +28,14 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
         ),
       );
 
+      // トークンごとに 1 本のキューで順番に送る理由: GitHub は同じユーザーからのリクエストを並行ではなく
+      // 順番に送ることを推奨しており、並行に送ると短時間の集中に対する制限（secondary rate limit）にかかりやすい。
+      // 上限はトークン単位で数えられるので、通知の同期と見張りの同期もこのキューを共有する。
+      const queue = yield* Semaphore.make(1);
+      // レート制限を受けたら解除時刻を覚え、それまではキューに並んでいるリクエストも送らずに失敗させる。
+      // 送り続けると同じ 403 がまとめて返り、secondary rate limit の最中なら制限が延びることもあるため。
+      const blockedUntil = yield* Ref.make(Option.none<DateTime.Utc>());
+
       // 応答に含まれる URL（通知の subject.url など）を取りに行くメソッドがあるため、
       // api.github.com 以外を指していたらトークンを付けて送らないよう、送る前に宛先を確かめる。
       const resolveUrl = (target: string, params: Record<string, string> = {}): Effect.Effect<URL, GitHubRequestError> => {
@@ -45,18 +53,18 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
         const header = (name: string) => Headers.get(response.headers, name);
         const retryAfter = Option.flatMap(header("retry-after"), (value) => Option.fromNullishOr(Number.parseInt(value, 10) || null));
         if (Option.isSome(retryAfter)) {
-          return Option.some(DateTime.formatIso(DateTime.add(yield* DateTime.now, { seconds: retryAfter.value })));
+          return Option.some(DateTime.add(yield* DateTime.now, { seconds: retryAfter.value }));
         }
         const exhausted = Option.getOrUndefined(header("x-ratelimit-remaining")) === "0";
         const reset = Option.flatMap(header("x-ratelimit-reset"), (value) => Option.fromNullishOr(Number.parseInt(value, 10) || null));
         if (exhausted && Option.isSome(reset)) {
-          return Option.some(DateTime.formatIso(DateTime.makeUnsafe(reset.value * 1000)));
+          return Option.some(DateTime.makeUnsafe(reset.value * 1000));
         }
-        return Option.none<string>();
+        return Option.none<DateTime.Utc>();
       });
 
       /** 404 / 410 のときは none、2xx は応答、それ以外は GitHubClientError */
-      const send = Effect.fnUntraced(function* (url: URL): Effect.fn.Return<
+      const sendOnce = Effect.fnUntraced(function* (url: URL): Effect.fn.Return<
         Option.Option<HttpClientResponse.HttpClientResponse>,
         GitHubClientError
       > {
@@ -72,10 +80,28 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
 
         if (response.status === 403 || response.status === 429) {
           const resetAt = yield* rateLimitResetAt(response);
-          if (Option.isSome(resetAt)) return yield* new GitHubRateLimitedError({ resetAt: resetAt.value });
+          if (Option.isSome(resetAt)) {
+            yield* Ref.set(blockedUntil, resetAt);
+            return yield* new GitHubRateLimitedError({ resetAt: DateTime.formatIso(resetAt.value) });
+          }
         }
         return yield* new GitHubRequestError({ message: `GitHub API が ${response.status} を返した: ${describe(url)}` });
       });
+
+      const send = (url: URL) =>
+        Semaphore.withPermits(
+          queue,
+          1,
+          Effect.gen(function* () {
+            // 解除時刻の確認をキューの中で行う理由: 前に並んでいたリクエストがレート制限を受けた直後に、
+            // 後ろのリクエストがその結果を見てから送るかどうかを決められるようにするため。
+            const blocked = yield* Ref.get(blockedUntil);
+            if (Option.isSome(blocked) && DateTime.toEpochMillis(yield* DateTime.now) < DateTime.toEpochMillis(blocked.value)) {
+              return yield* new GitHubRateLimitedError({ resetAt: DateTime.formatIso(blocked.value) });
+            }
+            return yield* sendOnce(url);
+          }),
+        );
 
       const jsonOf = (url: URL) => (response: HttpClientResponse.HttpClientResponse) =>
         response.json.pipe(

@@ -47,8 +47,6 @@ const decodePullRequest = decodeResponse(PullRequestDetail);
 const decodeCheckRuns = decodeResponse(CheckRunsResponse);
 const decodeReviews = decodeResponse(ReviewsResponse);
 
-// 1 回の見張りで GitHub の API レート制限を使い切らないよう、同時に詳細を取りに行く PR の数を絞る。
-const PULL_REQUEST_FETCH_CONCURRENCY = 5;
 
 export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (accountId: string) {
   const client = yield* GitHubClient;
@@ -59,13 +57,8 @@ export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (a
     const pull = yield* decodePullRequest(raw.value);
     const repository = pull.base.repo.full_name;
 
-    const [checkRuns, reviews] = yield* Effect.all(
-      [
-        client.listCheckRuns(repository, pull.head.sha).pipe(Effect.flatMap(decodeCheckRuns)),
-        client.listReviews(apiUrl).pipe(Effect.flatMap(decodeReviews)),
-      ],
-      { concurrency: 2 },
-    );
+    const checkRuns = yield* client.listCheckRuns(repository, pull.head.sha).pipe(Effect.flatMap(decodeCheckRuns));
+    const reviews = yield* client.listReviews(apiUrl).pipe(Effect.flatMap(decodeReviews));
 
     return Option.some<GitHubPullRequestSubject>({
       apiUrl,
@@ -86,9 +79,7 @@ export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (a
 
   const subjects = Effect.gen(function* () {
     const search = yield* client.searchMyOpenPullRequests.pipe(Effect.flatMap(decodeSearchResult));
-    const loaded = yield* Effect.forEach(search.items, (item) => loadSubject(item.pull_request.url), {
-      concurrency: PULL_REQUEST_FETCH_CONCURRENCY,
-    });
+    const loaded = yield* Effect.forEach(search.items, (item) => loadSubject(item.pull_request.url));
     return loaded.flatMap((subject) => (Option.isSome(subject) ? [subject.value] : []));
   });
 

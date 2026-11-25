@@ -79,8 +79,6 @@ export type GitHubAdapterError = GitHubClientError | GitHubResponseError;
 
 const RULE_TODO_REASONS = new Set(["review_requested", "assign", "ci_activity"]);
 
-// GitHub の API レート制限（認証済みで 1 時間あたり 5,000 リクエスト）を同期 1 回で使い切らないよう、同時実行数を絞る。
-const SUBJECT_FETCH_CONCURRENCY = 5;
 
 export const githubTodoRules: readonly ((item: GitHubItem) => boolean)[] = [
   (item) => RULE_TODO_REASONS.has(item.reason) && item.state !== "closed" && item.state !== "merged",
@@ -129,7 +127,7 @@ export const makeGitHubAdapter = Effect.fnUntraced(function* (options: GitHubAda
         const notifications = yield* client.listNotifications({ since, all: true }).pipe(Effect.flatMap(decodeNotifications));
 
         const targets = notifications.filter((notification) => isTargetRepository(notification.repository.full_name));
-        const changes = yield* Effect.forEach(targets, toChange, { concurrency: SUBJECT_FETCH_CONCURRENCY });
+        const changes = yield* Effect.forEach(targets, toChange);
 
         // フィルター後の targets ではなく全通知からカーソルを作る理由:
         // 除外したリポジトリの通知が最新のとき、カーソルが進まず毎回取得し直すことになるため。

@@ -75,6 +75,9 @@ WatchProvider（対象の一覧）× Condition（holds / clear / unknown）
 
 `src/sources/github/github-client-live.ts`（`effect/http` の HttpClient）。
 
+- **トークン（アカウント）ごとに 1 本のキュー**で、リクエストを 1 つずつ順番に送る。GitHub は同じユーザーからのリクエストを順番に送ることを推奨しており、並行に送ると secondary rate limit にかかりやすいため。通知の同期と見張りの同期は、同じアカウントなら同じクライアント（同じキュー）を共有する
+- レート制限を受けたら解除時刻を覚え、それまではキューに並んでいるものも含めて API に送らず、その場で `GitHubRateLimitedError` を返す（ブレーカー）
+- Adapter や見張りの側では並行数を指定しない（流量はキューで決まる）
 - `Link` ヘッダーの next をたどって全ページを取る（1 回の取得で最大 10 ページ）
 - 404 / 410 は「ない」として `Option.none`。レート制限（403 / 429 で残り 0、または `retry-after`）は解除時刻つきの `GitHubRateLimitedError`。それ以外は `GitHubRequestError`
 - クライアントの中では待たず、再試行もしない。いつまで休むか・いつやり直すかは定期実行の側で決める（待ち時間は最大 1 時間あり、クライアントの中で待つとアカウントの同期全体が止まるため）
