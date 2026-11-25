@@ -194,6 +194,17 @@ describe("GitHubClientLive", () => {
       assert.strictEqual(error.resetAt, "2026-11-25T00:01:00.000Z");
     }));
 
+  it.effect("失敗には、ステータスコードと GitHub が返した理由を含める", () =>
+    Effect.gen(function* () {
+      const { layer } = fakeGitHub(() => ({ status: 422, body: { message: "Validation Failed" } }));
+
+      const error = yield* Effect.flip(withClient(layer, (client) => client.searchMyOpenPullRequests));
+
+      assert.instanceOf(error, GitHubRequestError);
+      assert.strictEqual(error.status, 422);
+      assert.include(error.message, "Validation Failed");
+    }));
+
   it.effect("それ以外の失敗は GitHubRequestError にし、メッセージにトークンを含めない", () =>
     Effect.gen(function* () {
       const { layer } = fakeGitHub(() => ({ status: 401, body: { message: "Bad credentials" } }));

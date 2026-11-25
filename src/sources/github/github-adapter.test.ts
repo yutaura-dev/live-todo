@@ -10,6 +10,7 @@ import {
   type GitHubAdapterOptions,
   type GitHubCursor,
   type GitHubItem,
+  GitHubRequestError,
   GitHubResponseError,
   githubTodoRules,
   makeGitHubAdapter,
@@ -25,12 +26,20 @@ const openPull = { ...mergedPull, state: "open", merged: false };
 const openIssue = { ...closedIssue, state: "open", state_reason: null };
 const allSubjectsOpen: Record<string, unknown> = { [PULL_URL]: openPull, [ISSUE_URL]: openIssue };
 
-function clientWith(options: { notifications?: unknown[]; truncated?: boolean; subjects?: Record<string, unknown> }) {
+function clientWith(options: {
+  notifications?: unknown[];
+  truncated?: boolean;
+  subjects?: Record<string, unknown>;
+  failing?: Record<string, GitHubRequestError>;
+}) {
   return gitHubClientStub({
     listNotifications: vi.fn(() =>
       Effect.succeed({ notifications: options.notifications ?? [], truncated: options.truncated ?? false }),
     ),
-    getSubject: vi.fn((url: string) => Effect.succeed(Option.fromNullishOr(options.subjects?.[url]))),
+    getSubject: vi.fn((url: string) => {
+      const failure = options.failing?.[url];
+      return failure === undefined ? Effect.succeed(Option.fromNullishOr(options.subjects?.[url])) : Effect.fail(failure);
+    }),
   });
 }
 
@@ -212,6 +221,66 @@ describe("打ち切られた通知の続き", () => {
         since: "2026-11-11T00:00:00.000Z",
         backfill: { before: "2026-11-18T00:00:00Z", newest: "2026-11-24T10:30:00Z" },
       });
+    }));
+});
+
+describe("1 件の取得の失敗", () => {
+  const unprocessable = new GitHubRequestError({ message: "GitHub API が 422 を返した", status: 422 });
+
+  it.effect("1 件の取得が失敗しても、ほかの通知は反映し、失敗した通知はやり直しリストに入れる", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications, subjects: allSubjectsOpen, failing: { [ISSUE_URL]: unprocessable } });
+
+      const { changes, nextCursor } = yield* fetchWith(client, null);
+
+      assert.deepStrictEqual(upsertedItems(changes).map((item) => item.externalId).toSorted(), [PULL_URL, "github:thread:1003"].toSorted());
+      assert.deepStrictEqual(nextCursor.retry?.map((entry) => [entry.notification.id, entry.firstFailedAt]), [["1002", "2026-11-25T00:00:00.000Z"]]);
+      assert.strictEqual(nextCursor.since, "2026-11-24T10:30:00Z");
+    }));
+
+  it.effect("やり直しリストの通知は次の同期で取り直し、取れたらリストから外す", () =>
+    Effect.gen(function* () {
+      const first = yield* fetchWith(clientWith({ notifications, subjects: allSubjectsOpen, failing: { [ISSUE_URL]: unprocessable } }), null);
+
+      const second = yield* fetchWith(clientWith({ notifications: [], subjects: allSubjectsOpen }), first.nextCursor);
+
+      assert.deepStrictEqual(upsertedItems(second.changes).map((item) => item.externalId), [ISSUE_URL]);
+      assert.isUndefined(second.nextCursor.retry);
+    }));
+
+  it.effect("やり直しリストの通知が新しい取得にも含まれていたら、新しいほうだけを使う", () =>
+    Effect.gen(function* () {
+      const first = yield* fetchWith(clientWith({ notifications, subjects: allSubjectsOpen, failing: { [ISSUE_URL]: unprocessable } }), null);
+      const client = clientWith({ notifications: [{ ...notifications[1], updated_at: "2026-11-24T20:00:00Z" }], subjects: allSubjectsOpen });
+
+      const second = yield* fetchWith(client, first.nextCursor);
+
+      assert.deepStrictEqual(upsertedItems(second.changes).map((item) => item.updatedAt), ["2026-11-24T20:00:00Z"]);
+      expect(client.getSubject).toHaveBeenCalledTimes(1);
+    }));
+
+  it.effect("最初の失敗から 24 時間たっても取れない通知は、諦めてリストから外す", () =>
+    Effect.gen(function* () {
+      const failing = { [ISSUE_URL]: unprocessable };
+      const first = yield* fetchWith(clientWith({ notifications, subjects: allSubjectsOpen, failing }), null);
+
+      yield* TestClock.setTime(NOW + 24 * 60 * 60 * 1000);
+      const adapter = yield* makeGitHubAdapter({ initialLookbackDays: 14 }).pipe(
+        Effect.provideService(GitHubClient, clientWith({ notifications: [], subjects: allSubjectsOpen, failing })),
+      );
+      const second = yield* adapter.fetchChanges(first.nextCursor);
+
+      assert.deepStrictEqual(second.changes, []);
+      assert.isUndefined(second.nextCursor.retry);
+    }));
+
+  it.effect("接続そのものの失敗（ステータスなし）は、同期全体を失敗にする", () =>
+    Effect.gen(function* () {
+      const offline = new GitHubRequestError({ message: "GitHub API に接続できない" });
+
+      const error = yield* Effect.flip(fetchWith(clientWith({ notifications, subjects: allSubjectsOpen, failing: { [ISSUE_URL]: offline } }), null));
+
+      assert.strictEqual(error, offline);
     }));
 });
 

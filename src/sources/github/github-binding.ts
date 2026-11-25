@@ -1,7 +1,13 @@
 import { Effect, Schema } from "effect";
 import { DEFAULT_TODO_THRESHOLDS, makeTodoJudge, type TodoJudgeThresholds } from "../../core/judge/todo-judge.js";
 import type { ItemDraft, SourceBinding } from "../../core/sync/sync-source.js";
-import { type GitHubAdapterOptions, type GitHubItem, githubTodoRules, makeGitHubAdapter } from "./github-adapter.js";
+import {
+  type GitHubAdapterOptions,
+  type GitHubItem,
+  GitHubNotificationSchema,
+  githubTodoRules,
+  makeGitHubAdapter,
+} from "./github-adapter.js";
 
 /** アカウントごとに Source 名を分け、カーソルや Item が混ざらないようにする */
 export const githubSourceName = (accountId: string) => `github:${accountId}`;
@@ -11,6 +17,7 @@ const GITHUB_TODO_QUESTION = "この GitHub の通知は、自分が対応すべ
 const GitHubCursor = Schema.Struct({
   since: Schema.String,
   backfill: Schema.optionalKey(Schema.Struct({ before: Schema.String, newest: Schema.String })),
+  retry: Schema.optionalKey(Schema.Array(Schema.Struct({ notification: GitHubNotificationSchema, firstFailedAt: Schema.String }))),
 });
 
 export type GitHubBindingOptions = GitHubAdapterOptions & { accountId: string; thresholds?: TodoJudgeThresholds };

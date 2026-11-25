@@ -11,6 +11,8 @@ const MAX_PAGES = 10;
 const ArrayBody = Schema.Array(Schema.Unknown);
 const SearchBody = Schema.Struct({ items: ArrayBody });
 const CheckRunsBody = Schema.Struct({ check_runs: ArrayBody });
+const ErrorBody = Schema.Struct({ message: Schema.String });
+const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody);
 
 export type GitHubClientLiveOptions = { token: Redacted.Redacted<string> };
 
@@ -85,7 +87,16 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
             return yield* new GitHubRateLimitedError({ resetAt: DateTime.formatIso(resetAt.value) });
           }
         }
-        return yield* new GitHubRequestError({ message: `GitHub API が ${response.status} を返した: ${describe(url)}` });
+        // GitHub が返した理由（本文の message）を含める理由: 422 のようにステータスだけでは原因がわからない失敗があるため。
+        // 本文にトークンは含まれない。
+        const reason = yield* response.json.pipe(
+          Effect.map((body) => Option.match(decodeErrorBody(body), { onNone: () => "", onSome: ({ message }) => `: ${message}` })),
+          Effect.orElseSucceed(() => ""),
+        );
+        return yield* new GitHubRequestError({
+          message: `GitHub API が ${response.status} を返した: ${describe(url)}${reason}`,
+          status: response.status,
+        });
       });
 
       const send = (url: URL) =>

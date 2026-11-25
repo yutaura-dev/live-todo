@@ -5,6 +5,8 @@ import { makeRepositoryFilter, type RepositoryFilterConfig } from "./repository-
 
 export class GitHubRequestError extends Schema.TaggedError<GitHubRequestError>()("GitHubRequestError", {
   message: Schema.String,
+  /** HTTP のステータス。接続そのものに失敗したときは undefined */
+  status: Schema.optional(Schema.Number),
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
@@ -35,14 +37,14 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   listReviews(pullApiUrl: string): Effect.Effect<unknown, GitHubClientError>;
 }>()("live-todo/sources/github/GitHubClient") {}
 
-const GitHubNotification = Schema.Struct({
+export const GitHubNotificationSchema = Schema.Struct({
   id: Schema.String,
   reason: Schema.String,
   updated_at: Schema.String,
   subject: Schema.Struct({ title: Schema.String, url: Schema.NullOr(Schema.String), type: Schema.String }),
   repository: Schema.Struct({ full_name: Schema.String, html_url: Schema.String }),
 });
-type GitHubNotification = typeof GitHubNotification.Type;
+export type GitHubNotification = typeof GitHubNotificationSchema.Type;
 
 const GitHubSubjectDetail = Schema.Struct({
   state: Schema.String,
@@ -56,7 +58,7 @@ export const decodeResponse = <S extends Schema.Constraint>(schema: S) => {
   return (input: unknown) =>
     decode(input).pipe(Effect.mapError((error) => new GitHubResponseError({ message: error.message })));
 };
-const decodeNotifications = decodeResponse(Schema.Array(GitHubNotification));
+const decodeNotifications = decodeResponse(Schema.Array(GitHubNotificationSchema));
 const decodeSubjectDetail = decodeResponse(GitHubSubjectDetail);
 
 export type GitHubItemState = "open" | "closed" | "merged" | "unknown";
@@ -76,7 +78,18 @@ export type GitHubItem = {
  * backfill: 前回の取得がページ数の上限で打ち切られ、since から before までの古い通知を取り残している。
  * 取り切ったら newest（打ち切られた最初の取得で一番新しかった時刻）から通常の差分取得に戻る。
  */
-export type GitHubCursor = { since: string; backfill?: { before: string; newest: string } };
+export type GitHubCursor = {
+  since: string;
+  backfill?: { before: string; newest: string };
+  /** PR / issue の取得に失敗し、次の同期で取り直す通知 */
+  retry?: ReadonlyArray<RetryEntry>;
+};
+
+export type RetryEntry = { notification: GitHubNotification; firstFailedAt: string };
+
+// 回数ではなく最初の失敗からの時間で諦める理由: 同期は 1 分ごとに回るので、回数で区切ると
+// GitHub の数分の障害で通知を捨ててしまう。
+const RETRY_GIVE_UP_AFTER_MS = 24 * 60 * 60 * 1000;
 
 export type GitHubAdapterOptions = {
   initialLookbackDays: number;
@@ -138,12 +151,53 @@ export const makeGitHubAdapter = Effect.fnUntraced(function* (options: GitHubAda
         );
         const notifications = yield* decodeNotifications(response.notifications);
 
-        const targets = notifications.filter((notification) => isTargetRepository(notification.repository.full_name));
-        const changes = yield* Effect.forEach(targets, toChange);
+        const now = yield* DateTime.now;
+        const freshIds = new Set(notifications.map((notification) => notification.id));
+        // 新しい取得にも含まれている通知は、新しいほうだけを使う（同じ通知を 2 回取りに行かない）
+        const previousRetries = (cursor?.retry ?? []).filter((entry) => !freshIds.has(entry.notification.id));
+        const firstFailedAtOf = new Map(previousRetries.map((entry) => [entry.notification.id, entry.firstFailedAt]));
+
+        const targets = [...previousRetries.map((entry) => entry.notification), ...notifications].filter((notification) =>
+          isTargetRepository(notification.repository.full_name),
+        );
+        const outcomes = yield* Effect.forEach(targets, (notification) =>
+          toChange(notification).pipe(
+            Effect.map((change) => ({ ok: true as const, change })),
+            // HTTP のステータスがある失敗だけを 1 件ごとの保留にする理由: 接続そのものの失敗は全件で起きるので、
+            // 保留にすると同期が成功扱いでカーソルだけ進み、障害が長引くとまとめて諦めることになるため。
+            Effect.catchTags({
+              GitHubRequestError: (error) =>
+                error.status === undefined ? Effect.fail(error) : Effect.succeed({ ok: false as const, notification, error }),
+              GitHubResponseError: (error) => Effect.succeed({ ok: false as const, notification, error }),
+            }),
+          ),
+        );
+
+        const changes = outcomes.flatMap((outcome) => (outcome.ok ? [outcome.change] : []));
+        const retry: RetryEntry[] = [];
+        for (const outcome of outcomes) {
+          if (outcome.ok) continue;
+          const firstFailedAt = firstFailedAtOf.get(outcome.notification.id) ?? DateTime.formatIso(now);
+          const failingFor = Option.match(DateTime.make(firstFailedAt), {
+            onNone: () => 0,
+            onSome: (since) => DateTime.toEpochMillis(now) - DateTime.toEpochMillis(since),
+          });
+          if (failingFor >= RETRY_GIVE_UP_AFTER_MS) {
+            yield* Effect.logError("通知の対象を 24 時間取得できなかったため、取り直すのを諦める").pipe(
+              Effect.annotateLogs({ notification: outcome.notification.id, reason: outcome.error.message }),
+            );
+            continue;
+          }
+          yield* Effect.logWarning("通知の対象を取得できなかったため、次の同期で取り直す").pipe(
+            Effect.annotateLogs({ notification: outcome.notification.id, reason: outcome.error.message }),
+          );
+          retry.push({ notification: outcome.notification, firstFailedAt });
+        }
 
         // フィルター後の targets ではなく全通知からカーソルを作る理由:
         // 除外したリポジトリの通知が最新のとき、カーソルが進まず毎回取得し直すことになるため。
-        return { changes, nextCursor: nextCursorOf(since, backfill, notifications, response.truncated) };
+        const nextCursor = nextCursorOf(since, backfill, notifications, response.truncated);
+        return { changes, nextCursor: retry.length === 0 ? nextCursor : { ...nextCursor, retry } };
       }),
   };
   return adapter;
