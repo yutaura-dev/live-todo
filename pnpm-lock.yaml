@@ -189,6 +189,12 @@ importers:
 
   .:
     dependencies:
+      '@effect/ai-anthropic':
+        specifier: 4.1.5
+        version: 4.1.5(effect@4.1.5)
+      '@effect/ai-openai':
+        specifier: 4.1.5
+        version: 4.1.5(effect@4.1.5)
       '@effect/platform-node':
         specifier: 4.1.5
         version: 4.1.5(effect@4.1.5)(redis@6.4.0)
@@ -222,6 +228,16 @@ importers:
         version: 5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))
 
 packages:
+
+  '@effect/ai-anthropic@4.1.5':
+    resolution: {integrity: sha512-rLqL6hm/8J/CXJDNYhbF9g+isyZjiRNtiekL7iUxwflaEGLclXTP31/RxQwEzb6ihGeMMYmJz3yt6+besNaUzg==}
+    peerDependencies:
+      effect: ^4.1.5
+
+  '@effect/ai-openai@4.1.5':
+    resolution: {integrity: sha512-JucWxv+12K5cV71oMaU0XT97HJLQC4xSbZwT1BEWsT6AX6y2t9jL3LuzNUhczffypifs4RUUtpx9sIzjiAhYbw==}
+    peerDependencies:
+      effect: ^4.1.5
 
   '@effect/platform-node-shared@4.1.5':
     resolution: {integrity: sha512-JzlrYe4uKaBFTWihBRXo2pDjkUVB39kQpKdGfXdbp7Co5sKT8hbcjOmdB5pg/WOYESdGTddd3fxD4lwlZELbZQ==}
@@ -1178,6 +1194,14 @@ packages:
         optional: true
 
 snapshots:
+
+  '@effect/ai-anthropic@4.1.5(effect@4.1.5)':
+    dependencies:
+      effect: 4.1.5
+
+  '@effect/ai-openai@4.1.5(effect@4.1.5)':
+    dependencies:
+      effect: 4.1.5
 
   '@effect/platform-node-shared@4.1.5(effect@4.1.5)':
     dependencies:

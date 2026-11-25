@@ -88,11 +88,20 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 - 応答に含まれる URL を取りに行くとき、宛先が `api.github.com` でなければトークンを付けずにエラーにする
 - エラーの `cause` に HttpClient のエラーを入れない（送ったリクエストの `authorization` ヘッダーがログに出るため）
 
+## LLM による判定
+
+- `src/core/judge/llm-classifier.ts`（`LlmStructuredClassifier`）: `effect/ai` の `LanguageModel.generateObject` で verdict（todo / not_todo / uncertain）と理由を受け取る。provider は LanguageModel を提供する側で決める
+- 出力が Schema に合わない・内容のポリシーで拒否された場合は、同期を止めずに要確認に回す（同じ入力なら次も同じ結果になりやすく、同期を失敗にすると 1 件で詰まるため）。接続・レート制限・認証などの失敗は `JudgeRequestError` にして、次の周期でやり直す
+- 評価対象（通知のタイトルなど）は外部から来たデータなので、プロンプトでは区切りの中に入れ、指示として従わないよう明示する
+- `src/app/llm.ts`（`makeStructuredClassifier`）: LLM Profile から classifier を作る。対応済みは `none`（LLM を使わない）・`anthropic`・`openai`。API キーは `SecretStore` の `llm.<provider>.api_key`
+- classifier は**アカウントごと**に作り、そのアカウントのジョブにだけ渡す（会社のデータを許可外の LLM に送らないため）
+- Effect の `effect/ai` には provider に依存しない `DecisionModel`（Probability / Classify / Rate）があり、`@effect/ai-openai` に `OpenAiDecisionModel` がある。Decisions provider はこれで実装する予定
+
 ## 定期実行
 
 - `src/core/sync/scheduler.ts`（`runJobs`）: ジョブごとに「実行 → 間隔だけ待つ」を止まらずに繰り返す。失敗（defect も含む）はログに残して次の間隔でやり直す。ジョブが休む時刻（レート制限の解除時刻など）を示したら、少なくともその時刻まで待つ。1 つのジョブが休んだり失敗したりしても、ほかのジョブは止まらない
 - `src/app/github-jobs.ts`: アカウントごとに GitHubClient を 1 つ作り、通知の同期（1 分ごと）と見張り（5 分ごと）の 2 つのジョブで共有する
-- LLM による判定を入れるまでは、`ConservativeClassifier`（常に `uncertain`）を使う。規則で決まらない項目はすべて要確認に入り、対象外として捨てることはない
+- LLM Profile の provider が `none` のときは `ConservativeClassifier`（常に `uncertain`）を使う。規則で決まらない項目はすべて要確認に入り、対象外として捨てることはない
 
 ## 技術スタック
 

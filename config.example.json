@@ -1,15 +1,16 @@
 {
   "llmProfiles": {
     "work": {
-      "provider": "azure-openai",
-      "model": "gpt-5"
+      "provider": "openai",
+      "model": "gpt-5.2"
     },
     "personal": {
       "provider": "anthropic",
-      "model": "claude-sonnet-5-5",
-      "decisions": {
-        "provider": "openai"
-      }
+      "model": "claude-haiku-5-5"
+    },
+    "offline": {
+      "provider": "none",
+      "model": "-"
     }
   },
   "defaultLlmProfile": "work",

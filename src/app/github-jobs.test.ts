@@ -4,7 +4,6 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import { MissingSecretError } from "../core/config/secret-store.js";
 import { EnvSecretStore } from "../core/config/secret-store.js";
 import { TestDatabase } from "../core/db/test-database.js";
-import { ConservativeClassifier } from "../core/judge/conservative-classifier.js";
 import { GitHubRateLimitedError, GitHubRequestError } from "../sources/github/github-adapter.js";
 import conflictedPull from "../sources/github/__fixtures__/pull-42-open-conflict.json" with { type: "json" };
 import { decodeAppConfig } from "./config/app-config.js";
@@ -12,7 +11,7 @@ import { githubBackoffUntil, makeGitHubJobs } from "./github-jobs.js";
 
 const account = Effect.gen(function* () {
   const config = yield* decodeAppConfig({
-    llmProfiles: { work: { provider: "anthropic", model: "claude-sonnet-5-5" } },
+    llmProfiles: { work: { provider: "none", model: "-" } },
     defaultLlmProfile: "work",
     accounts: [{ kind: "github", id: "work" }],
   });
@@ -81,14 +80,14 @@ describe("makeGitHubJobs", () => {
 
       assert.isAbove(github.stats.requests, 2);
       assert.strictEqual(github.stats.max, 1);
-    }).pipe(withEnv(TOKEN_ENV), Effect.provide(ConservativeClassifier), Effect.provide(TestDatabase)));
+    }).pipe(withEnv(TOKEN_ENV), Effect.provide(TestDatabase)));
 });
 
 describe("makeGitHubJobs のフィルター", () => {
   it.effect("アカウントのリポジトリのフィルターを、見張りにも適用する", () =>
     Effect.gen(function* () {
       const config = yield* decodeAppConfig({
-        llmProfiles: { work: { provider: "anthropic", model: "claude-sonnet-5-5" } },
+        llmProfiles: { work: { provider: "none", model: "-" } },
         defaultLlmProfile: "work",
         accounts: [{ kind: "github", id: "work", repositories: { exclude: ["acme/*"] } }],
       });
@@ -99,7 +98,19 @@ describe("makeGitHubJobs のフィルター", () => {
       yield* watch.run;
 
       assert.strictEqual(github.stats.requests, 1);
-    }).pipe(withEnv(TOKEN_ENV), Effect.provide(ConservativeClassifier), Effect.provide(TestDatabase)));
+    }).pipe(withEnv(TOKEN_ENV), Effect.provide(TestDatabase)));
+});
+
+describe("makeGitHubJobs の判定", () => {
+  it.effect("アカウントの LLM Profile で作った classifier で判定し、外から classifier を渡す必要がない", () =>
+    Effect.gen(function* () {
+      const github = fakeGitHub();
+      const jobs = yield* makeGitHubJobs(yield* account).pipe(Effect.provide(github.layer));
+
+      const runs = yield* Effect.forEach(jobs, (job) => Effect.exit(job.run));
+
+      assert.isTrue(runs.every((exit) => exit._tag === "Success"));
+    }).pipe(withEnv(TOKEN_ENV), Effect.provide(TestDatabase)));
 });
 
 describe("githubBackoffUntil", () => {

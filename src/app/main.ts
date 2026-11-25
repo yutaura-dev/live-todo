@@ -4,7 +4,6 @@ import { Cause, Config, Effect, Exit, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { EnvSecretStore } from "../core/config/secret-store.js";
 import { Database, DatabaseMigrations } from "../core/db/database.js";
-import { ConservativeClassifier } from "../core/judge/conservative-classifier.js";
 import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { runJobsOnce } from "../core/sync/run-once.js";
 import { runJobs } from "../core/sync/scheduler.js";
@@ -54,7 +53,7 @@ const program = Effect.gen(function* () {
   yield* printTasks;
 }).pipe(
   Effect.provide(DatabaseLive),
-  Effect.provide(Layer.mergeAll(EnvSecretStore, ConservativeClassifier, FetchHttpClient.layer, NodeFileSystem.layer)),
+  Effect.provide(Layer.mergeAll(EnvSecretStore, FetchHttpClient.layer, NodeFileSystem.layer)),
 );
 
 NodeRuntime.runMain(program);

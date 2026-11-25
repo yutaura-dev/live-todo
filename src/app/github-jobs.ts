@@ -7,7 +7,8 @@ import { type GitHubAdapterError, GitHubClient } from "../sources/github/github-
 import { makeGitHubBinding } from "../sources/github/github-binding.js";
 import { GitHubClientLive } from "../sources/github/github-client-live.js";
 import { makeGitHubPullRequestWatchProvider, pullRequestConditions } from "../sources/github/github-watch.js";
-import type { JudgeRequestError } from "../core/judge/todo-judge.js";
+import { type JudgeRequestError, StructuredClassifier } from "../core/judge/todo-judge.js";
+import { makeStructuredClassifier } from "./llm.js";
 import type { ResolvedAccount } from "./config/app-config.js";
 
 export const NOTIFICATION_SYNC_INTERVAL = "1 minute";
@@ -40,8 +41,12 @@ export const makeGitHubJobs = Effect.fnUntraced(function* (account: ResolvedAcco
   // 見張りの最初の間隔をジョブの間隔にそろえる理由: 最初の間隔より短く回しても、確認する時刻が来ていない対象は飛ばされるだけなので。
   const watch = watchBinding(watchProvider, pullRequestConditions, { initial: WATCH_SYNC_INTERVAL, max: "1 day" });
 
+  // classifier をアカウントごとに作ってそのジョブにだけ渡す理由: 会社のデータは会社が許可した LLM にだけ
+  // 送るという charter の制約を、組み立ての段階で守らせるため（外から 1 つ渡すと全アカウントで共有される）。
+  const classifier = yield* makeStructuredClassifier(account.resolvedLlmProfile);
+
   return [
-    { name: notifications.source, interval: NOTIFICATION_SYNC_INTERVAL, run: syncSource(notifications), backoffUntil: githubBackoffUntil },
+    { name: notifications.source, interval: NOTIFICATION_SYNC_INTERVAL, run: syncSource(notifications).pipe(Effect.provideService(StructuredClassifier, classifier)), backoffUntil: githubBackoffUntil },
     { name: watch.source, interval: WATCH_SYNC_INTERVAL, run: syncSource(watch), backoffUntil: githubBackoffUntil },
   ] satisfies ReadonlyArray<SyncJob<GitHubJobError, unknown>>;
 });

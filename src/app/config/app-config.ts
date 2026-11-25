@@ -9,7 +9,8 @@ export class InvalidAppConfigError extends Schema.TaggedError<InvalidAppConfigEr
 const AccountId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/));
 
 const LlmProfile = Schema.Struct({
-  provider: Schema.Literals(["anthropic", "openai", "gemini", "azure-openai", "bedrock"]),
+  // none: LLM を使わない（規則で決まらないものはすべて要確認）。API キーがまだない環境でも動かせるようにするため。
+  provider: Schema.Literals(["none", "anthropic", "openai", "gemini", "azure-openai", "bedrock"]),
   model: Schema.NonEmptyString,
   decisions: Schema.optional(
     Schema.Struct({
