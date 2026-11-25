@@ -4,11 +4,11 @@ import type {
   ConfigDocument,
   FilterReason,
   GitHubTokenSummary,
-  LlmProvider,
   SecretStatus,
   SettingsSnapshot,
 } from "../../shared/api.js";
 import { api } from "./api.js";
+import { type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
 
@@ -17,12 +17,6 @@ const EMPTY_CONFIG: ConfigDocument = {
   defaultLlmProfile: "default",
   accounts: [],
 };
-
-const PROVIDERS: { value: LlmProvider; label: string }[] = [
-  { value: "none", label: "使わない（すべて要確認に入れる）" },
-  { value: "anthropic", label: "Claude（Anthropic）" },
-  { value: "openai", label: "OpenAI" },
-];
 
 const SECRET_LABELS: Record<SecretStatus, string> = {
   saved: "保存済み（キーチェーンで暗号化）",
@@ -97,8 +91,9 @@ export function Settings() {
             <AccountEditor
               key={account.id || index}
               account={account}
-              profiles={Object.keys(draft.llmProfiles)}
-              defaultProfile={draft.defaultLlmProfile}
+              judge={judgeSettingOf(draft, account.id)}
+              onJudgeChange={(setting) => setDraft((current) => withJudgeSetting(current, account.id, setting))}
+              secrets={snapshot.secrets}
               tokenStatus={snapshot.secrets[`github.${account.id}.token`] ?? "missing"}
               tokenSummary={snapshot.githubTokens[account.id]}
               onChange={(next) => updateAccount(index, next)}
@@ -112,16 +107,6 @@ export function Settings() {
           />
         </section>
 
-        <section className="settings-section" aria-labelledby="llm-heading">
-          <h3 id="llm-heading" className="section-title">
-            判定に使う LLM
-          </h3>
-          <LlmEditor draft={draft} onChange={setDraft} />
-          <div className="secret-list">
-            <SecretField label="Anthropic の API キー" secretKey="llm.anthropic.api_key" status={snapshot.secrets["llm.anthropic.api_key"] ?? "missing"} onChanged={reload} />
-            <SecretField label="OpenAI の API キー" secretKey="llm.openai.api_key" status={snapshot.secrets["llm.openai.api_key"] ?? "missing"} onChanged={reload} />
-          </div>
-        </section>
       </div>
 
       <footer className="settings-footer">
@@ -139,8 +124,9 @@ export function Settings() {
 
 function AccountEditor(props: {
   account: Account;
-  profiles: string[];
-  defaultProfile: string;
+  judge: JudgeSetting;
+  onJudgeChange: (setting: JudgeSetting) => void;
+  secrets: Record<string, SecretStatus>;
   tokenStatus: SecretStatus;
   tokenSummary: GitHubTokenSummary | undefined;
   onChange: (next: Account) => void;
@@ -183,24 +169,9 @@ function AccountEditor(props: {
         <p className="token-summary">環境変数のトークンは確かめていません。ここに貼り付けて保存すると、権限と有効期限を確かめます。</p>
       )}
 
+      <JudgeEditor setting={props.judge} onChange={props.onJudgeChange} secrets={props.secrets} onSecretChanged={props.onSecretChanged} />
+
       <div className="field-row">
-        <label className="field">
-          <span className="field-label">判定に使う LLM</span>
-          <select
-            value={account.llmProfile ?? ""}
-            onChange={(event) => {
-              const { llmProfile: _omitted, ...rest } = account;
-              props.onChange(event.target.value === "" ? rest : { ...rest, llmProfile: event.target.value });
-            }}
-          >
-            <option value="">既定（{props.defaultProfile}）</option>
-            {props.profiles.map((profile) => (
-              <option key={profile} value={profile}>
-                {profile}
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="field">
           <span className="field-label">初回にさかのぼる日数</span>
           <input
@@ -365,87 +336,78 @@ function AddAccount(props: { existing: string[]; onAdd: (id: string) => void }) 
   );
 }
 
-function LlmEditor(props: { draft: ConfigDocument; onChange: (next: ConfigDocument) => void }) {
-  const { draft } = props;
-  const [newName, setNewName] = useState("");
-  const setProfile = (name: string, profile: ConfigDocument["llmProfiles"][string]) =>
-    props.onChange({ ...draft, llmProfiles: { ...draft.llmProfiles, [name]: profile } });
+const JUDGE_OPTIONS: { value: "none" | "anthropic" | "openai"; label: string; hint: string }[] = [
+  { value: "none", label: "LLM を使わない", hint: "規則で決まらない通知は、すべて要確認に入ります。費用はかかりません" },
+  { value: "anthropic", label: "Claude", hint: "通知ごとに Anthropic の API を呼びます" },
+  { value: "openai", label: "OpenAI", hint: "通知ごとに OpenAI の API を呼びます" },
+];
+
+function JudgeEditor(props: {
+  setting: JudgeSetting;
+  onChange: (setting: JudgeSetting) => void;
+  secrets: Record<string, SecretStatus>;
+  onSecretChanged: () => Promise<unknown>;
+}) {
+  const { setting } = props;
+  const name = useId();
+  const models = MODEL_CHOICES[setting.provider];
+  const known = JUDGE_OPTIONS.some((option) => option.value === setting.provider);
+  const choose = (provider: JudgeSetting["provider"]) =>
+    props.onChange({ ...setting, provider, model: MODEL_CHOICES[provider]?.[0]?.value ?? (provider === "none" ? "-" : "") });
 
   return (
-    <div className="llm-editor">
-      <table className="profile-table">
-        <thead>
-          <tr>
-            <th scope="col">名前</th>
-            <th scope="col">プロバイダ</th>
-            <th scope="col">モデル</th>
-            <th scope="col">確率付きの判定（OpenAI Decisions）</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(draft.llmProfiles).map(([name, profile]) => (
-            <tr key={name}>
-              <th scope="row">{name}</th>
-              <td>
-                <select value={profile.provider} onChange={(event) => setProfile(name, { ...profile, provider: event.target.value as LlmProvider })}>
-                  {PROVIDERS.map((provider) => (
-                    <option key={provider.value} value={provider.value}>
-                      {provider.label}
-                    </option>
-                  ))}
-                  {!PROVIDERS.some((provider) => provider.value === profile.provider) && <option value={profile.provider}>{profile.provider}</option>}
-                </select>
-              </td>
-              <td>
-                <input value={profile.model} onChange={(event) => setProfile(name, { ...profile, model: event.target.value })} />
-              </td>
-              <td>
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={profile.decisions !== undefined}
-                    onChange={(event) => {
-                      const { decisions: _omitted, ...rest } = profile;
-                      setProfile(name, event.target.checked ? { ...rest, decisions: { provider: "openai", model: "gpt-6-luna" } } : rest);
-                    }}
-                  />
-                  使う
-                </label>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="field-row">
+    <fieldset className="judge">
+      <legend className="field-label">判定</legend>
+      <p className="field-hint">届いた通知が、自分の対応が要るものかを決める方法です。</p>
+      <div className="judge-options">
+        {JUDGE_OPTIONS.map((option) => (
+          <label key={option.value} className={`judge-option${setting.provider === option.value ? " judge-option--selected" : ""}`}>
+            <input type="radio" name={name} checked={setting.provider === option.value} onChange={() => choose(option.value)} />
+            <span className="judge-option-label">{option.label}</span>
+            <span className="field-hint">{option.hint}</span>
+          </label>
+        ))}
+        {!known && <p className="field-hint">設定ファイルで {setting.provider} を指定しています。画面からは変えられません。</p>}
+      </div>
+
+      {setting.provider === "anthropic" && models && (
         <label className="field">
-          <span className="field-label">既定の LLM</span>
-          <select value={draft.defaultLlmProfile} onChange={(event) => props.onChange({ ...draft, defaultLlmProfile: event.target.value })}>
-            {Object.keys(draft.llmProfiles).map((name) => (
-              <option key={name} value={name}>
-                {name}
+          <span className="field-label">モデル</span>
+          <select value={setting.model} onChange={(event) => props.onChange({ ...setting, model: event.target.value })}>
+            {models.map((model) => (
+              <option key={model.value} value={model.value}>
+                {model.label}
               </option>
             ))}
+            {!models.some((model) => model.value === setting.model) && <option value={setting.model}>{setting.model}</option>}
           </select>
         </label>
-        <form
-          className="add-account"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (newName.trim() === "" || newName in draft.llmProfiles) return;
-            setProfile(newName.trim(), { provider: "none", model: "-" });
-            setNewName("");
-          }}
-        >
-          <label className="field">
-            <span className="field-label">LLM の設定を追加</span>
-            <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="work-llm" />
-          </label>
-          <button type="submit" className="quiet-button">
-            追加する
-          </button>
-        </form>
-      </div>
-    </div>
+      )}
+      {setting.provider === "openai" && (
+        <label className="field">
+          <span className="field-label">モデル</span>
+          <input value={setting.model} placeholder="例: gpt-5.2" onChange={(event) => props.onChange({ ...setting, model: event.target.value })} />
+        </label>
+      )}
+      {setting.provider === "anthropic" && (
+        <SecretField label="Anthropic の API キー" secretKey="llm.anthropic.api_key" status={props.secrets["llm.anthropic.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
+      )}
+
+      {setting.provider !== "none" && (
+        <label className="checkbox judge-probabilities">
+          <input type="checkbox" checked={setting.probabilities} onChange={(event) => props.onChange({ ...setting, probabilities: event.target.checked })} />
+          <span>
+            <span className="judge-option-label">確率も出す</span>
+            <span className="field-hint">
+              OpenAI Decisions で「自分の対応が要る確率」を出し、カードに表示します。OpenAI の API キーが要ります
+            </span>
+          </span>
+        </label>
+      )}
+      {(setting.provider === "openai" || setting.probabilities) && (
+        <SecretField label="OpenAI の API キー" secretKey="llm.openai.api_key" status={props.secrets["llm.openai.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
+      )}
+    </fieldset>
   );
 }
 

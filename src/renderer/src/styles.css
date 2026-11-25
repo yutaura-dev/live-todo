@@ -443,7 +443,7 @@ textarea {
 
 .secret-field {
   display: grid;
-  grid-template-columns: 10em auto minmax(12em, 1fr) auto auto;
+  grid-template-columns: 12em auto minmax(12em, 1fr) auto auto;
   gap: 8px 12px;
   align-items: center;
 }
@@ -616,6 +616,63 @@ textarea {
 button:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+.judge {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.judge legend {
+  padding: 0 6px;
+}
+
+.judge > .field-hint {
+  margin: 0;
+}
+
+.judge-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.judge-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.judge-option .field-hint {
+  grid-column: 2;
+}
+
+.judge-option--selected {
+  border-color: var(--primary);
+  background: var(--tray);
+}
+
+.judge-option-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.judge-probabilities {
+  align-items: start;
+}
+
+.judge-probabilities > span {
+  display: grid;
+  gap: 2px;
 }
 
 .token-summary {
