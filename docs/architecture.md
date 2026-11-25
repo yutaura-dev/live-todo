@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0004](decisions/0004-epic-and-custom-labels.md)
+> **直近の変更 ADR**: [ADR-0005](decisions/0005-adopt-effect.md)
 
 # Architecture — live-todo
 
@@ -26,18 +26,19 @@ macOS 向けの Electron アプリ。main プロセスがポーリングして S
 
 ## 技術スタック
 
-決定の経緯は [ADR-0002](decisions/0002-desktop-app-stack.md) を参照。
+決定の経緯は [ADR-0002](decisions/0002-desktop-app-stack.md) と [ADR-0005](decisions/0005-adopt-effect.md) を参照。
 
 | 領域 | 採用技術 | 採用理由 / 関連 ADR |
 |------|----------|---------------------|
 | アプリ基盤 | Electron（macOS のみ） | 常駐・キーチェーン・Node SDK をまとめて満たす。[ADR-0002](decisions/0002-desktop-app-stack.md) |
 | 言語 | TypeScript | main と renderer を 1 言語にそろえる |
+| 実装の基盤 | Effect 4（`effect`） | エラーの型付け・依存の注入・Schema による検証・スケジュール。[ADR-0005](decisions/0005-adopt-effect.md) |
 | UI | React + Vite | |
 | カンバン | dnd-kit | |
-| データストア | SQLite（better-sqlite3）+ Drizzle ORM | ローカル完結。マイグレーションを型付きで管理する |
-| LLM 抽象 | Vercel AI SDK | 複数プロバイダと tool calling を共通 API で扱える |
+| データストア | SQLite（`effect/sql` + `@effect/sql-sqlite-node`） | ローカル完結。[ADR-0005](decisions/0005-adopt-effect.md) |
+| LLM 抽象 | `effect/ai`（`LanguageModel`）+ `@effect/ai-*` | 複数プロバイダと tool calling を共通 API で扱える。Decisions provider は `effect/http` で自前実装 |
 | 秘匿情報 | Electron `safeStorage`（macOS Keychain） | トークンを平文の設定ファイルに置かない |
-| テスト | Vitest（UI の E2E は必要に応じて Playwright） | |
+| テスト | Vitest + `@effect/vitest`（UI の E2E は必要に応じて Playwright） | |
 | パッケージ管理 | pnpm 12（`packageManager` で固定、corepack で起動） | |
 | 開発環境 | nix flake + direnv | 版を `flake.lock` で固定し、手元・CI・worktree を揃える |
 
@@ -69,6 +70,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 - [ADR-0002: アプリ基盤に Electron + TypeScript を採用する](decisions/0002-desktop-app-stack.md)
 - [ADR-0003: 同期と判定のパイプライン](decisions/0003-sync-and-judge-pipeline.md)
 - [ADR-0004: Epic とカスタムラベルを導入する](decisions/0004-epic-and-custom-labels.md)
+- [ADR-0005: 実装の基盤に Effect を採用する](decisions/0005-adopt-effect.md)
 - 設計の方針
   - Source ごとの差異は Source Adapter に閉じ込め、Task・UI は Source に依存させない
   - 外部への書き込みは Approval を必ず通す。Adapter の書き込みメソッドは、承認済みの操作しか受け付けない形にする

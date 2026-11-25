@@ -40,6 +40,12 @@
 - テストのない変更を入れない。新しい Source Adapter は実 API ではなくフィクスチャでテストする
 - 判定の refusal や想定外の応答は「要確認」に倒す（fail closed）。否定判定として扱わない
 - 実 LLM / Decisions API はテストから呼ばない（課金されるため）。provider はテストダブルに差し替える
+- 実装は Effect 4 で書く（[ADR-0005](docs/decisions/0005-adopt-effect.md)）。API は v3 から大きく変わっているので、記憶や外部記事ではなく `node_modules/effect/CLAUDE.md`・`node_modules/effect/ai-docs/`・型定義を一次情報にする
+  - エラーは `Schema.TaggedError` で定義し、`throw` しない
+  - 依存は `Context.Service` で表し、テストでは `Effect.provideService` で差し替える
+  - 外部データ（LLM の出力、API の応答、ユーザー設定）は `Schema` でデコードする
+  - 時刻は `DateTime` / `Clock` を使う（`Date.now` を使わない）。テストでは `TestClock` で固定する
+  - テストは `@effect/vitest` の `it.effect` で書く
 
 ## 触れてほしくない領域
 
@@ -64,3 +70,4 @@ TBD（次回更新時に決定）
 - データはローカル保存、推論は外部の LLM API（プロバイダは切り替え可能）
 - Source ごとの差異は Source Adapter で吸収し、Task 側は Source に依存しない
 - macOS 向けの Electron + TypeScript。Sync・Adapter・Agent・秘匿情報は main プロセスに置き、renderer には API キーもトークンも渡さない（[ADR-0002](docs/decisions/0002-desktop-app-stack.md)）
+- 実装は Effect 4。LLM は `effect/ai`、DB は `effect/sql` を使う（[ADR-0005](docs/decisions/0005-adopt-effect.md)）

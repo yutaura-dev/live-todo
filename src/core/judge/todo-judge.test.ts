@@ -1,151 +1,160 @@
-import { describe, expect, it, vi } from "vitest";
-import { createTodoJudge, type DecisionsProvider, type StructuredClassifier } from "./todo-judge.js";
+import { assert, describe, expect, it, vi } from "@effect/vitest";
+import { Effect } from "effect";
+import {
+  type DecisionAnswer,
+  DecisionsProvider,
+  InvalidThresholdsError,
+  JudgeRequestError,
+  makeTodoJudge,
+  StructuredClassifier,
+} from "./todo-judge.js";
 
 type Item = { text: string; reviewRequested?: boolean };
 
 const QUESTION = "このメッセージは自分が対応すべきタスクか？";
 const thresholds = { todo: 0.8, review: 0.4 };
 
-const decisionsReturning = (answer: Awaited<ReturnType<DecisionsProvider["judgePredicate"]>>): DecisionsProvider => ({
-  judgePredicate: vi.fn().mockResolvedValue(answer),
-});
-
-const structuredReturning = (answer: string): StructuredClassifier => ({
-  classifyTodo: vi.fn().mockResolvedValue(answer),
-});
-
-const baseOptions = {
+const options = {
   rules: [(item: Item) => item.reviewRequested === true],
   describe: (item: Item) => item.text,
   question: QUESTION,
   thresholds,
 };
 
+const decisionsReturning = (answer: DecisionAnswer) =>
+  DecisionsProvider.of({ judgePredicate: vi.fn(() => Effect.succeed(answer)) });
+
+const structuredReturning = (answer: unknown) =>
+  StructuredClassifier.of({ classifyTodo: vi.fn(() => Effect.succeed(answer)) });
+
+const judgeWith = (
+  item: Item,
+  services: { decisions?: DecisionsProvider["Service"]; structured: StructuredClassifier["Service"] },
+) =>
+  Effect.gen(function* () {
+    const judge = yield* makeTodoJudge(options);
+    return yield* judge(item);
+  }).pipe(
+    Effect.provideService(StructuredClassifier, services.structured),
+    services.decisions ? Effect.provideService(DecisionsProvider, services.decisions) : (self) => self,
+  );
+
 describe("規則による判定", () => {
-  it("規則に一致した項目は LLM を呼ばずに todo と判定する", async () => {
-    const decisions = decisionsReturning({ type: "predicate", probability: 0 });
-    const structured = structuredReturning("not_todo");
-    const judge = createTodoJudge({ ...baseOptions, decisions, structured });
+  it.effect("規則に一致した項目は LLM を呼ばずに todo と判定する", () =>
+    Effect.gen(function* () {
+      const decisions = decisionsReturning({ type: "predicate", probability: 0 });
+      const structured = structuredReturning("not_todo");
 
-    const result = await judge({ text: "PR #1", reviewRequested: true });
+      const result = yield* judgeWith({ text: "PR #1", reviewRequested: true }, { decisions, structured });
 
-    expect(result).toEqual({ verdict: "todo", method: "rule" });
-    expect(decisions.judgePredicate).not.toHaveBeenCalled();
-    expect(structured.classifyTodo).not.toHaveBeenCalled();
-  });
+      assert.deepStrictEqual(result, { verdict: "todo", method: "rule" });
+      expect(decisions.judgePredicate).not.toHaveBeenCalled();
+      expect(structured.classifyTodo).not.toHaveBeenCalled();
+    }));
 });
 
 describe("Decisions provider による判定", () => {
-  it.each([
+  it.effect.each([
     [0.95, "todo"],
     [0.8, "todo"],
     [0.79, "needs_review"],
     [0.4, "needs_review"],
     [0.39, "not_todo"],
-  ] as const)("確率 %s は %s と判定する", async (probability, verdict) => {
-    const judge = createTodoJudge({
-      ...baseOptions,
-      decisions: decisionsReturning({ type: "predicate", probability }),
-      structured: structuredReturning("todo"),
-    });
+  ] as const)("確率 %s は %s と判定する", ([probability, verdict]) =>
+    Effect.gen(function* () {
+      const result = yield* judgeWith(
+        { text: "確認お願いします" },
+        { decisions: decisionsReturning({ type: "predicate", probability }), structured: structuredReturning("todo") },
+      );
 
-    const result = await judge({ text: "確認お願いします" });
+      assert.deepStrictEqual(result, { verdict, method: "decisions", probability });
+    }));
 
-    expect(result).toEqual({ verdict, method: "decisions", probability });
-  });
+  it.effect("評価対象の内容を input に、質問を question に渡す", () =>
+    Effect.gen(function* () {
+      const decisions = decisionsReturning({ type: "predicate", probability: 0.9 });
 
-  it("評価対象の内容を input に、質問を question に渡す", async () => {
-    const decisions = decisionsReturning({ type: "predicate", probability: 0.9 });
-    const judge = createTodoJudge({ ...baseOptions, decisions, structured: structuredReturning("todo") });
+      yield* judgeWith({ text: "明日までにレビューしてください" }, { decisions, structured: structuredReturning("todo") });
 
-    await judge({ text: "明日までにレビューしてください" });
+      expect(decisions.judgePredicate).toHaveBeenCalledWith({ input: "明日までにレビューしてください", question: QUESTION });
+    }));
 
-    expect(decisions.judgePredicate).toHaveBeenCalledWith({
-      input: "明日までにレビューしてください",
-      question: QUESTION,
-    });
-  });
+  it.effect("refusal が返ったら要確認にする", () =>
+    Effect.gen(function* () {
+      const result = yield* judgeWith(
+        { text: "..." },
+        { decisions: decisionsReturning({ type: "refusal" }), structured: structuredReturning("todo") },
+      );
 
-  it("refusal が返ったら要確認にする", async () => {
-    const judge = createTodoJudge({
-      ...baseOptions,
-      decisions: decisionsReturning({ type: "refusal" }),
-      structured: structuredReturning("todo"),
-    });
+      assert.deepStrictEqual(result, { verdict: "needs_review", method: "decisions" });
+    }));
 
-    const result = await judge({ text: "..." });
+  it.effect.each([Number.NaN, -0.1, 1.1])("0 から 1 の範囲外の確率 %s が返ったら要確認にする", (probability) =>
+    Effect.gen(function* () {
+      const result = yield* judgeWith(
+        { text: "..." },
+        { decisions: decisionsReturning({ type: "predicate", probability }), structured: structuredReturning("todo") },
+      );
 
-    expect(result).toEqual({ verdict: "needs_review", method: "decisions" });
-  });
+      assert.deepStrictEqual(result, { verdict: "needs_review", method: "decisions" });
+    }));
 
-  it.each([Number.NaN, -0.1, 1.1])("0 から 1 の範囲外の確率 %s が返ったら要確認にする", async (probability) => {
-    const judge = createTodoJudge({
-      ...baseOptions,
-      decisions: decisionsReturning({ type: "predicate", probability }),
-      structured: structuredReturning("todo"),
-    });
+  it.effect("Decisions provider が使えるときは structured output を呼ばない", () =>
+    Effect.gen(function* () {
+      const structured = structuredReturning("todo");
 
-    const result = await judge({ text: "..." });
+      yield* judgeWith({ text: "..." }, { decisions: decisionsReturning({ type: "predicate", probability: 0.1 }), structured });
 
-    expect(result).toEqual({ verdict: "needs_review", method: "decisions" });
-  });
+      expect(structured.classifyTodo).not.toHaveBeenCalled();
+    }));
 
-  it("Decisions provider が使えるときは structured output を呼ばない", async () => {
-    const structured = structuredReturning("todo");
-    const judge = createTodoJudge({
-      ...baseOptions,
-      decisions: decisionsReturning({ type: "predicate", probability: 0.1 }),
-      structured,
-    });
+  it.effect("通信エラーは要確認にせず呼び出し元に伝える", () =>
+    Effect.gen(function* () {
+      const decisions = DecisionsProvider.of({
+        judgePredicate: () => Effect.fail(new JudgeRequestError({ message: "network" })),
+      });
 
-    await judge({ text: "..." });
+      const error = yield* Effect.flip(judgeWith({ text: "..." }, { decisions, structured: structuredReturning("todo") }));
 
-    expect(structured.classifyTodo).not.toHaveBeenCalled();
-  });
-
-  it("通信エラーは要確認にせず呼び出し元に伝える", async () => {
-    const decisions: DecisionsProvider = { judgePredicate: vi.fn().mockRejectedValue(new Error("network")) };
-    const judge = createTodoJudge({ ...baseOptions, decisions, structured: structuredReturning("todo") });
-
-    await expect(judge({ text: "..." })).rejects.toThrow("network");
-  });
+      assert.instanceOf(error, JudgeRequestError);
+      assert.strictEqual(error.message, "network");
+    }));
 });
 
 describe("structured output による判定（Decisions provider が使えない場合）", () => {
-  it.each([
+  it.effect.each([
     ["todo", "todo"],
     ["not_todo", "not_todo"],
     ["uncertain", "needs_review"],
-  ] as const)("%s が返ったら %s と判定する", async (answer, verdict) => {
-    const judge = createTodoJudge({ ...baseOptions, structured: structuredReturning(answer) });
+  ] as const)("%s が返ったら %s と判定する", ([answer, verdict]) =>
+    Effect.gen(function* () {
+      const result = yield* judgeWith({ text: "..." }, { structured: structuredReturning(answer) });
 
-    const result = await judge({ text: "..." });
+      assert.deepStrictEqual(result, { verdict, method: "structured" });
+    }));
 
-    expect(result).toEqual({ verdict, method: "structured" });
-  });
+  it.effect("想定外の値が返ったら要確認にする", () =>
+    Effect.gen(function* () {
+      const result = yield* judgeWith({ text: "..." }, { structured: structuredReturning("maybe") });
 
-  it("想定外の値が返ったら要確認にする", async () => {
-    const judge = createTodoJudge({ ...baseOptions, structured: structuredReturning("maybe") });
+      assert.deepStrictEqual(result, { verdict: "needs_review", method: "structured" });
+    }));
 
-    const result = await judge({ text: "..." });
+  it.effect("評価対象の内容を渡す", () =>
+    Effect.gen(function* () {
+      const structured = structuredReturning("todo");
 
-    expect(result).toEqual({ verdict: "needs_review", method: "structured" });
-  });
+      yield* judgeWith({ text: "請求書を送ってください" }, { structured });
 
-  it("評価対象の内容を渡す", async () => {
-    const structured = structuredReturning("todo");
-    const judge = createTodoJudge({ ...baseOptions, structured });
-
-    await judge({ text: "請求書を送ってください" });
-
-    expect(structured.classifyTodo).toHaveBeenCalledWith({ input: "請求書を送ってください", question: QUESTION });
-  });
+      expect(structured.classifyTodo).toHaveBeenCalledWith({ input: "請求書を送ってください", question: QUESTION });
+    }));
 });
 
 describe("閾値の検証", () => {
-  it("todo の閾値が要確認の閾値より小さいとエラーにする", () => {
-    expect(() =>
-      createTodoJudge({ ...baseOptions, thresholds: { todo: 0.3, review: 0.5 }, structured: structuredReturning("todo") }),
-    ).toThrow("todo の閾値は要確認の閾値以上にしてください");
-  });
+  it.effect("todo の閾値が要確認の閾値より小さいとエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(makeTodoJudge({ ...options, thresholds: { todo: 0.3, review: 0.5 } }));
+
+      assert.instanceOf(error, InvalidThresholdsError);
+    }));
 });

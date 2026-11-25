@@ -1,6 +1,6 @@
 # ADR-0002: アプリ基盤に Electron + TypeScript を採用する
 
-- **Status**: Accepted
+- **Status**: Accepted（LLM の抽象と DB は [ADR-0005](0005-adopt-effect.md) で置き換え）
 - **Date**: 2026-11-25
 - **Deciders**: YutaUra
 

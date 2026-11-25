@@ -1,144 +1,156 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "@effect/vitest";
+import { Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import notifications from "./__fixtures__/notifications.json" with { type: "json" };
 import mergedPull from "./__fixtures__/pull-42-merged.json" with { type: "json" };
 import closedIssue from "./__fixtures__/issue-7-closed.json" with { type: "json" };
+import type { SourceChange } from "../../core/sync/source-change.js";
 import {
-  createGitHubAdapter,
-  githubTodoRules,
+  GitHubClient,
   type GitHubAdapterOptions,
-  type GitHubClient,
   type GitHubItem,
-  type GitHubNotification,
-  type GitHubSubjectDetail,
+  GitHubResponseError,
+  githubTodoRules,
+  makeGitHubAdapter,
 } from "./github-adapter.js";
 
-const NOW = new Date("2026-11-25T00:00:00Z");
+const NOW = Date.parse("2026-11-25T00:00:00Z");
 
 const PULL_URL = "https://api.github.com/repos/acme/app/pulls/42";
 const ISSUE_URL = "https://api.github.com/repos/acme/app/issues/7";
 
 const openPull = { ...mergedPull, state: "open", merged: false };
 const openIssue = { ...closedIssue, state: "open", state_reason: null };
+const allSubjectsOpen: Record<string, unknown> = { [PULL_URL]: openPull, [ISSUE_URL]: openIssue };
 
-function clientWith(options: {
-  notifications?: GitHubNotification[];
-  subjects?: Record<string, GitHubSubjectDetail | null>;
-}): GitHubClient {
-  return {
-    listNotifications: vi.fn().mockResolvedValue(options.notifications ?? []),
-    getSubject: vi.fn(async (url: string) => options.subjects?.[url] ?? null),
-  };
+function clientWith(options: { notifications?: unknown[]; subjects?: Record<string, unknown> }) {
+  return GitHubClient.of({
+    listNotifications: vi.fn(() => Effect.succeed<unknown>(options.notifications ?? [])),
+    getSubject: vi.fn((url: string) => Effect.succeed(Option.fromNullishOr(options.subjects?.[url]))),
+  });
 }
 
-const allSubjectsOpen = { [PULL_URL]: openPull, [ISSUE_URL]: openIssue };
+const fetchWith = (
+  client: GitHubClient["Service"],
+  cursor: { since: string } | null,
+  extra: Partial<GitHubAdapterOptions> = {},
+) =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(NOW);
+    const adapter = yield* makeGitHubAdapter({ initialLookbackDays: 14, ...extra });
+    return yield* adapter.fetchChanges(cursor);
+  }).pipe(Effect.provideService(GitHubClient, client));
 
-function adapterWith(client: GitHubClient, extra: Partial<GitHubAdapterOptions> = {}) {
-  return createGitHubAdapter({ client, now: () => NOW, initialLookbackDays: 14, ...extra });
-}
-
-function upsertedItems(changes: Awaited<ReturnType<ReturnType<typeof adapterWith>["fetchChanges"]>>["changes"]): GitHubItem[] {
-  return changes.flatMap((change) => (change.kind === "upserted" ? [change.item] : []));
-}
+const upsertedItems = (changes: readonly SourceChange<GitHubItem>[]): GitHubItem[] =>
+  changes.flatMap((change) => (change.kind === "upserted" ? [change.item] : []));
 
 describe("通知の取得条件", () => {
-  it("初回は lookback 期間の開始時刻から、既読の通知も含めて取得する", async () => {
-    const client = clientWith({});
+  it.effect("初回は lookback 期間の開始時刻から、既読の通知も含めて取得する", () =>
+    Effect.gen(function* () {
+      const client = clientWith({});
 
-    await adapterWith(client).fetchChanges(null);
+      yield* fetchWith(client, null);
 
-    expect(client.listNotifications).toHaveBeenCalledWith({ since: "2026-11-11T00:00:00.000Z", all: true });
-  });
+      expect(client.listNotifications).toHaveBeenCalledWith({ since: "2026-11-11T00:00:00.000Z", all: true });
+    }));
 
-  it("2 回目以降は前回のカーソルから、既読の通知も含めて取得する", async () => {
-    const client = clientWith({});
+  it.effect("2 回目以降は前回のカーソルから、既読の通知も含めて取得する", () =>
+    Effect.gen(function* () {
+      const client = clientWith({});
 
-    await adapterWith(client).fetchChanges({ since: "2026-11-24T10:30:00Z" });
+      yield* fetchWith(client, { since: "2026-11-24T10:30:00Z" });
 
-    expect(client.listNotifications).toHaveBeenCalledWith({ since: "2026-11-24T10:30:00Z", all: true });
-  });
+      expect(client.listNotifications).toHaveBeenCalledWith({ since: "2026-11-24T10:30:00Z", all: true });
+    }));
 });
 
 describe("通知から GitHubItem への変換", () => {
-  it("PR の通知を、理由・タイトル・リポジトリ・Web の URL 付きで返す", async () => {
-    const client = clientWith({ notifications, subjects: allSubjectsOpen });
+  it.effect("PR の通知を、理由・タイトル・リポジトリ・Web の URL 付きで返す", () =>
+    Effect.gen(function* () {
+      const { changes } = yield* fetchWith(clientWith({ notifications, subjects: allSubjectsOpen }), null);
 
-    const { changes } = await adapterWith(client).fetchChanges(null);
+      assert.deepInclude(upsertedItems(changes), {
+        externalId: PULL_URL,
+        reason: "review_requested",
+        subjectType: "PullRequest",
+        title: "Add retry to sync",
+        repository: "acme/app",
+        htmlUrl: "https://github.com/acme/app/pull/42",
+        state: "open",
+        updatedAt: "2026-11-24T09:00:00Z",
+      });
+    }));
 
-    expect(upsertedItems(changes)).toContainEqual({
-      externalId: PULL_URL,
-      reason: "review_requested",
-      subjectType: "PullRequest",
-      title: "Add retry to sync",
-      repository: "acme/app",
-      htmlUrl: "https://github.com/acme/app/pull/42",
-      state: "open",
-      updatedAt: "2026-11-24T09:00:00Z",
-    });
-  });
+  it.effect("マージ済みの PR は state を merged にする", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications, subjects: { ...allSubjectsOpen, [PULL_URL]: mergedPull } });
 
-  it("マージ済みの PR は state を merged にする", async () => {
-    const client = clientWith({ notifications, subjects: { ...allSubjectsOpen, [PULL_URL]: mergedPull } });
+      const { changes } = yield* fetchWith(client, null);
 
-    const { changes } = await adapterWith(client).fetchChanges(null);
+      assert.strictEqual(upsertedItems(changes).find((item) => item.externalId === PULL_URL)?.state, "merged");
+    }));
 
-    expect(upsertedItems(changes).find((item) => item.externalId === PULL_URL)?.state).toBe("merged");
-  });
+  it.effect("閉じられた Issue は state を closed にする", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications, subjects: { ...allSubjectsOpen, [ISSUE_URL]: closedIssue } });
 
-  it("閉じられた Issue は state を closed にする", async () => {
-    const client = clientWith({ notifications, subjects: { ...allSubjectsOpen, [ISSUE_URL]: closedIssue } });
+      const { changes } = yield* fetchWith(client, null);
 
-    const { changes } = await adapterWith(client).fetchChanges(null);
+      assert.strictEqual(upsertedItems(changes).find((item) => item.externalId === ISSUE_URL)?.state, "closed");
+    }));
 
-    expect(upsertedItems(changes).find((item) => item.externalId === ISSUE_URL)?.state).toBe("closed");
-  });
+  it.effect("subject の URL がない通知（CI など）は状態を取りに行かず、通知 ID で識別して state を unknown にする", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications, subjects: allSubjectsOpen });
 
-  it("subject の URL がない通知（CI など）は状態を取りに行かず、通知 ID で識別して state を unknown にする", async () => {
-    const client = clientWith({ notifications, subjects: allSubjectsOpen });
+      const { changes } = yield* fetchWith(client, null);
 
-    const { changes } = await adapterWith(client).fetchChanges(null);
+      assert.deepInclude(upsertedItems(changes), {
+        externalId: "github:thread:1003",
+        reason: "ci_activity",
+        subjectType: "CheckSuite",
+        title: "CI workflow run failed for main branch",
+        repository: "acme/app",
+        htmlUrl: "https://github.com/acme/app",
+        state: "unknown",
+        updatedAt: "2026-11-24T08:15:00Z",
+      });
+      expect(client.getSubject).toHaveBeenCalledTimes(2);
+    }));
 
-    expect(upsertedItems(changes)).toContainEqual({
-      externalId: "github:thread:1003",
-      reason: "ci_activity",
-      subjectType: "CheckSuite",
-      title: "CI workflow run failed for main branch",
-      repository: "acme/app",
-      htmlUrl: "https://github.com/acme/app",
-      state: "unknown",
-      updatedAt: "2026-11-24T08:15:00Z",
-    });
-    expect(client.getSubject).toHaveBeenCalledTimes(2);
-  });
+  it.effect("対象の PR や Issue が見つからない（削除・権限喪失）ときは removed として返す", () =>
+    Effect.gen(function* () {
+      const { changes } = yield* fetchWith(clientWith({ notifications, subjects: { [PULL_URL]: openPull } }), null);
 
-  it("対象の PR や Issue が見つからない（削除・権限喪失）ときは removed として返す", async () => {
-    const client = clientWith({ notifications, subjects: { [PULL_URL]: openPull } });
+      assert.deepInclude(changes, { kind: "removed", externalId: ISSUE_URL });
+    }));
 
-    const { changes } = await adapterWith(client).fetchChanges(null);
+  it.effect("通知の応答が想定した形でないときはエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(fetchWith(clientWith({ notifications: [{ id: 1 }] }), null));
 
-    expect(changes).toContainEqual({ kind: "removed", externalId: ISSUE_URL });
-  });
+      assert.instanceOf(error, GitHubResponseError);
+    }));
 });
 
 describe("次回のカーソル", () => {
-  it("取得した通知のうち最も新しい updated_at を次回のカーソルにする", async () => {
-    const client = clientWith({ notifications, subjects: allSubjectsOpen });
+  it.effect("取得した通知のうち最も新しい updated_at を次回のカーソルにする", () =>
+    Effect.gen(function* () {
+      const { nextCursor } = yield* fetchWith(clientWith({ notifications, subjects: allSubjectsOpen }), null);
 
-    const { nextCursor } = await adapterWith(client).fetchChanges(null);
+      assert.deepStrictEqual(nextCursor, { since: "2026-11-24T10:30:00Z" });
+    }));
 
-    expect(nextCursor).toEqual({ since: "2026-11-24T10:30:00Z" });
-  });
+  it.effect("通知がなかったときは今回使ったカーソルをそのまま返す", () =>
+    Effect.gen(function* () {
+      const { nextCursor } = yield* fetchWith(clientWith({}), { since: "2026-11-20T00:00:00Z" });
 
-  it("通知がなかったときは今回使ったカーソルをそのまま返す", async () => {
-    const client = clientWith({});
-
-    const { nextCursor } = await adapterWith(client).fetchChanges({ since: "2026-11-20T00:00:00Z" });
-
-    expect(nextCursor).toEqual({ since: "2026-11-20T00:00:00Z" });
-  });
+      assert.deepStrictEqual(nextCursor, { since: "2026-11-20T00:00:00Z" });
+    }));
 });
 
 describe("リポジトリのフィルター", () => {
-  const otherOrgNotification: GitHubNotification = {
+  const otherOrgNotification = {
     id: "2001",
     reason: "assign",
     updated_at: "2026-11-24T23:00:00Z",
@@ -147,22 +159,24 @@ describe("リポジトリのフィルター", () => {
   };
   const allNotifications = [...notifications, otherOrgNotification];
 
-  it("フィルターに一致しないリポジトリの通知は返さず、対象の PR や Issue も取りに行かない", async () => {
-    const client = clientWith({ notifications: allNotifications, subjects: allSubjectsOpen });
+  it.effect("フィルターに一致しないリポジトリの通知は返さず、対象の PR や Issue も取りに行かない", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications: allNotifications, subjects: allSubjectsOpen });
 
-    const { changes } = await adapterWith(client, { repositoryFilter: { include: ["acme/*"] } }).fetchChanges(null);
+      const { changes } = yield* fetchWith(client, null, { repositoryFilter: { include: ["acme/*"] } });
 
-    expect(upsertedItems(changes).map((item) => item.repository)).not.toContain("personal/dotfiles");
-    expect(client.getSubject).not.toHaveBeenCalledWith(otherOrgNotification.subject.url);
-  });
+      assert.notInclude(upsertedItems(changes).map((item) => item.repository), "personal/dotfiles");
+      expect(client.getSubject).not.toHaveBeenCalledWith(otherOrgNotification.subject.url);
+    }));
 
-  it("除外した通知も次回のカーソルの計算に含める", async () => {
-    const client = clientWith({ notifications: allNotifications, subjects: allSubjectsOpen });
+  it.effect("除外した通知も次回のカーソルの計算に含める", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications: allNotifications, subjects: allSubjectsOpen });
 
-    const { nextCursor } = await adapterWith(client, { repositoryFilter: { include: ["acme/*"] } }).fetchChanges(null);
+      const { nextCursor } = yield* fetchWith(client, null, { repositoryFilter: { include: ["acme/*"] } });
 
-    expect(nextCursor).toEqual({ since: "2026-11-24T23:00:00Z" });
-  });
+      assert.deepStrictEqual(nextCursor, { since: "2026-11-24T23:00:00Z" });
+    }));
 });
 
 describe("githubTodoRules", () => {
@@ -178,14 +192,14 @@ describe("githubTodoRules", () => {
   });
 
   it.each(["review_requested", "assign", "ci_activity"])("理由が %s の項目は規則で todo にする", (reason) => {
-    expect(githubTodoRules.some((rule) => rule(itemWithReason(reason)))).toBe(true);
+    assert.isTrue(githubTodoRules.some((rule) => rule(itemWithReason(reason))));
   });
 
   it.each(["mention", "author", "comment", "subscribed"])("理由が %s の項目は規則では決めない", (reason) => {
-    expect(githubTodoRules.some((rule) => rule(itemWithReason(reason)))).toBe(false);
+    assert.isFalse(githubTodoRules.some((rule) => rule(itemWithReason(reason))));
   });
 
   it("閉じられた PR へのレビュー依頼は規則で todo にしない", () => {
-    expect(githubTodoRules.some((rule) => rule({ ...itemWithReason("review_requested"), state: "merged" }))).toBe(false);
+    assert.isFalse(githubTodoRules.some((rule) => rule({ ...itemWithReason("review_requested"), state: "merged" })));
   });
 });

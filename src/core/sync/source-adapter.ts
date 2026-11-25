@@ -1,3 +1,4 @@
+import type { Effect } from "effect";
 import type { SourceChange } from "./source-change.js";
 
 export type FetchChangesResult<TItem, TCursor> = {
@@ -5,6 +6,6 @@ export type FetchChangesResult<TItem, TCursor> = {
   nextCursor: TCursor;
 };
 
-export interface SourceAdapter<TItem, TCursor> {
-  fetchChanges(cursor: TCursor | null): Promise<FetchChangesResult<TItem, TCursor>>;
+export interface SourceAdapter<TItem, TCursor, E> {
+  fetchChanges(cursor: TCursor | null): Effect.Effect<FetchChangesResult<TItem, TCursor>, E>;
 }

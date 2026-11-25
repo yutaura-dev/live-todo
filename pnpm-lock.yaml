@@ -188,7 +188,14 @@ settings:
 importers:
 
   .:
+    dependencies:
+      effect:
+        specifier: 4.1.5
+        version: 4.1.5
     devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.5
+        version: 4.1.5(effect@4.1.5)(vitest@5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)))
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
@@ -200,6 +207,12 @@ importers:
         version: 5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6))
 
 packages:
+
+  '@effect/vitest@4.1.5':
+    resolution: {integrity: sha512-18u1013wkJtSelk1ZYLc/5aUnluTQyDfi2hAemkJW1GQ9qXw4mtPSiSf0AXZPhesmGCvG1Dk2C4JYD2sz+R72w==}
+    peerDependencies:
+      effect: ^4.1.5
+      vitest: '>=5.0.0 <6.0.0'
 
   '@emnapi/core@2.0.0-beta.2':
     resolution: {integrity: sha512-MzCVoWtcg4Pm2B3je5mMvYMvj3MmBKw+fU7vbsJc9/iT8ip6/eYIHo/Dsm/mr+wsHB6SEyJDuxB09Yy6r/8+4A==}
@@ -495,6 +508,9 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
+  effect@4.1.5:
+    resolution: {integrity: sha512-xyR20KhQI0vg2gD8ILUSQRTTESEYJ0JKdP+QD8J37xbwPTqXRxFM/l0+vUVD9fuSvoYruoTqyt33C4FZv1s4TQ==}
+
   es-module-lexer@2.3.2:
     resolution: {integrity: sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw==}
 
@@ -742,6 +758,11 @@ packages:
 
 snapshots:
 
+  '@effect/vitest@4.1.5(effect@4.1.5)(vitest@5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)))':
+    dependencies:
+      effect: 4.1.5
+      vitest: 5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6))
+
   '@emnapi/core@2.0.0-beta.2':
     dependencies:
       '@emnapi/wasi-threads': 2.2.0
@@ -924,6 +945,8 @@ snapshots:
   chai@6.3.0: {}
 
   detect-libc@2.1.2: {}
+
+  effect@4.1.5: {}
 
   es-module-lexer@2.3.2: {}
 
