@@ -14,7 +14,10 @@ import {
 /** アカウントごとに Source 名を分け、カーソルや Item が混ざらないようにする */
 export const githubSourceName = (accountId: string) => `github:${accountId}`;
 
-const GITHUB_TODO_QUESTION = "この GitHub の通知は、自分が対応すべきタスクか？";
+// 「自分」ではなく「アカウントの持ち主（ユーザー本人）」と書く理由: Decisions の確率がどの通知でも 0.1〜0.2 程度に
+// そろって低く出た。前置きのない Decisions では「自分」を判定する側と読まれている可能性があったため。
+const GITHUB_TODO_QUESTION =
+  "信頼できる情報にある GitHub アカウントの持ち主（ユーザー本人）が、この通知の件で返信・レビュー・作業・判断などの対応をする必要があるか？";
 
 const GitHubCursor = Schema.Struct({
   since: Schema.String,

@@ -40,6 +40,7 @@ export const DecisionModelDecisionsProvider = Layer.effect(
         );
         return { type: "refusal" } as const;
       }
+      yield* Effect.logDebug("Decisions の判定").pipe(Effect.annotateLogs({ probability: outcome.success.probability }));
       return { type: "predicate", probability: outcome.success.probability } as const;
     });
 
