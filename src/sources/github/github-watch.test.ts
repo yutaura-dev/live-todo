@@ -149,6 +149,36 @@ describe("makeGitHubPullRequestWatchProvider", () => {
       ]);
     }));
 
+  it.effect("リポジトリのフィルターに一致しない PR は見張らず、詳細も取りに行かない", () =>
+    Effect.gen(function* () {
+      const requested: string[] = [];
+      const client = gitHubClientStub({
+        searchMyOpenPullRequests: Effect.succeed<unknown>({
+          items: [
+            { repository_url: "https://api.github.com/repos/acme/app", pull_request: { url: PULL_URL } },
+            {
+              repository_url: "https://api.github.com/repos/old-contest/app",
+              pull_request: { url: "https://api.github.com/repos/old-contest/app/pulls/1" },
+            },
+          ],
+        }),
+        getPullRequest: (url) => {
+          requested.push(url);
+          return Effect.succeed(Option.some<unknown>(conflictedPull));
+        },
+        listCheckRuns: () => Effect.succeed<unknown>(checkRunsFailed),
+        listReviews: () => Effect.succeed<unknown>(reviewsChangesRequested),
+      });
+
+      const subjects = yield* Effect.gen(function* () {
+        const provider = yield* makeGitHubPullRequestWatchProvider("work", { repositoryFilter: { exclude: ["old-contest/*"] } });
+        return yield* provider.subjects;
+      }).pipe(Effect.provideService(GitHubClient, client));
+
+      assert.deepStrictEqual(subjects.map((subject) => subject.apiUrl), [PULL_URL]);
+      assert.deepStrictEqual(requested, [PULL_URL]);
+    }));
+
   it.effect("PR の詳細が取れない（削除・権限喪失）ものは見張る対象から外す", () =>
     Effect.gen(function* () {
       assert.deepStrictEqual(yield* subjectsWith(clientWith({ pull: undefined })), []);

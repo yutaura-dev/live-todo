@@ -38,10 +38,10 @@ describe("githubItemDraft", () => {
     assert.strictEqual(githubItemDraft(githubItem({ state })).state, expected);
   });
 
-  it("Web の URL とタイトルを Item に引き継ぐ", () => {
+  it("タイトルにはリポジトリ名を添え、Web の URL を Item に引き継ぐ", () => {
     const draft = githubItemDraft(githubItem());
 
-    assert.strictEqual(draft.title, "Add retry to sync");
+    assert.strictEqual(draft.title, "Add retry to sync（acme/app）");
     assert.strictEqual(draft.url, "https://github.com/acme/app/pull/42");
   });
 

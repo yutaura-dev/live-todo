@@ -2,6 +2,7 @@ import { DateTime, Effect, Option, Schema } from "effect";
 import type { Condition, WatchProvider } from "../../core/watch/watcher.js";
 import { decodeResponse, type GitHubAdapterError, GitHubClient } from "./github-adapter.js";
 import { githubSourceName } from "./github-binding.js";
+import { makeRepositoryFilter, type RepositoryFilterConfig } from "./repository-filter.js";
 
 export type CheckRun = { status: string; conclusion: string | null };
 export type PullRequestReview = { login: string; state: string; commitId: string; submittedAt: string };
@@ -20,8 +21,11 @@ export type GitHubPullRequestSubject = {
 };
 
 const SearchResult = Schema.Struct({
-  items: Schema.Array(Schema.Struct({ pull_request: Schema.Struct({ url: Schema.String }) })),
+  items: Schema.Array(Schema.Struct({ repository_url: Schema.String, pull_request: Schema.Struct({ url: Schema.String }) })),
 });
+
+/** "https://api.github.com/repos/acme/app" → "acme/app" */
+const repositoryOf = (repositoryUrl: string) => new URL(repositoryUrl).pathname.replace(/^\/repos\//, "");
 const PullRequestDetail = Schema.Struct({
   number: Schema.Number,
   title: Schema.String,
@@ -48,8 +52,11 @@ const decodeCheckRuns = decodeResponse(CheckRunsResponse);
 const decodeReviews = decodeResponse(ReviewsResponse);
 
 
-export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (accountId: string) {
+export type GitHubWatchOptions = { repositoryFilter?: RepositoryFilterConfig };
+
+export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (accountId: string, options: GitHubWatchOptions = {}) {
   const client = yield* GitHubClient;
+  const isTargetRepository = yield* makeRepositoryFilter(options.repositoryFilter ?? {});
 
   const loadSubject = Effect.fnUntraced(function* (apiUrl: string) {
     const raw = yield* client.getPullRequest(apiUrl);
@@ -79,7 +86,9 @@ export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (a
 
   const subjects = Effect.gen(function* () {
     const search = yield* client.searchMyOpenPullRequests.pipe(Effect.flatMap(decodeSearchResult));
-    const loaded = yield* Effect.forEach(search.items, (item) => loadSubject(item.pull_request.url));
+    // 詳細を取りに行く前に外す理由: 見張りは PR ごとに 3 回 API を呼ぶので、対象外の PR を先に除けば呼び出しが減る。
+    const targets = search.items.filter((item) => isTargetRepository(repositoryOf(item.repository_url)));
+    const loaded = yield* Effect.forEach(targets, (item) => loadSubject(item.pull_request.url));
     return loaded.flatMap((subject) => (Option.isSome(subject) ? [subject.value] : []));
   });
 

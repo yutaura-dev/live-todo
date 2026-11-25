@@ -28,12 +28,15 @@ export const makeGitHubJobs = Effect.fnUntraced(function* (account: ResolvedAcco
     return yield* GitHubClient;
   }).pipe(Effect.provide(GitHubClientLive({ token })));
 
+  const repositoryFilter = account.repositories === undefined ? {} : { repositoryFilter: account.repositories };
   const notifications = yield* makeGitHubBinding({
     accountId: account.id,
     initialLookbackDays: account.initialLookbackDays,
-    ...(account.repositories === undefined ? {} : { repositoryFilter: account.repositories }),
+    ...repositoryFilter,
   }).pipe(Effect.provideService(GitHubClient, client));
-  const watchProvider = yield* makeGitHubPullRequestWatchProvider(account.id).pipe(Effect.provideService(GitHubClient, client));
+  const watchProvider = yield* makeGitHubPullRequestWatchProvider(account.id, repositoryFilter).pipe(
+    Effect.provideService(GitHubClient, client),
+  );
   const watch = watchBinding(watchProvider, pullRequestConditions);
 
   return [

@@ -17,7 +17,8 @@ export type GitHubBindingOptions = GitHubAdapterOptions & { accountId: string; t
 
 export function githubItemDraft(item: GitHubItem): ItemDraft {
   return {
-    title: item.title,
+    // リポジトリ名を添える理由: 依存更新の PR のように、同じタイトルが複数のリポジトリに並ぶと見分けられないため。
+    title: `${item.title}（${item.repository}）`,
     url: item.htmlUrl,
     // CI の通知など状態を取れない（unknown）ものは open として扱う。解決の合図が取れないため、
     // 自動では done にならず、ユーザーが閉じる前提になる。

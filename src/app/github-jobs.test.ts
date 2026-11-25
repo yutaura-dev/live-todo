@@ -32,7 +32,7 @@ function fakeGitHub() {
       const body = url.pathname === "/notifications"
         ? []
         : url.pathname === "/search/issues"
-          ? { items: [1, 2].map((number) => ({ pull_request: { url: `https://api.github.com/repos/acme/app/pulls/${number}` } })) }
+          ? { items: [1, 2].map((number) => ({ repository_url: "https://api.github.com/repos/acme/app", pull_request: { url: `https://api.github.com/repos/acme/app/pulls/${number}` } })) }
           : url.pathname.endsWith("/check-runs")
             ? { check_runs: [] }
             : url.pathname.endsWith("/reviews")
@@ -81,6 +81,24 @@ describe("makeGitHubJobs", () => {
 
       assert.isAbove(github.stats.requests, 2);
       assert.strictEqual(github.stats.max, 1);
+    }).pipe(withEnv(TOKEN_ENV), Effect.provide(ConservativeClassifier), Effect.provide(TestDatabase)));
+});
+
+describe("makeGitHubJobs のフィルター", () => {
+  it.effect("アカウントのリポジトリのフィルターを、見張りにも適用する", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig({
+        llmProfiles: { work: { provider: "anthropic", model: "claude-sonnet-5-5" } },
+        defaultLlmProfile: "work",
+        accounts: [{ kind: "github", id: "work", repositories: { exclude: ["acme/*"] } }],
+      });
+      const github = fakeGitHub();
+      const jobs = yield* makeGitHubJobs(config.accounts[0]!).pipe(Effect.provide(github.layer));
+      const watch = jobs.find((job) => job.name === "github:work:watch")!;
+
+      yield* watch.run;
+
+      assert.strictEqual(github.stats.requests, 1);
     }).pipe(withEnv(TOKEN_ENV), Effect.provide(ConservativeClassifier), Effect.provide(TestDatabase)));
 });
 
