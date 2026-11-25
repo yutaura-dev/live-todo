@@ -8,7 +8,10 @@ import { StructuredClassifier } from "../core/judge/todo-judge.js";
 import type { LlmProfile } from "./config/app-config.js";
 
 // 判定は verdict と 1 文の理由だけなので、出力トークンに上限を付けて料金の上振れを防ぐ。
-const MAX_JUDGMENT_OUTPUT_TOKENS = 256;
+// 256 では、入力が長いときにモデルが答える前に考え、上限を使い切って本文を返さないことがあった。
+const MAX_JUDGMENT_OUTPUT_TOKENS = 1024;
+// 思考を無効にする理由: 3 択と理由 1 文の判定に考える必要はなく、思考が出力トークンを使い切ると答えが返らないため。
+const JUDGMENT_THINKING = { type: "disabled" } as const;
 
 export class UnsupportedLlmProviderError extends Schema.TaggedError<UnsupportedLlmProviderError>()(
   "UnsupportedLlmProviderError",
@@ -30,7 +33,9 @@ export const makeStructuredClassifier = Effect.fnUntraced(function* (profile: Ll
       const apiKey = yield* secrets.require("llm.anthropic.api_key");
       return yield* buildClassifier(
         LlmStructuredClassifier.pipe(
-          Layer.provide(AnthropicLanguageModel.model(profile.model, { max_tokens: MAX_JUDGMENT_OUTPUT_TOKENS })),
+          Layer.provide(
+            AnthropicLanguageModel.model(profile.model, { max_tokens: MAX_JUDGMENT_OUTPUT_TOKENS, thinking: JUDGMENT_THINKING }),
+          ),
           Layer.provide(AnthropicClient.layer({ apiKey })),
         ),
       );

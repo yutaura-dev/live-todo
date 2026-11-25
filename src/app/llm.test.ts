@@ -34,7 +34,7 @@ describe("makeStructuredClassifier", () => {
       assert.isFunction(classifier.classifyTodo);
     }).pipe(withEnv({ LIVE_TODO_SECRET_LLM_ANTHROPIC_API_KEY: "sk-test" })));
 
-  it.effect("Anthropic への判定のリクエストには、出力トークンの上限を付ける", () => {
+  it.effect("Anthropic への判定のリクエストでは思考を無効にし、出力トークンの上限を付ける", () => {
     const bodies: unknown[] = [];
     const http = HttpClient.make((request) => {
       if (request.body._tag === "Uint8Array") bodies.push(JSON.parse(new TextDecoder().decode(request.body.body)));
@@ -45,7 +45,7 @@ describe("makeStructuredClassifier", () => {
 
       yield* Effect.exit(classifier.classifyTodo({ input: "x", question: "q" }));
 
-      assert.deepInclude(bodies[0], { model: "claude-haiku-5-5", max_tokens: 256 });
+      assert.deepInclude(bodies[0], { model: "claude-haiku-5-5", max_tokens: 1024, thinking: { type: "disabled" } });
     }).pipe(
       Effect.provide(EnvSecretStore),
       Effect.provideService(HttpClient.HttpClient, http),
