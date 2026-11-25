@@ -179,19 +179,6 @@ function AccountEditor(props: {
         <p className="token-summary">環境変数のトークンは確かめていません。ここに貼り付けて保存すると、権限と有効期限を確かめます。</p>
       )}
 
-      <div className="field-row">
-        <label className="field">
-          <span className="field-label">初回にさかのぼる日数</span>
-          <input
-            type="number"
-            min={1}
-            max={90}
-            value={account.initialLookbackDays ?? 14}
-            onChange={(event) => props.onChange({ ...account, initialLookbackDays: Number(event.target.value) })}
-          />
-        </label>
-      </div>
-
       <div className="filter-grid">
         <label className="field" htmlFor={`${id}-include`}>
           <span className="field-label">含めるリポジトリ</span>
