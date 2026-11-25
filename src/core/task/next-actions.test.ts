@@ -3,6 +3,7 @@ import { Option } from "effect";
 import {
   chooseOption,
   completeStep,
+  conflictPlan,
   currentSteps,
   decodePlan,
   type NextActionPlan,
@@ -133,6 +134,21 @@ describe("待つ手順", () => {
   it("並列で着手できる手順があれば、待つ手順は難易度に数えない", () => {
     const easy = { ...wait, id: "e", kind: "manual" as const, effort: "normal" as const, mode: "parallel" as const };
     assert.strictEqual(taskEffort({ steps: [wait, easy] }), "normal");
+  });
+});
+
+describe("conflictPlan", () => {
+  it("コンフリクトは、アプリで直させてから、確かめて push する（どちらもボタン 1 つで済むので簡単）", () => {
+    const plan = conflictPlan();
+
+    assert.deepStrictEqual(
+      plan.steps.map((step) => [step.kind, step.effort, step.mode]),
+      [
+        ["resolve_conflicts", "easy", "serial"],
+        ["push_conflict_resolution", "easy", "serial"],
+      ],
+    );
+    assert.deepStrictEqual(decodePlan(JSON.parse(JSON.stringify(plan))), Option.some(plan));
   });
 });
 

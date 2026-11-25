@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MergePlanView, MovableStatus, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
+import type { ConflictResolutionView, MergePlanView, MovableStatus, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
 import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
@@ -299,6 +299,24 @@ function StepItem(props: {
         )}
       </div>
       {isCurrent && step.kind === "merge_pull_request" && <MergeFlow detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />}
+      {isCurrent && step.kind === "resolve_conflicts" && (
+        <div className="step-actions">
+          <span className="field-hint">PR のブランチにベースを merge し、Claude Code がコンフリクトしたファイルだけを直します。push は確かめてからです</span>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() =>
+              void api.resolveConflicts(detail.id).then(async (outcome) => {
+                if (outcome.ok) await props.onStarted();
+                else setProblem(outcome.message);
+              })
+            }
+          >
+            コンフリクトを直す
+          </button>
+        </div>
+      )}
+      {isCurrent && step.kind === "push_conflict_resolution" && <ConflictPushFlow taskId={detail.id} onPushed={props.onChanged} />}
       {isCurrent && step.kind === "decision" && (
         <div className="step-actions">
           {step.options.map((option) => (
@@ -392,6 +410,58 @@ function MergeFlow({ detail, onMerged, onStarted }: { detail: TaskDetail; onMerg
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** Claude Code が直した内容を見せ、承認されたら PR のブランチに push する */
+function ConflictPushFlow({ taskId, onPushed }: { taskId: number; onPushed: () => Promise<void> }) {
+  const [view, setView] = useState<ConflictResolutionView | { error: string } | null>(null);
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string }>({ kind: "idle" });
+  useEffect(() => {
+    void api.conflictResolution(taskId).then(setView);
+  }, [taskId]);
+
+  if (view === null) return <p className="field-hint">直した内容を読み込んでいます</p>;
+  if ("error" in view) return <p className="problem">{view.error}</p>;
+  const push = async () => {
+    setState({ kind: "busy" });
+    const outcome = await api.pushConflictResolution(taskId);
+    if (outcome.ok) await onPushed();
+    else setState({ kind: "failed", message: outcome.message });
+  };
+
+  return (
+    <div className="step-actions step-actions--column">
+      <Markdown text={view.summary} onOpenLink={(url) => void api.openExternal(url)} />
+      {view.files.length > 0 && (
+        <ul className="conflict-files">
+          {view.files.map((entry) => (
+            <li key={entry.path}>
+              <code>{entry.path}</code>: {entry.resolution}
+            </li>
+          ))}
+        </ul>
+      )}
+      {view.concerns !== "" && <p className="field-hint">確かめてほしい点: {view.concerns}</p>}
+      {view.diff !== "" && (
+        <details className="conflict-diff">
+          <summary>PR のブランチから見た差分</summary>
+          <pre>{view.diff}</pre>
+        </details>
+      )}
+      <div className="merge-confirm" role="alertdialog" aria-labelledby={`conflict-push-${taskId}`}>
+        <p id={`conflict-push-${taskId}`} className="merge-confirm-title">
+          {view.repository} の {view.headRef} に、{view.baseRef} を取り込んだ commit（<code className="session-id">{view.commitSha.slice(0, 7)}</code>）を push します
+        </p>
+        <p className="field-hint">直し始めたあとに PR のブランチへ commit が足されていたら、push しません（force push はしません）。</p>
+        <div className="merge-confirm-actions">
+          <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void push()}>
+            push する
+          </button>
+        </div>
+      </div>
+      {state.kind === "failed" && <p className="problem">push できませんでした: {state.message}</p>}
     </div>
   );
 }

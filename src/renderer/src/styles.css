@@ -1160,6 +1160,22 @@ button:disabled {
   color: var(--rust);
 }
 
+.conflict-files {
+  margin: 0;
+  padding-inline-start: 1.2em;
+  font-size: 0.85rem;
+}
+
+.conflict-diff pre {
+  max-block-size: 320px;
+  overflow: auto;
+  font-size: 0.75rem;
+  white-space: pre;
+  background: var(--card-edge);
+  padding: 8px;
+  border-radius: 4px;
+}
+
 .effort--wait {
   background: var(--card-edge);
   color: var(--muted);

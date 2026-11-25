@@ -56,6 +56,18 @@ export type GitHubTokenSummary = {
 export type MergeMethod = "squash" | "merge" | "rebase";
 export type MergePlanView = { repository: string; number: number; sha: string; method: MergeMethod; reason: string };
 
+/** Claude Code がコンフリクトを直した結果。push の確認に出す */
+export type ConflictResolutionView = {
+  repository: string;
+  headRef: string;
+  baseRef: string;
+  summary: string;
+  files: ReadonlyArray<{ path: string; resolution: string }>;
+  concerns: string;
+  diff: string;
+  commitSha: string;
+};
+
 export type Outcome = { ok: true; detail?: string } | { ok: false; message: string };
 
 export type FilterPreviewRequest = {
@@ -82,6 +94,11 @@ export interface LiveTodoApi {
   chooseOption(taskId: number, stepId: string, optionKey: string): Promise<Outcome>;
   /** 済んだにした手順・選んだ分かれ道を戻す */
   reopenStep(taskId: number, stepId: string): Promise<Outcome>;
+  /** Claude Code にコンフリクトを直させる。裏で進み、Task は処理中のレーンに移る */
+  resolveConflicts(taskId: number): Promise<Outcome>;
+  conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;
+  /** 直した内容を PR のブランチに push する。外部への書き込み。差分を確かめて承認したあとにだけ呼ぶ */
+  pushConflictResolution(taskId: number): Promise<Outcome>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

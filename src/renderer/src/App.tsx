@@ -219,6 +219,7 @@ const AGENT_LABELS: Record<string, string> = {
   merge_pull_request: "merge 中",
   dependency_review: "Claude Code が調べています",
   next_actions: "次にやることを考えています",
+  resolve_conflicts: "Claude Code がコンフリクトを直しています",
 };
 
 function agentLabel(agent: BoardCard["agent"]) {

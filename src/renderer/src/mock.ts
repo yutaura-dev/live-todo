@@ -58,6 +58,9 @@ export const mockApi: LiveTodoApi = {
   completeStep: async () => ({ ok: true }),
   chooseOption: async () => ({ ok: true }),
   reopenStep: async () => ({ ok: true }),
+  resolveConflicts: async () => ({ ok: true }),
+  conflictResolution: async () => ({ error: "見本の画面では使えない" }),
+  pushConflictResolution: async () => ({ ok: true }),
   markSeen: async (taskId: number) => {
     cards = cards.map((card) => (card.id === taskId ? { ...card, unreadChanges: 0 } : card));
   },

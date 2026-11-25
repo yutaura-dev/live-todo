@@ -9,6 +9,15 @@ import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { finishMerge, mergePlan, startMerge } from "../app/merge-approval.js";
+import { applyConflictPlans } from "../app/conflict-plans.js";
+import {
+  conflictTarget,
+  finishConflictResolution,
+  latestConflictResolution,
+  pushConflictResolution,
+  startConflictResolution,
+} from "../app/conflict-resolution-flow.js";
+import { ConflictWorkspace } from "../core/agent/conflict-workspace.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
@@ -75,7 +84,7 @@ const AppLayer = Layer.mergeAll(BoardService.layer.pipe(Layer.provideMerge(TaskR
   Layer.provideMerge(Database.layer),
   Layer.provideMerge(SqliteClient.layer({ filename: dbPath })),
   Layer.provideMerge(encryptedFileSecretStore({ path: secretsPath, cipher: keychainCipher })),
-  Layer.provideMerge(Layer.mergeAll(ClaudeCode.layer, AgentWorkspace.layer(agentWorkspaceRoot))),
+  Layer.provideMerge(Layer.mergeAll(ClaudeCode.layer, AgentWorkspace.layer(agentWorkspaceRoot), ConflictWorkspace.layer(agentWorkspaceRoot))),
   Layer.provideMerge(Layer.mergeAll(FetchHttpClient.layer, NodeServices.layer)),
 );
 const runtime = ManagedRuntime.make(AppLayer);
@@ -115,6 +124,7 @@ const startSync = Effect.gen(function* () {
   syncProblem = undefined;
 
   yield* backfillNextActions;
+  yield* applyConflictPlans;
   const recovered = yield* recoverInterruptedAgentRuns;
   if (recovered > 0) yield* Effect.log(`途中で止まった AI の調査を ${recovered} 件戻した`);
   const reviewSources = config.accounts
@@ -157,8 +167,15 @@ const startSync = Effect.gen(function* () {
           },
         ];
 
-  yield* Effect.log(`同期を始める: ${[...jobs, ...agentJobs].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(agentJobs)], { concurrency: 2, discard: true });
+  // 見張りが新しく見つけた conflict の Task にも、アプリで直す手順を入れる
+  const conflictPlanJob: SyncJob<never, Database | TaskRepository> = {
+    name: "app:conflict-plans",
+    interval: AGENT_JOB_INTERVAL,
+    run: applyConflictPlans,
+    backoffUntil: () => Option.none<DateTime.Utc>(),
+  };
+  yield* Effect.log(`同期を始める: ${[...jobs, ...agentJobs, conflictPlanJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(agentJobs), runJobs([conflictPlanJob])], { concurrency: 3, discard: true });
 }).pipe(
   // 設定やトークンがなくても画面は開けるようにする（同期だけが止まり、設定画面に理由を出す）
   Effect.catchCause((cause) =>
@@ -348,6 +365,56 @@ const githubClientFor = (accountId: string) =>
 const errorMessage = (error: unknown) =>
   typeof error === "object" && error !== null && "message" in error ? String(error.message) : String(error);
 
+/** そのアカウントで Claude Code を使ってよいか（会社のコードを、許可していない LLM に送らないため） */
+const claudeAllowedFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const account = config.accounts.find((candidate) => candidate.id === accountId);
+    return account !== undefined && (account.reviewDependencyPrs || account.planNextActions);
+  });
+
+function registerConflictResolution() {
+  ipcMain.handle(IPC_CHANNELS.resolveConflicts, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const taskId = yield* decodeTaskId(input);
+        const target = yield* conflictTarget(taskId);
+        if (!(yield* claudeAllowedFor(target.accountId))) {
+          return yield* new GitHubRequestError({
+            message: "このアカウントでは Claude Code を使わない設定です。設定画面で AI の調査を有効にしてから直してください",
+          });
+        }
+        const runId = yield* startConflictResolution(taskId);
+        runtime.runFork(finishConflictResolution(runId, { model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD }));
+      }),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.conflictResolution, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const latest = yield* latestConflictResolution(yield* decodeTaskId(input));
+        if (Option.isNone(latest)) return { error: "コンフリクトを直した記録がない" };
+        const { cwd: _cwd, conflicted: _conflicted, ...view } = latest.value.result;
+        return view;
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+  // 外部への書き込み。renderer で差分を見せ、ユーザーが承認したときだけ呼ばれる
+  ipcMain.handle(IPC_CHANNELS.pushConflictResolution, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const taskId = yield* decodeTaskId(input);
+        yield* pushConflictResolution(taskId, (accountId) =>
+          Effect.gen(function* () {
+            // push のときだけ平文に戻し、git の環境変数にだけ渡す
+            return Redacted.value(yield* (yield* SecretStore).require(yield* decodeSecretKey(`github.${accountId}.token`)));
+          }),
+        );
+      }),
+    ),
+  );
+}
+
 function registerMerge() {
   ipcMain.handle(IPC_CHANNELS.completeStep, (_event, input: unknown) =>
     outcomeOf(
@@ -465,6 +532,7 @@ void app.whenReady().then(() => {
   if (headless) app.dock?.hide();
   registerIpc();
   registerMerge();
+  registerConflictResolution();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();
 });

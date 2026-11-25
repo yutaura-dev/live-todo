@@ -14,8 +14,12 @@ export type WaitCondition =
   | { kind: "review_submitted"; pullUrl: string; since?: string }
   | { kind: "merged"; pullUrl: string };
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
-export type ActionStep = StepBase & { kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push"; until?: WaitCondition };
-export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push"] as const;
+/** resolve_conflicts: アプリが Claude Code にコンフリクトを直させる / push_conflict_resolution: 直した内容を確かめて push する */
+export type ActionStep = StepBase & {
+  kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" | "resolve_conflicts" | "push_conflict_resolution";
+  until?: WaitCondition;
+};
+export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push", "resolve_conflicts", "push_conflict_resolution"] as const;
 export type DecisionStep = StepBase & {
   kind: "decision";
   options: ReadonlyArray<{ key: string; label: string; steps: ReadonlyArray<Step> }>;
@@ -83,6 +87,13 @@ export const reopenStep = (plan: NextActionPlan, id: string): NextActionPlan => 
 
 export const chooseOption = (plan: NextActionPlan, id: string, key: string): NextActionPlan => ({
   steps: mapSteps(plan.steps, (step) => (step.id === id && step.kind === "decision" ? { ...step, chosen: key, status: "done" } : step)),
+});
+
+export const conflictPlan = (): NextActionPlan => ({
+  steps: [
+    { id: "resolve", kind: "resolve_conflicts", title: "Claude Code にコンフリクトを直させる", effort: "easy", mode: "serial", status: "todo" },
+    { id: "push", kind: "push_conflict_resolution", title: "直した内容を確かめて、PR に push する", effort: "easy", mode: "serial", status: "todo" },
+  ],
 });
 
 /** AI が返す待つ条件。JSON Schema の都合で項目は平らに持ち、kind に要らない項目は空文字 */
