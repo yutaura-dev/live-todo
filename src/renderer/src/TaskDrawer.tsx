@@ -30,7 +30,12 @@ export function TaskDrawer(props: {
         setProblem(null);
         if (next.changes.some((change) => change.unread)) void api.markSeen(next.id);
       })
-      .catch(() => current && setProblem("この Task を読み込めませんでした。削除されたか、同期で消えた可能性があります。"));
+      .catch((error: unknown) => {
+        if (!current) return;
+        // 原因を推測で書かない（アプリの更新途中など、Task が消えた以外の理由でも失敗するため）
+        const reason = error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': /, "") : String(error);
+        setProblem(`この Task の詳細を読み込めませんでした: ${reason}`);
+      });
     return () => {
       current = false;
     };
