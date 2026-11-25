@@ -281,12 +281,13 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
         ),
         searchOpenPullRequests: (repository, query) =>
           Effect.gen(function* () {
-            // 1 件で足りる理由: 出たかどうかと、どれが出たかを示せればよいため
-            const url = yield* resolveUrl("/search/issues", { q: `repo:${repository} is:pr is:open ${query}`, per_page: "1" });
+            // 本文まで探すと、待っている PR の話をしている別の PR（Task 自身が追う PR など）にも当たるため、タイトルだけを探す。
+            // 数件取る理由: Task 自身が追う PR を除いても残るかを、呼び出し側で確かめるため
+            const url = yield* resolveUrl("/search/issues", { q: `repo:${repository} is:pr is:open in:title ${query}`, per_page: "5" });
             const response = yield* send(url);
-            if (Option.isNone(response)) return { count: 0, firstUrl: undefined };
+            if (Option.isNone(response)) return { urls: [] };
             const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(SearchCountBody, url)));
-            return { count: body.total_count, firstUrl: body.items[0]?.html_url };
+            return { urls: body.items.map((item) => item.html_url) };
           }),
         listReviews: (pullApiUrl) =>
           resolveUrl(`${pullApiUrl}/reviews`, { per_page: PER_PAGE }).pipe(

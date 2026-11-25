@@ -18,12 +18,13 @@ const pullApiUrl = (pullUrl: string) => {
 };
 
 /** 条件が成り立っていれば、何が起きたかの説明を返す */
-const satisfied = (client: GitHubClient["Service"], until: WaitCondition) =>
+const satisfied = (client: GitHubClient["Service"], until: WaitCondition, ownUrls: ReadonlySet<string>) =>
   Effect.gen(function* () {
     switch (until.kind) {
       case "pull_request_opened": {
-        const found = yield* client.searchOpenPullRequests(until.repository, until.query);
-        return found.count > 0 ? Option.some(`PR が出た: ${found.firstUrl ?? until.repository}`) : Option.none<string>();
+        // Task 自身が追う PR は、待っている PR ではない（待つ理由の PR がタイトルに同じ語を含むことがある）
+        const found = (yield* client.searchOpenPullRequests(until.repository, until.query)).urls.filter((url) => !ownUrls.has(url));
+        return found.length > 0 ? Option.some(`PR が出た: ${found[0]}`) : Option.none<string>();
       }
       case "review_submitted": {
         const api = pullApiUrl(until.pullUrl);
@@ -54,14 +55,18 @@ export const checkWaitConditions = (accountId: string, client: GitHubClient["Ser
     const taskRepository = yield* TaskRepository;
     const ownSources = [`github:${accountId}`, `github:${accountId}:watch`];
     const rows = yield* db
-      .select({ taskId: tasks.id, source: sourceItems.source })
+      .select({ taskId: tasks.id, source: sourceItems.source, url: sourceItems.url })
       .from(taskLinks)
       .innerJoin(tasks, eq(taskLinks.taskId, tasks.id))
       .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
       .where(and(eq(taskLinks.role, "tracks"), isNotNull(tasks.nextActions), inArray(tasks.status, [...WATCHED_STATUSES])))
       .pipe(Effect.orDie);
     const ownTasks = new Map<number, boolean>();
-    for (const row of rows) ownTasks.set(row.taskId, (ownTasks.get(row.taskId) ?? true) && ownSources.includes(row.source));
+    const trackedUrls = new Map<number, Set<string>>();
+    for (const row of rows) {
+      ownTasks.set(row.taskId, (ownTasks.get(row.taskId) ?? true) && ownSources.includes(row.source));
+      trackedUrls.set(row.taskId, (trackedUrls.get(row.taskId) ?? new Set()).add(row.url));
+    }
 
     let completed = 0;
     for (const [taskId, own] of ownTasks) {
@@ -74,7 +79,7 @@ export const checkWaitConditions = (accountId: string, client: GitHubClient["Ser
       const reasons: string[] = [];
       for (const step of waits) {
         // 1 件を確かめられなくても（PR が消えた・応答の形が違うなど）、ほかの Task は確かめる
-        const outcome = yield* satisfied(client, step.until).pipe(
+        const outcome = yield* satisfied(client, step.until, trackedUrls.get(taskId) ?? new Set()).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("待つ条件を確かめられない").pipe(
               Effect.annotateLogs({ taskId, kind: step.until.kind, cause: Cause.pretty(cause) }),

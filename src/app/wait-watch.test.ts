@@ -44,7 +44,7 @@ describe("checkWaitConditions", () => {
       const client = gitHubClientStub({
         searchOpenPullRequests: (repository, query) => {
           searched.push(`${repository} ${query}`);
-          return Effect.succeed({ count: 1, firstUrl: "https://github.com/acme/app/pull/240" });
+          return Effect.succeed({ urls: ["https://github.com/acme/app/pull/240"] });
         },
       });
 
@@ -56,6 +56,16 @@ describe("checkWaitConditions", () => {
       assert.deepInclude(last, { field: "next_actions", actor: "sync" });
       assert.include(String(last?.after), "https://github.com/acme/app/pull/240");
       assert.isNull(last?.seenAt);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("検索に当たったのが Task 自身が追う PR だけなら、待ち終わりにしない（待っている別の PR ではない）", () =>
+    Effect.gen(function* () {
+      const id = yield* waitingFor(opened);
+      const ownUrl = `https://github.com/acme/app/pull/${1000 + itemNumber - 1}`;
+      const client = gitHubClientStub({ searchOpenPullRequests: () => Effect.succeed({ urls: [ownUrl] }) });
+
+      assert.strictEqual(yield* checkWaitConditions("personal", client), 0);
+      assert.deepStrictEqual(yield* currentOf(id), ["w"]);
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("まだ出ていなければ、待ったままにする", () =>
@@ -111,7 +121,7 @@ describe("checkWaitConditions", () => {
       const ok = yield* waitingFor(opened);
       const client = gitHubClientStub({
         getPullRequest: () => Effect.die(new Error("取れない")),
-        searchOpenPullRequests: () => Effect.succeed({ count: 1, firstUrl: "https://github.com/acme/app/pull/240" }),
+        searchOpenPullRequests: () => Effect.succeed({ urls: ["https://github.com/acme/app/pull/240"] }),
       });
 
       assert.strictEqual(yield* checkWaitConditions("personal", client), 1);
