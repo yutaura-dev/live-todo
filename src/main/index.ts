@@ -12,7 +12,7 @@ import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
-import { recoverInterruptedAgentRuns, runNextDependencyReview } from "../core/agent/dependency-triage.js";
+import { recoverInterruptedAgentRuns, runDependencyReviews } from "../core/agent/dependency-triage.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
@@ -54,6 +54,8 @@ const agentWorkspaceRoot = join(app.getPath("userData"), "agent-workspaces");
 // 依存更新の PR の調査に使うモデルと、1 回あたりの予算の上限
 const DEPENDENCY_REVIEW_MODEL = "sonnet";
 const DEPENDENCY_REVIEW_BUDGET_USD = 2;
+// 同時に調べる数。並列にすると早く終わるが、増やしすぎると Claude Code の使用量の枠をすぐに使い切る
+const DEPENDENCY_REVIEW_CONCURRENCY = 4;
 const AGENT_JOB_INTERVAL = "1 minute" as const;
 const LLM_SECRET_KEYS = ["llm.anthropic.api_key", "llm.openai.api_key"] as const;
 
@@ -120,7 +122,12 @@ const startSync = Effect.gen(function* () {
           {
             name: "agent:dependency-review",
             interval: AGENT_JOB_INTERVAL,
-            run: runNextDependencyReview({ sources: reviewSources, model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD }),
+            run: runDependencyReviews({
+              sources: reviewSources,
+              model: DEPENDENCY_REVIEW_MODEL,
+              maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD,
+              concurrency: DEPENDENCY_REVIEW_CONCURRENCY,
+            }),
             backoffUntil: () => Option.none<DateTime.Utc>(),
           },
         ];

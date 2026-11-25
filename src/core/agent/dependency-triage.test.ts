@@ -9,7 +9,7 @@ import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
 import { AgentWorkspace } from "./agent-workspace.js";
-import { recoverInterruptedAgentRuns, runNextDependencyReview } from "./dependency-triage.js";
+import { recoverInterruptedAgentRuns, runDependencyReviews } from "./dependency-triage.js";
 
 const REVIEW = {
   conclusion: "mergeable_after_fix",
@@ -43,10 +43,11 @@ const statusOf = (taskId: number) =>
     return Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status;
   });
 
-type Recorded = { requests: ClaudeRequest[]; statusDuringRun: TaskStatus[] };
+type Recorded = { requests: ClaudeRequest[]; statusDuringRun: TaskStatus[][]; maxInFlight: number };
 
 const withAgent = (options: { fail?: string; sessionId?: string; onRun?: Effect.Effect<void, never, TaskRepository | SourceItemRepository> } = {}) => {
-  const recorded: Recorded = { requests: [], statusDuringRun: [] };
+  const recorded: Recorded = { requests: [], statusDuringRun: [], maxInFlight: 0 };
+  let inFlight = 0;
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       const tasks = yield* TaskRepository;
@@ -55,9 +56,15 @@ const withAgent = (options: { fail?: string; sessionId?: string; onRun?: Effect.
         run: (request) =>
           Effect.gen(function* () {
             recorded.requests.push(request);
+            inFlight++;
+            recorded.maxInFlight = Math.max(recorded.maxInFlight, inFlight);
             const all = yield* tasks.listTasks;
-            recorded.statusDuringRun.push(...all.map((task) => task.status));
+            recorded.statusDuringRun.push(all.map((task) => task.status));
             if (options.onRun) yield* options.onRun.pipe(Effect.provideService(TaskRepository, tasks), Effect.provideService(SourceItemRepository, items));
+            // ほかの調査に順番を譲り、並列に動いていれば同時に処理中になるようにする
+            yield* Effect.yieldNow;
+            yield* Effect.yieldNow;
+            inFlight--;
             if (options.fail) return yield* new ClaudeCodeError({ message: options.fail });
             return { sessionId: options.sessionId ?? "session-1", structured: REVIEW, costUsd: 0.3, permissionDenials: 0 };
           }),
@@ -73,9 +80,9 @@ const withAgent = (options: { fail?: string; sessionId?: string; onRun?: Effect.
 };
 
 const SOURCES = ["github:personal", "github:personal:watch"];
-const run = runNextDependencyReview({ sources: SOURCES, model: "sonnet", maxBudgetUsd: 2 });
+const run = runDependencyReviews({ sources: SOURCES, model: "sonnet", maxBudgetUsd: 2, concurrency: 1 });
 
-describe("runNextDependencyReview", () => {
+describe("runDependencyReviews", () => {
   it.effect("bot の依存更新 PR を追う Task を、調査中のレーンに移してから claude で調べる", () =>
     Effect.gen(function* () {
       const { taskId } = yield* dependencyTask();
@@ -83,8 +90,8 @@ describe("runNextDependencyReview", () => {
 
       const outcome = yield* agent.provide(run);
 
-      assert.deepStrictEqual(outcome, Option.some({ taskId, succeeded: true }));
-      assert.deepStrictEqual(agent.recorded.statusDuringRun, ["agent_running"]);
+      assert.deepStrictEqual(outcome, [{ taskId, succeeded: true }]);
+      assert.deepStrictEqual(agent.recorded.statusDuringRun, [["agent_running"]]);
       const request = agent.recorded.requests[0]!;
       assert.strictEqual(request.cwd, `/work/${taskId}/repo/acme/app`);
       assert.deepStrictEqual(request.addDirs, [`/work/${taskId}/context`]);
@@ -134,7 +141,7 @@ describe("runNextDependencyReview", () => {
       });
       const outcome = yield* second.provide(run);
 
-      assert.deepStrictEqual(Option.map(outcome, (o) => o.taskId), Option.some(taskId));
+      assert.deepStrictEqual(outcome.map((o) => o.taskId), [taskId]);
       assert.strictEqual(second.recorded.requests[0]?.resumeSessionId, "session-1");
     }).pipe(Effect.provide(TestDatabase)));
 
@@ -144,7 +151,7 @@ describe("runNextDependencyReview", () => {
       yield* withAgent({ fail: "落ちた" }).provide(run);
 
       const again = withAgent();
-      assert.isTrue(Option.isNone(yield* again.provide(run)));
+      assert.lengthOf(yield* again.provide(run), 0);
       assert.lengthOf(again.recorded.requests, 0);
     }).pipe(Effect.provide(TestDatabase)));
 
@@ -154,7 +161,7 @@ describe("runNextDependencyReview", () => {
 
       const outcome = yield* withAgent({ fail: "claude が失敗した（error_max_budget_usd）" }).provide(run);
 
-      assert.deepStrictEqual(outcome, Option.some({ taskId, succeeded: false }));
+      assert.deepStrictEqual(outcome, [{ taskId, succeeded: false }]);
       assert.strictEqual(yield* statusOf(taskId), "needs_review");
       const [runRow] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, taskId));
       assert.deepInclude(runRow, { status: "failed", error: "claude が失敗した（error_max_budget_usd）" });
@@ -183,13 +190,77 @@ describe("runNextDependencyReview", () => {
       yield* dependencyTask({ url: "https://github.com/acme/app/issues/5" });
       const agent = withAgent();
 
-      assert.isTrue(Option.isNone(yield* agent.provide(run)));
+      assert.lengthOf(yield* agent.provide(run), 0);
       assert.lengthOf(agent.recorded.requests, 0);
     }).pipe(Effect.provide(TestDatabase)));
 });
 
+describe("調査待ち", () => {
+  it.effect("対象が複数あれば、すべて調査待ちとしてレーンに入れてから、古いものから調べる", () =>
+    Effect.gen(function* () {
+      const first = yield* dependencyTask({ url: "https://github.com/acme/app/pull/1" });
+      const second = yield* dependencyTask({ url: "https://github.com/acme/app/pull/2" });
+      const agent = withAgent();
+
+      const outcome = yield* agent.provide(run);
+
+      assert.deepStrictEqual(agent.recorded.statusDuringRun[0], ["agent_running", "agent_running"]);
+      assert.deepStrictEqual(agent.recorded.requests.map((request) => request.prompt.includes("/pull/1")), [true, false]);
+      assert.deepStrictEqual(outcome.map((o) => o.taskId), [first.taskId, second.taskId]);
+      assert.strictEqual(yield* statusOf(second.taskId), "todo");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("同時に調べる数を上限までに抑え、待ちはすべて調べ切る", () =>
+    Effect.gen(function* () {
+      for (const number of [1, 2, 3, 4, 5]) yield* dependencyTask({ url: `https://github.com/acme/app/pull/${number}` });
+      const agent = withAgent();
+
+      const outcome = yield* agent.provide(runDependencyReviews({ sources: SOURCES, concurrency: 2 }));
+
+      assert.lengthOf(outcome, 5);
+      assert.strictEqual(agent.recorded.maxInFlight, 2);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("調査待ちの間に同期が状態を変えたら（merge されて完了など）、その Task は調べずに待ちから外す", () =>
+    Effect.gen(function* () {
+      yield* dependencyTask({ url: "https://github.com/acme/app/pull/1" });
+      const second = yield* dependencyTask({ url: "https://github.com/acme/app/pull/2" });
+      const agent = withAgent({
+        onRun: Effect.gen(function* () {
+          yield* (yield* TaskRepository).updateTask(second.taskId, { status: "done" });
+        }),
+      });
+
+      yield* agent.provide(run);
+
+      assert.lengthOf(agent.recorded.requests, 1);
+      assert.strictEqual(yield* statusOf(second.taskId), "done");
+      assert.lengthOf(yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, second.taskId)), 0);
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
 describe("recoverInterruptedAgentRuns", () => {
-  it.effect("途中で止まった調査は失敗として閉じ、Task を元のレーンに戻す", () =>
+  it.effect("調査待ちは取り消して元のレーンに戻す（設定をオフにしたときにレーンに残さないため。次の回で並べ直す）", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask({ status: "needs_review" });
+      const db = yield* Database;
+      yield* (yield* TaskRepository).updateTask(taskId, { status: "agent_running" });
+      yield* db.insert(agentRuns).values({
+        taskId,
+        kind: "dependency_review",
+        status: "queued",
+        subjectFingerprint: "v1",
+        previousStatus: "needs_review",
+        startedAt: "2026-11-25T00:00:00.000Z",
+      });
+
+      yield* recoverInterruptedAgentRuns;
+
+      assert.strictEqual(yield* statusOf(taskId), "needs_review");
+      assert.lengthOf(yield* db.select().from(agentRuns).where(eq(agentRuns.taskId, taskId)), 0);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("途中で止まった調査は取り消して Task を元のレーンに戻し、次の回で調べ直せるようにする（アプリの終了は PR の問題ではないため）", () =>
     Effect.gen(function* () {
       const { taskId } = yield* dependencyTask({ status: "needs_review" });
       const db = yield* Database;
@@ -205,7 +276,6 @@ describe("recoverInterruptedAgentRuns", () => {
 
       assert.strictEqual(yield* recoverInterruptedAgentRuns, 1);
       assert.strictEqual(yield* statusOf(taskId), "needs_review");
-      const [runRow] = yield* db.select().from(agentRuns).where(eq(agentRuns.taskId, taskId));
-      assert.strictEqual(runRow?.status, "failed");
+      assert.lengthOf(yield* db.select().from(agentRuns).where(eq(agentRuns.taskId, taskId)), 0);
     }).pipe(Effect.provide(TestDatabase)));
 });

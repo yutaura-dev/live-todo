@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks } from "../db/schema.js";
@@ -29,6 +29,8 @@ export type BoardCard = {
   updatedAt: string;
   /** 今の状況と次の一手（AI の調査の結論など） */
   brief?: string;
+  /** AI が調査中のレーンにあるとき、調べている最中か、調査待ちの何番目か */
+  agent?: { state: "running" } | { state: "queued"; position: number };
   /** tracks で紐づいた元の項目（PR / issue など）。手動で追加した Task にはない */
   url?: string;
   source?: string;
@@ -115,8 +117,20 @@ export class BoardService extends Context.Service<BoardService, {
         .orderBy(asc(taskLinks.id))
         .pipe(Effect.orDie);
 
+      const activeRuns = db
+        .select({ taskId: agentRuns.taskId, status: agentRuns.status })
+        .from(agentRuns)
+        .where(inArray(agentRuns.status, ["queued", "running"]))
+        .orderBy(asc(agentRuns.id))
+        .pipe(Effect.orDie);
+
       const board = Effect.gen(function* () {
         const all = yield* tasks.listTasks;
+        const agentOf = new Map<number, NonNullable<BoardCard["agent"]>>();
+        let position = 0;
+        for (const run of yield* activeRuns) {
+          agentOf.set(run.taskId, run.status === "running" ? { state: "running" } : { state: "queued", position: ++position });
+        }
         const itemOf = new Map<number, { url: string; source: string; judgment: unknown }>();
         for (const row of yield* trackedItems) {
           if (!itemOf.has(row.taskId)) itemOf.set(row.taskId, row);
@@ -132,6 +146,7 @@ export class BoardService extends Context.Service<BoardService, {
             unreadChanges: task.unreadChanges,
             updatedAt: task.updatedAt,
             ...(task.brief === null ? {} : { brief: task.brief }),
+            ...(agentOf.has(task.id) ? { agent: agentOf.get(task.id)! } : {}),
             ...(item === undefined ? {} : { url: item.url, source: item.source }),
             ...Option.match(judgment, {
               onNone: () => ({}),

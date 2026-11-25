@@ -305,7 +305,11 @@ function Card(props: {
         <span className="task-number">{taskNumber(card.id)}</span>
         {repository && <span className="card-repository">{repository}</span>}
       </p>
-      {card.status === "agent_running" && <p className="card-brief card-brief--working">Claude Code が調べています</p>}
+      {card.status === "agent_running" && (
+        <p className={`card-brief ${card.agent?.state === "queued" ? "card-brief--waiting" : "card-brief--working"}`}>
+          {card.agent?.state === "queued" ? `調査待ち（${card.agent.position} 番目）` : "Claude Code が調べています"}
+        </p>
+      )}
       {card.status !== "agent_running" && card.brief && <p className="card-brief">{card.brief}</p>}
       {inTray && card.judgment && <Judgment judgment={card.judgment} />}
       <div className="card-actions" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>

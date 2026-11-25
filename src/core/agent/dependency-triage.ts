@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect, Option } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns, agentThreads, sourceItems, taskLinks, tasks } from "../db/schema.js";
@@ -29,26 +29,30 @@ const CONCLUSION_TEXT: Record<DependencyReview["conclusion"], string> = {
 
 export const briefOf = (review: DependencyReview) => `依存更新の調査: ${CONCLUSION_TEXT[review.conclusion]}`;
 
-export type DependencyReviewOptions = { sources: ReadonlyArray<string>; model?: string; maxBudgetUsd?: number };
+export type DependencyReviewOptions = {
+  sources: ReadonlyArray<string>;
+  model?: string;
+  maxBudgetUsd?: number;
+  /** 同時に調べる数の上限。Claude Code は並列に動かせるが、増やしすぎると使用量の枠をすぐに使い切る */
+  concurrency: number;
+};
+
+export type DependencyReviewOutcome = { taskId: number; succeeded: boolean };
 
 const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
 /**
- * 依存更新の bot の PR を追う Task を 1 件選んで調べる。対象がなければ none。
+ * 依存更新の bot の PR を追う Task を、すべて調査待ちとしてレーンに入れ、待ちを同時に concurrency 件まで調べ切る。
  * 同じ状態の PR は二度調べない（失敗したものも、PR が更新されるまでやり直さない）。
  */
-export const runNextDependencyReview = (options: DependencyReviewOptions) =>
+export const runDependencyReviews = (options: DependencyReviewOptions) =>
   Effect.gen(function* () {
     const db = yield* Database;
-    const taskRepository = yield* TaskRepository;
-    const claude = yield* ClaudeCode;
-    const workspace = yield* AgentWorkspace;
 
     const rows = yield* db
       .select({
         taskId: tasks.id,
         status: tasks.status,
-        title: sourceItems.title,
         url: sourceItems.url,
         author: sourceItems.author,
         fingerprint: sourceItems.fingerprint,
@@ -67,38 +71,58 @@ export const runNextDependencyReview = (options: DependencyReviewOptions) =>
       .orderBy(tasks.id)
       .pipe(Effect.orDie);
 
-    let candidate: (typeof rows)[number] & { repository: string } | undefined;
+    // 見つけた対象はすべて調査待ちにしてレーンに入れる（順番を待っていることを画面で見えるようにするため）
     for (const row of rows) {
-      const pull = PULL_URL.exec(row.url);
-      if (pull === null || !isDependencyBot(row.author)) continue;
+      if (PULL_URL.exec(row.url) === null || !isDependencyBot(row.author)) continue;
       const reviewed = yield* db
         .select({ id: agentRuns.id })
         .from(agentRuns)
         .where(and(eq(agentRuns.taskId, row.taskId), eq(agentRuns.kind, KIND), eq(agentRuns.subjectFingerprint, row.fingerprint)))
         .limit(1)
         .pipe(Effect.orDie);
-      if (reviewed.length === 0) {
-        candidate = { ...row, repository: pull[1]! };
-        break;
-      }
+      if (reviewed.length > 0) continue;
+      yield* db
+        .insert(agentRuns)
+        .values({ taskId: row.taskId, kind: KIND, status: "queued", subjectFingerprint: row.fingerprint, previousStatus: row.status, startedAt: yield* nowIso })
+        .pipe(Effect.orDie);
+      yield* moveTask(row.taskId, row.status, "agent_running");
     }
-    if (candidate === undefined) return Option.none<{ taskId: number; succeeded: boolean }>();
-    const target = candidate;
 
-    const [run] = yield* db
-      .insert(agentRuns)
-      .values({
-        taskId: target.taskId,
-        kind: KIND,
-        status: "running",
-        subjectFingerprint: target.fingerprint,
-        previousStatus: target.status,
-        startedAt: yield* nowIso,
-      })
-      .returning({ id: agentRuns.id })
+    const queued = yield* db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.kind, KIND), eq(agentRuns.status, "queued")))
+      .orderBy(agentRuns.id)
       .pipe(Effect.orDie);
-    const runId = run!.id;
-    yield* moveTask(target.taskId, target.status, "agent_running");
+    const outcomes = yield* Effect.forEach(queued, (run) => reviewQueued(run.id, options), { concurrency: options.concurrency });
+    return outcomes.flatMap((outcome) => (Option.isSome(outcome) ? [outcome.value] : []));
+  });
+
+/** 調査待ちを 1 件調べる。待っている間に同期などが状態を変えたもの（merge されて完了など）は調べずに待ちから外す */
+const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const taskRepository = yield* TaskRepository;
+    const claude = yield* ClaudeCode;
+    const workspace = yield* AgentWorkspace;
+
+    const [run] = yield* db.select().from(agentRuns).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
+    if (run === undefined || run.status !== "queued") return Option.none<DependencyReviewOutcome>();
+    const task = yield* taskRepository.findTask(run.taskId);
+    const [item] = yield* db
+      .select({ title: sourceItems.title, url: sourceItems.url })
+      .from(taskLinks)
+      .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+      .where(and(eq(taskLinks.taskId, run.taskId), eq(taskLinks.role, "tracks")))
+      .limit(1)
+      .pipe(Effect.orDie);
+    const pull = item === undefined ? null : PULL_URL.exec(item.url);
+    if (Option.isNone(task) || task.value.status !== "agent_running" || item === undefined || pull === null) {
+      yield* db.delete(agentRuns).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
+      return Option.none<DependencyReviewOutcome>();
+    }
+    const target = { taskId: run.taskId, previousStatus: run.previousStatus as TaskStatus, title: item.title, url: item.url, repository: pull[1]! };
+    yield* db.update(agentRuns).set({ status: "running", startedAt: yield* nowIso }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
 
     const outcome = yield* Effect.gen(function* () {
       const { cwd, contextDir } = yield* workspace.prepare(target.repository, target.taskId, target.url);
@@ -133,18 +157,18 @@ export const runNextDependencyReview = (options: DependencyReviewOptions) =>
         .values({ taskId: target.taskId, provider: PROVIDER, sessionId: result.sessionId, workspace: cwd, updatedAt: finishedAt })
         .onConflictDoUpdate({ target: agentThreads.taskId, set: { sessionId: result.sessionId, workspace: cwd, updatedAt: finishedAt } })
         .pipe(Effect.orDie);
-      const task = Option.getOrThrow(yield* taskRepository.findTask(target.taskId));
+      const current = Option.getOrThrow(yield* taskRepository.findTask(target.taskId));
       const brief = briefOf(review);
       yield* taskRepository.updateTask(target.taskId, { brief });
       // 結論が出たことを更新マークで知らせる
-      yield* taskRepository.recordChange(target.taskId, { kind: "field_changed", field: "brief", before: task.brief, after: brief, unread: true, actor: "agent" });
+      yield* taskRepository.recordChange(target.taskId, { kind: "field_changed", field: "brief", before: current.brief, after: brief, unread: true, actor: "agent" });
       yield* moveTask(target.taskId, "agent_running", "todo");
       return Option.some({ taskId: target.taskId, succeeded: true });
     }
 
     yield* db.update(agentRuns).set({ status: "failed", error: outcome.failure.message, finishedAt }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
     yield* Effect.logWarning("依存更新の PR を調べられなかった").pipe(Effect.annotateLogs({ taskId: target.taskId, reason: outcome.failure.message }));
-    yield* moveTask(target.taskId, "agent_running", target.status);
+    yield* moveTask(target.taskId, "agent_running", target.previousStatus);
     return Option.some({ taskId: target.taskId, succeeded: false });
   });
 
@@ -158,14 +182,17 @@ const moveTask = (taskId: number, expected: TaskStatus, next: TaskStatus) =>
     yield* taskRepository.recordChange(taskId, { kind: "field_changed", field: "status", before: current, after: next, unread: false, actor: "agent" });
   });
 
-/** アプリが途中で終わり、調査中のまま残ったものを失敗として閉じ、Task を元のレーンに戻す */
+/**
+ * アプリが途中で終わり、調査中・調査待ちのまま残ったものを取り消し、Task を元のレーンに戻す。
+ * 失敗として残さない理由: 失敗は PR が更新されるまでやり直さないので、アプリを閉じただけで調べられなくなるため。
+ * 対象なら次の回で待ちに入れ直す（設定をオフにしたときは、レーンに残さずに済む）。
+ */
 export const recoverInterruptedAgentRuns = Effect.gen(function* () {
   const db = yield* Database;
-  const running = yield* db.select().from(agentRuns).where(eq(agentRuns.status, "running")).orderBy(desc(agentRuns.id)).pipe(Effect.orDie);
-  const finishedAt = yield* nowIso;
-  for (const run of running) {
-    yield* db.update(agentRuns).set({ status: "failed", error: "アプリが途中で終了した", finishedAt }).where(eq(agentRuns.id, run.id)).pipe(Effect.orDie);
+  const interrupted = yield* db.select().from(agentRuns).where(inArray(agentRuns.status, ["queued", "running"])).pipe(Effect.orDie);
+  for (const run of interrupted) {
+    yield* db.delete(agentRuns).where(eq(agentRuns.id, run.id)).pipe(Effect.orDie);
     yield* moveTask(run.taskId, "agent_running", run.previousStatus as TaskStatus);
   }
-  return running.length;
+  return interrupted.filter((run) => run.status === "running").length;
 });

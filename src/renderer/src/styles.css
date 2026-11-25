@@ -907,6 +907,10 @@ button:disabled {
   color: var(--focus);
 }
 
+.card-brief--waiting {
+  color: var(--muted);
+}
+
 .column--agent_running {
   border: 1px dashed var(--card-edge);
 }

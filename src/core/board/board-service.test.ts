@@ -226,6 +226,28 @@ describe("AI の調査", () => {
       }),
     ));
 
+  it.effect("AI が調査中のレーンのカードには、調査待ちか調べている最中かと、待ちの順番を出す", () =>
+    run(
+      Effect.gen(function* () {
+        const running = yield* taskWithItem("a", "agent_running");
+        const waitingFirst = yield* taskWithItem("b", "agent_running");
+        const waitingSecond = yield* taskWithItem("c", "agent_running");
+        const db = yield* Database;
+        const base = { kind: "dependency_review", subjectFingerprint: "v1", previousStatus: "todo", startedAt: "2026-11-25T00:00:00.000Z" };
+        yield* db.insert(agentRuns).values({ ...base, taskId: waitingFirst.id, status: "queued" });
+        yield* db.insert(agentRuns).values({ ...base, taskId: running.id, status: "running" });
+        yield* db.insert(agentRuns).values({ ...base, taskId: waitingSecond.id, status: "queued" });
+
+        const board = yield* (yield* BoardService).board;
+        const cards = board.columns.find((column) => column.id === "agent_running")?.cards ?? [];
+        const stateOf = (id: number) => cards.find((card) => card.id === id)?.agent;
+
+        assert.deepStrictEqual(stateOf(running.id), { state: "running" });
+        assert.deepStrictEqual(stateOf(waitingFirst.id), { state: "queued", position: 1 });
+        assert.deepStrictEqual(stateOf(waitingSecond.id), { state: "queued", position: 2 });
+      }),
+    ));
+
   it.effect("調べたことがなければ、調査の結果は出さない", () =>
     run(
       Effect.gen(function* () {

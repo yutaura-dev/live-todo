@@ -91,7 +91,8 @@ export const syncCursors = sqliteTable("sync_cursors", {
   updatedAt: text("updated_at").notNull(),
 });
 
-export const AGENT_RUN_STATUSES = ["running", "succeeded", "failed"] as const;
+/** queued: 調査待ち（AI が調査中のレーンに入れて順番を待つ） */
+export const AGENT_RUN_STATUSES = ["queued", "running", "succeeded", "failed"] as const;
 
 /** Task ごとの AI Agent との会話（Agent Thread）。Claude Code の session を続けて使うため、id と作業場所を残す */
 export const agentThreads = sqliteTable("agent_threads", {
