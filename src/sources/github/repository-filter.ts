@@ -6,8 +6,8 @@ export class InvalidRepositoryPatternError extends Schema.TaggedError<InvalidRep
 ) {}
 
 export type RepositoryFilterConfig = {
-  include?: readonly string[];
-  exclude?: readonly string[];
+  include?: readonly string[] | undefined;
+  exclude?: readonly string[] | undefined;
 };
 
 type Pattern = { owner: string; repo: string };

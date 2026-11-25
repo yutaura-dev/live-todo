@@ -84,6 +84,12 @@ WatchProvider（対象の一覧）× Condition（holds / clear / unknown）
 - 応答に含まれる URL を取りに行くとき、宛先が `api.github.com` でなければトークンを付けずにエラーにする
 - エラーの `cause` に HttpClient のエラーを入れない（送ったリクエストの `authorization` ヘッダーがログに出るため）
 
+## 定期実行
+
+- `src/core/sync/scheduler.ts`（`runJobs`）: ジョブごとに「実行 → 間隔だけ待つ」を止まらずに繰り返す。失敗（defect も含む）はログに残して次の間隔でやり直す。ジョブが休む時刻（レート制限の解除時刻など）を示したら、少なくともその時刻まで待つ。1 つのジョブが休んだり失敗したりしても、ほかのジョブは止まらない
+- `src/app/github-jobs.ts`: アカウントごとに GitHubClient を 1 つ作り、通知の同期（1 分ごと）と見張り（5 分ごと）の 2 つのジョブで共有する
+- LLM による判定を入れるまでは、`ConservativeClassifier`（常に `uncertain`）を使う。規則で決まらない項目はすべて要確認に入り、対象外として捨てることはない
+
 ## 技術スタック
 
 決定の経緯は [ADR-0002](decisions/0002-desktop-app-stack.md) と [ADR-0005](decisions/0005-adopt-effect.md) を参照。
