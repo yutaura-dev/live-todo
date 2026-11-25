@@ -32,6 +32,9 @@ export type TodoJudgment =
 
 export type TodoJudgeThresholds = { todo: number; review: number };
 
+/** 初期値。運用しながら調整する（docs/architecture.md の「判定の閾値」） */
+export const DEFAULT_TODO_THRESHOLDS: TodoJudgeThresholds = { todo: 0.8, review: 0.4 };
+
 export type TodoJudgeOptions<TItem> = {
   rules: readonly ((item: TItem) => boolean)[];
   describe: (item: TItem) => string;
