@@ -1,0 +1,8 @@
+# nix / direnv
+.direnv/
+/result
+/result-*
+
+# env files
+.env
+.env*.local

@@ -1,0 +1,8 @@
+# worktree を新規作成する際にコピーするファイル（.gitignore 構文）。
+# gitignore 対象のファイルがコピーされる（tracked ファイルは git が複製するので書く必要はない）。
+
+# direnv が読む環境差分
+.env
+
+# 秘匿値（API キー・トークン）
+.env.local
