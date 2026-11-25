@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 export const DEPENDENCY_BOT_LOGINS = ["renovate[bot]", "renovate-bot", "app/renovate", "dependabot[bot]", "app/dependabot"] as const;
 const DEPENDENCY_BOTS = new Set<string>(DEPENDENCY_BOT_LOGINS);
@@ -15,6 +15,9 @@ const DependencyReview = Schema.Struct({
   requiredChanges: Schema.String,
   blockers: Schema.String,
   configChanges: Schema.String,
+  // この 2 つは後から足した項目。足す前の回答は「そのまま merge しない」として読む
+  canMergeAsIs: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  mergeAsIsNote: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
 });
 export type DependencyReview = typeof DependencyReview.Type;
 export const decodeDependencyReview = Schema.decodeUnknownEffect(DependencyReview);
@@ -35,8 +38,16 @@ export const DEPENDENCY_REVIEW_JSON_SCHEMA = {
       type: "string",
       description: "not_mergeable のとき、renovate / dependabot の設定ファイルをどう直せばよいか（ファイル名と差分）。それ以外は空文字",
     },
+    canMergeAsIs: {
+      type: "boolean",
+      description: "mergeable_after_fix でも、条件付きで修正せずにそのまま merge してよいなら true。mergeable なら true、not_mergeable なら false",
+    },
+    mergeAsIsNote: {
+      type: "string",
+      description: "mergeable_after_fix で canMergeAsIs が true のとき、そのまま merge してよい条件（例: fork からの PR を受け付けないなら）。それ以外は空文字",
+    },
   },
-  required: ["conclusion", "impact", "requiredChanges", "blockers", "configChanges"],
+  required: ["conclusion", "impact", "requiredChanges", "blockers", "configChanges", "canMergeAsIs", "mergeAsIsNote"],
   additionalProperties: false,
 } as const;
 
@@ -67,6 +78,7 @@ export function dependencyReviewPrompt(subject: { url: string; repository: strin
     "- 影響範囲の調査結果（どこに影響があり、なぜそう判断したか）",
     "- 修正が必要なら、具体的にどこをどう直すか",
     "- merge できないなら、その理由と、renovate / dependabot の設定ファイルをどう直せばよいか",
+    "- 修正すれば merge できる場合でも、条件付きで修正せずにそのまま merge してよいなら、そのことと条件",
     "",
     "書き込みはしないでください（コメント・承認・push・ファイルの編集など）。調べて答えるだけにしてください。",
     "日本語で、根拠となるファイル名やリリースノートの記述を添えて答えてください。",

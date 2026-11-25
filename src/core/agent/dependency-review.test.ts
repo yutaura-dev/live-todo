@@ -28,11 +28,23 @@ describe("decodeDependencyReview", () => {
     requiredChanges: "src/a.ts の呼び出しを新しい引数に合わせる",
     blockers: "",
     configChanges: "",
+    canMergeAsIs: true,
+    mergeAsIsNote: "fork からの PR を受け付けないなら、修正せずに merge してよい",
   };
 
   it.effect("3 つの結論のどれかと、影響範囲・修正・理由・設定の直し方を受け取る", () =>
     Effect.gen(function* () {
       assert.deepStrictEqual(yield* decodeDependencyReview(valid), valid);
+    }));
+
+  it.effect("そのまま merge してよいかの項目がない古い回答は、そのまま merge しない（false）として読む", () =>
+    Effect.gen(function* () {
+      const { canMergeAsIs: _omitted, mergeAsIsNote: _note, ...old } = valid;
+
+      const review = yield* decodeDependencyReview(old);
+
+      assert.isFalse(review.canMergeAsIs);
+      assert.strictEqual(review.mergeAsIsNote, "");
     }));
 
   it.effect("知らない結論はエラーにする", () =>
@@ -44,7 +56,15 @@ describe("decodeDependencyReview", () => {
 
 describe("DEPENDENCY_REVIEW_JSON_SCHEMA", () => {
   it("claude に求める回答の項目が、受け取る形と一致する", () => {
-    assert.deepStrictEqual(DEPENDENCY_REVIEW_JSON_SCHEMA.required, ["conclusion", "impact", "requiredChanges", "blockers", "configChanges"]);
+    assert.deepStrictEqual(DEPENDENCY_REVIEW_JSON_SCHEMA.required, [
+      "conclusion",
+      "impact",
+      "requiredChanges",
+      "blockers",
+      "configChanges",
+      "canMergeAsIs",
+      "mergeAsIsNote",
+    ]);
     assert.deepStrictEqual(DEPENDENCY_REVIEW_JSON_SCHEMA.properties.conclusion.enum, ["mergeable", "mergeable_after_fix", "not_mergeable"]);
   });
 });

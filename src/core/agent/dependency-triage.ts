@@ -16,6 +16,7 @@ import {
 } from "./dependency-review.js";
 
 const KIND = "dependency_review";
+const hasCurrentReviewShape = (result: unknown) => typeof result === "object" && result !== null && "canMergeAsIs" in result;
 const PROVIDER = "claude-code";
 // 自分で手を付けた（進行中）ものや終わったものには割り込まない
 const ELIGIBLE_STATUSES: ReadonlyArray<TaskStatus> = ["needs_review", "todo"];
@@ -75,12 +76,12 @@ export const runDependencyReviews = (options: DependencyReviewOptions) =>
     for (const row of rows) {
       if (PULL_URL.exec(row.url) === null || !isDependencyBot(row.author)) continue;
       const reviewed = yield* db
-        .select({ status: agentRuns.status, subjectSha: agentRuns.subjectSha })
+        .select({ status: agentRuns.status, subjectSha: agentRuns.subjectSha, result: agentRuns.result })
         .from(agentRuns)
         .where(and(eq(agentRuns.taskId, row.taskId), eq(agentRuns.kind, KIND), eq(agentRuns.subjectFingerprint, row.fingerprint)))
         .pipe(Effect.orDie);
-      // 成功したのに commit が残っていない調査は、commit を残す前のもの。merge に使えないので調べ直す
-      if (reviewed.some((run) => !(run.status === "succeeded" && run.subjectSha === null))) continue;
+      // 成功したのに commit が残っていない・回答に後から足した項目がない調査は、それより前のもの。merge に使えないので調べ直す
+      if (reviewed.some((run) => !(run.status === "succeeded" && (run.subjectSha === null || !hasCurrentReviewShape(run.result))))) continue;
       yield* db
         .insert(agentRuns)
         .values({ taskId: row.taskId, kind: KIND, status: "queued", subjectFingerprint: row.fingerprint, previousStatus: row.status, startedAt: yield* nowIso })

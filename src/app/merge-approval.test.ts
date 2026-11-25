@@ -10,7 +10,7 @@ import { GitHubRequestError, type GitHubClient } from "../sources/github/github-
 import { gitHubClientStub } from "../sources/github/test-client.js";
 import { approveAndMerge, mergePlan } from "./merge-approval.js";
 
-const reviewedTask = (options: { conclusion?: string; subjectSha?: string | null } = {}) =>
+const reviewedTask = (options: { conclusion?: string; subjectSha?: string | null; canMergeAsIs?: boolean } = {}) =>
   Effect.gen(function* () {
     const url = "https://github.com/acme/app/pull/42";
     const item = yield* (yield* SourceItemRepository).upsertItem({
@@ -32,7 +32,15 @@ const reviewedTask = (options: { conclusion?: string; subjectSha?: string | null
       subjectFingerprint: "v1",
       subjectSha: options.subjectSha === undefined ? "head-sha" : options.subjectSha,
       previousStatus: "todo",
-      result: { conclusion: options.conclusion ?? "mergeable", impact: "", requiredChanges: "", blockers: "", configChanges: "" },
+      result: {
+        conclusion: options.conclusion ?? "mergeable",
+        impact: "",
+        requiredChanges: "",
+        blockers: "",
+        configChanges: "",
+        canMergeAsIs: options.canMergeAsIs ?? false,
+        mergeAsIsNote: "",
+      },
       startedAt: "2026-11-25T00:00:00.000Z",
     });
     return task.id;
@@ -55,6 +63,15 @@ describe("mergePlan", () => {
 
       assert.deepInclude(plan, { repository: "acme/app", number: 42, sha: "head-sha", method: "squash" });
       assert.include(plan.reason, "2 件中 2 件");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("修正すれば merge 可能でも、そのまま merge してよいとされていれば merge できる", () =>
+    Effect.gen(function* () {
+      const taskId = yield* reviewedTask({ conclusion: "mergeable_after_fix", canMergeAsIs: true });
+
+      const plan = yield* mergePlan(taskId, clientFor(squashRepo));
+
+      assert.strictEqual(plan.number, 42);
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("merge 可能と判定されていなければ、merge させない", () =>

@@ -154,7 +154,15 @@ export function TaskDrawer(props: {
   );
 }
 
-type ReviewResult = { conclusion?: string; impact?: string; requiredChanges?: string; blockers?: string; configChanges?: string };
+type ReviewResult = {
+  conclusion?: string;
+  impact?: string;
+  requiredChanges?: string;
+  blockers?: string;
+  configChanges?: string;
+  canMergeAsIs?: boolean;
+  mergeAsIsNote?: string;
+};
 
 function AgentRunSection({ run, taskId, onRequested }: { run: NonNullable<TaskDetail["agentRun"]>; taskId: number; onRequested: () => Promise<void> }) {
   const review = (run.result ?? {}) as ReviewResult;
@@ -206,6 +214,7 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
   const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "merged" } | { kind: "failed"; message: string }>({ kind: "idle" });
 
   if (detail.status === "done" || detail.status === "dismissed" || review.conclusion === undefined) return null;
+  const canMerge = review.conclusion === "mergeable" || (review.conclusion === "mergeable_after_fix" && review.canMergeAsIs === true);
 
   const openConfirm = async () => {
     setState({ kind: "busy" });
@@ -232,20 +241,27 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
       <h3 id="drawer-next" className="drawer-section-title">
         次にやること
       </h3>
-      {review.conclusion === "mergeable" && (
+      {review.conclusion === "mergeable" && <p className="next-action-text">PR を merge する（AI の調査で merge 可能と判定）</p>}
+      {review.conclusion === "mergeable_after_fix" && (
         <>
-          <p className="next-action-text">PR を merge する（AI の調査で merge 可能と判定）</p>
+          <p className="next-action-text">修正してから merge する。必要な修正は下の「AI の調査」を見てください</p>
+          {review.canMergeAsIs && review.mergeAsIsNote && <p className="field-hint">条件によっては、修正せずにそのまま merge してもよい: {review.mergeAsIsNote}</p>}
+        </>
+      )}
+      {canMerge && (
+        <>
           {state.kind === "merged" ? (
             <p className="next-action-done">merge しました</p>
           ) : plan === null ? (
-            <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void openConfirm()}>
-              merge する
+            <button type="button" className={review.conclusion === "mergeable" ? "primary-button" : "quiet-button"} disabled={state.kind === "busy"} onClick={() => void openConfirm()}>
+              {review.conclusion === "mergeable" ? "merge する" : "そのまま merge する"}
             </button>
           ) : (
             <div className="merge-confirm" role="alertdialog" aria-labelledby="merge-confirm-title">
               <p id="merge-confirm-title" className="merge-confirm-title">
                 {plan.repository} #{plan.number} を {METHOD_LABELS[plan.method]} で merge します
               </p>
+              {review.conclusion === "mergeable_after_fix" && <p className="field-hint">修正せずに merge します。条件: {review.mergeAsIsNote}</p>}
               <p className="field-hint">方法の理由: {plan.reason}</p>
               <p className="field-hint">
                 調べたときの commit（<code className="session-id">{plan.sha.slice(0, 7)}</code>）から PR が変わっていれば、GitHub が merge を断ります。
@@ -262,7 +278,6 @@ function NextAction({ detail, onMerged }: { detail: TaskDetail; onMerged: () => 
           )}
         </>
       )}
-      {review.conclusion === "mergeable_after_fix" && <p className="next-action-text">修正してから merge する。必要な修正は下の「AI の調査」を見てください</p>}
       {review.conclusion === "not_mergeable" && (
         <p className="next-action-text">merge しない。renovate / dependabot の設定を直すか、PR を閉じる。直し方は下の「AI の調査」を見てください</p>
       )}

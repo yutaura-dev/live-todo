@@ -17,6 +17,8 @@ const REVIEW = {
   requiredChanges: "引数を直す",
   blockers: "",
   configChanges: "",
+  canMergeAsIs: false,
+  mergeAsIsNote: "",
 };
 
 const dependencyTask = (options: { status?: TaskStatus; author?: string; source?: string; state?: "open" | "resolved"; fingerprint?: string; url?: string } = {}) =>
@@ -163,6 +165,23 @@ describe("runDependencyReviews", () => {
       const outcome = yield* agent.provide(run);
 
       assert.deepStrictEqual(outcome, [{ taskId, succeeded: true }]);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("そのまま merge してよいかの項目がない古い回答は、調べ直す", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      yield* (yield* Database).insert(agentRuns).values({
+        taskId,
+        kind: "dependency_review",
+        status: "succeeded",
+        subjectFingerprint: "v1",
+        subjectSha: "head-sha-1",
+        previousStatus: "todo",
+        result: { conclusion: "mergeable_after_fix", impact: "", requiredChanges: "", blockers: "", configChanges: "" },
+        startedAt: "2026-11-25T00:00:00.000Z",
+      });
+
+      assert.lengthOf(yield* withAgent().provide(run), 1);
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("同じ状態の PR は二度調べない（失敗したものも、PR が変わるまでやり直さない）", () =>

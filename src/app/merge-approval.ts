@@ -19,7 +19,7 @@ export type ClientFor<E, R> = (accountId: string) => Effect.Effect<GitHubClient[
 
 const PULL_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/(\d+)/;
 const SOURCE = /^github:([a-z0-9][a-z0-9-]*)(?::watch)?$/;
-const Review = Schema.Struct({ conclusion: Schema.String });
+const Review = Schema.Struct({ conclusion: Schema.String, canMergeAsIs: Schema.optional(Schema.Boolean) });
 const decodeReview = Schema.decodeUnknownOption(Review);
 
 /** 最後の調査が merge 可能と判定した PR と、調べたときの commit。そうでなければ merge させない */
@@ -34,9 +34,9 @@ const reviewedPull = Effect.fnUntraced(function* (taskId: number) {
     .limit(1)
     .pipe(Effect.orDie);
   if (run === undefined || run.status !== "succeeded") return yield* notAllowed("merge できると判定した調査がない");
-  if (Option.getOrUndefined(Option.map(decodeReview(run.result), (review) => review.conclusion)) !== "mergeable") {
-    return yield* notAllowed("最後の調査で merge 可能と判定されていない");
-  }
+  const review = Option.getOrUndefined(decodeReview(run.result));
+  const mergeable = review?.conclusion === "mergeable" || (review?.conclusion === "mergeable_after_fix" && review.canMergeAsIs === true);
+  if (!mergeable) return yield* notAllowed("最後の調査で merge 可能と判定されていない");
   if (run.subjectSha === null) return yield* notAllowed("調べたときの commit が分からない（調べていない変更を merge しないため）");
 
   const [item] = yield* db
