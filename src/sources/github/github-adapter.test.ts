@@ -13,6 +13,7 @@ import {
   githubTodoRules,
   makeGitHubAdapter,
 } from "./github-adapter.js";
+import { gitHubClientStub } from "./test-client.js";
 
 const NOW = Date.parse("2026-11-25T00:00:00Z");
 
@@ -24,7 +25,7 @@ const openIssue = { ...closedIssue, state: "open", state_reason: null };
 const allSubjectsOpen: Record<string, unknown> = { [PULL_URL]: openPull, [ISSUE_URL]: openIssue };
 
 function clientWith(options: { notifications?: unknown[]; subjects?: Record<string, unknown> }) {
-  return GitHubClient.of({
+  return gitHubClientStub({
     listNotifications: vi.fn(() => Effect.succeed<unknown>(options.notifications ?? [])),
     getSubject: vi.fn((url: string) => Effect.succeed(Option.fromNullishOr(options.subjects?.[url]))),
   });

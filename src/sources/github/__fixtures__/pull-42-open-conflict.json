@@ -1,0 +1,16 @@
+{
+  "number": 42,
+  "title": "Add retry to sync",
+  "state": "open",
+  "merged": false,
+  "mergeable": false,
+  "html_url": "https://github.com/acme/app/pull/42",
+  "head": {
+    "sha": "head-sha-2"
+  },
+  "base": {
+    "repo": {
+      "full_name": "acme/app"
+    }
+  }
+}

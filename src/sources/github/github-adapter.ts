@@ -16,6 +16,12 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   listNotifications(params: { since: string; all: boolean }): Effect.Effect<unknown, GitHubRequestError>;
   /** 対象が削除された・見られなくなったときは Option.none を返す */
   getSubject(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubRequestError>;
+  /** 自分が author の open な PR（Search API: is:pr is:open author:@me） */
+  readonly searchMyOpenPullRequests: Effect.Effect<unknown, GitHubRequestError>;
+  /** 対象が削除された・見られなくなったときは Option.none を返す */
+  getPullRequest(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubRequestError>;
+  listCheckRuns(repository: string, sha: string): Effect.Effect<unknown, GitHubRequestError>;
+  listReviews(pullApiUrl: string): Effect.Effect<unknown, GitHubRequestError>;
 }>()("live-todo/sources/github/GitHubClient") {}
 
 const GitHubNotification = Schema.Struct({
@@ -34,7 +40,7 @@ const GitHubSubjectDetail = Schema.Struct({
 });
 type GitHubSubjectDetail = typeof GitHubSubjectDetail.Type;
 
-const decodeResponse = <S extends Schema.Constraint>(schema: S) => {
+export const decodeResponse = <S extends Schema.Constraint>(schema: S) => {
   const decode = Schema.decodeUnknownEffect(schema);
   return (input: unknown) =>
     decode(input).pipe(Effect.mapError((error) => new GitHubResponseError({ message: error.message })));

@@ -11,6 +11,7 @@ import mergedPull from "./__fixtures__/pull-42-merged.json" with { type: "json" 
 import closedIssue from "./__fixtures__/issue-7-closed.json" with { type: "json" };
 import { GitHubClient, type GitHubItem } from "./github-adapter.js";
 import { githubItemDraft, makeGitHubBinding } from "./github-binding.js";
+import { gitHubClientStub } from "./test-client.js";
 
 const PULL_URL = "https://api.github.com/repos/acme/app/pulls/42";
 const ISSUE_URL = "https://api.github.com/repos/acme/app/issues/7";
@@ -64,7 +65,7 @@ describe("GitHub の通知から Task まで", () => {
   const clientServing = (subjects: Record<string, unknown>, batches: unknown[][]) => {
     const listNotifications = vi.fn();
     for (const batch of batches) listNotifications.mockReturnValueOnce(Effect.succeed<unknown>(batch));
-    return GitHubClient.of({
+    return gitHubClientStub({
       listNotifications,
       getSubject: (url: string) => Effect.succeed(Option.fromNullishOr(subjects[url])),
     });

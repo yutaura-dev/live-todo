@@ -1,0 +1,16 @@
+{
+  "total_count": 1,
+  "incomplete_results": false,
+  "items": [
+    {
+      "number": 42,
+      "title": "Add retry to sync",
+      "html_url": "https://github.com/acme/app/pull/42",
+      "repository_url": "https://api.github.com/repos/acme/app",
+      "pull_request": {
+        "url": "https://api.github.com/repos/acme/app/pulls/42",
+        "html_url": "https://github.com/acme/app/pull/42"
+      }
+    }
+  ]
+}

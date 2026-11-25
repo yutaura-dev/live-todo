@@ -1,0 +1,10 @@
+[
+  {
+    "user": {
+      "login": "alice"
+    },
+    "state": "CHANGES_REQUESTED",
+    "commit_id": "head-sha-2",
+    "submitted_at": "2026-11-24T10:00:00Z"
+  }
+]
