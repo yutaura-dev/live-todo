@@ -30,6 +30,8 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
     taskId: number,
     pullUrl: string,
   ): Effect.Effect<{ cwd: string; contextDir: string; headSha: string | undefined }, AgentWorkspaceError>;
+  /** Task の情報をファイルに書き出す（リポジトリの要らない調査のため）。書き出したフォルダのパスを返す */
+  writeContext(taskId: number, files: Readonly<Record<string, string>>): Effect.Effect<string, AgentWorkspaceError>;
 }>()("live-todo/core/agent/AgentWorkspace") {
   static readonly layer = (root: string) =>
     Layer.effect(
@@ -73,7 +75,18 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
           return { cwd: dir, contextDir, headSha: headShaOf(view) };
         });
 
-        return AgentWorkspace.of({ prepare });
+        const writeContext = Effect.fn("AgentWorkspace.writeContext")(function* (taskId: number, files: Readonly<Record<string, string>>) {
+          const contextDir = `${root}/task-${taskId}/context`;
+          yield* fs.makeDirectory(contextDir, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
+          for (const [name, content] of Object.entries(files)) {
+            // パスに使うので、決まった形のファイル名だけを受け付ける
+            if (!/^[a-z][a-z.-]*$/.test(name)) return yield* new AgentWorkspaceError({ message: `ファイル名が不正: ${name}` });
+            yield* fs.writeFileString(`${contextDir}/${name}`, content).pipe(Effect.mapError(fail("Task の情報を書き出せない")));
+          }
+          return contextDir;
+        });
+
+        return AgentWorkspace.of({ prepare, writeContext });
       }),
     );
 }

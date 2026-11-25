@@ -22,6 +22,7 @@ export type ConfigDocument = {
     initialLookbackDays?: number;
     repositories?: { include?: string[]; exclude?: string[] };
     reviewDependencyPrs?: boolean;
+    planNextActions?: boolean;
   }>;
 };
 

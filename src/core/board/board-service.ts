@@ -4,7 +4,7 @@ import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks } from "../db/schema.js";
 import { TaskRepository, type TaskWithUnread } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
-import { chooseOption, completeStep, currentSteps, decodePlan, type Effort, type NextActionPlan } from "../task/next-actions.js";
+import { chooseOption, completeStep, currentSteps, decodePlan, EFFORTS, type Effort, type NextActionPlan, taskEffort } from "../task/next-actions.js";
 
 export class TaskNotFoundError extends Schema.TaggedError<TaskNotFoundError>()("TaskNotFoundError", {
   taskId: Schema.Number,
@@ -30,6 +30,8 @@ export type BoardCard = {
   updatedAt: string;
   /** 今の状況と次の一手（AI の調査の結論など） */
   brief?: string;
+  /** Task の難易度（いま着手できる手順のうち、いちばん手間の少ないもの） */
+  effort?: Effort;
   /** いま着手できる次にやることと、その手間 */
   nextActions?: ReadonlyArray<{ title: string; effort: Effort }>;
   /** AI が調査中のレーンにあるとき、調べている最中か、調査待ちの何番目か */
@@ -100,6 +102,8 @@ const StoredJudgment = Schema.Struct({
 });
 const decodeJudgment = Schema.decodeUnknownOption(StoredJudgment);
 
+const effortRank = (card: { effort?: Effort }) => (card.effort === undefined ? EFFORTS.length : EFFORTS.indexOf(card.effort));
+
 const byAttention = (a: TaskWithUnread, b: TaskWithUnread) =>
   Number(b.unreadChanges > 0) - Number(a.unreadChanges > 0) || b.updatedAt.localeCompare(a.updatedAt);
 
@@ -160,7 +164,13 @@ export class BoardService extends Context.Service<BoardService, {
             ...(agentOf.has(task.id) ? { agent: agentOf.get(task.id)! } : {}),
             ...Option.match(decodePlan(task.nextActions), {
               onNone: () => ({}),
-              onSome: (plan) => ({ nextActions: currentSteps(plan).map((step) => ({ title: step.title, effort: step.effort })) }),
+              onSome: (plan) => {
+                const effort = taskEffort(plan);
+                return {
+                  nextActions: currentSteps(plan).map((step) => ({ title: step.title, effort: step.effort })),
+                  ...(effort === undefined ? {} : { effort }),
+                };
+              },
             }),
             ...(item === undefined ? {} : { url: item.url, source: item.source }),
             ...Option.match(judgment, {
@@ -179,6 +189,8 @@ export class BoardService extends Context.Service<BoardService, {
         return {
           columns: BOARD_COLUMNS.map((column) => {
             const cards = all.filter((task) => task.status === column.id).toSorted(byAttention).map(toCard);
+            // Todo は、すぐ片付くものから手を付けられるよう、難易度の低い順に並べる（次にやることがないものは最後）
+            if (column.id === "todo") cards.sort((a, b) => effortRank(a) - effortRank(b));
             return { ...column, cards: column.id === "done" ? cards.slice(0, DONE_COLUMN_LIMIT) : cards };
           }),
         };

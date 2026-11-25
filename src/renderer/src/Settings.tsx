@@ -215,6 +215,18 @@ function AccountEditor(props: {
         </span>
       </label>
 
+      <label className="checkbox judge-probabilities">
+        <input
+          type="checkbox"
+          checked={account.planNextActions ?? false}
+          onChange={(event) => props.onChange({ ...account, planNextActions: event.target.checked })}
+        />
+        <span>
+          <span className="judge-option-label">次にやることを Claude Code で考える</span>
+          <span className="field-hint">次にやることがない Task について、手順と手間を考えます。Task の内容（通知の本文の抜粋など）を Claude に送ります</span>
+        </span>
+      </label>
+
       <div className="filter-grid">
         <label className="field" htmlFor={`${id}-include`}>
           <span className="field-label">含めるリポジトリ</span>

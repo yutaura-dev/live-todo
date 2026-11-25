@@ -46,6 +46,12 @@ function mapSteps(steps: ReadonlyArray<Step>, change: (step: Step) => Step): Ste
   });
 }
 
+/** Task の難易度。いま着手できる手順のうち、いちばん手間の少ないもの（直列なら先頭、並列ならその中で最も簡単なもの） */
+export function taskEffort(plan: NextActionPlan): Effort | undefined {
+  const efforts = currentSteps(plan).map((step) => EFFORTS.indexOf(step.effort));
+  return efforts.length === 0 ? undefined : EFFORTS[Math.min(...efforts)];
+}
+
 export const completeStep = (plan: NextActionPlan, id: string): NextActionPlan => ({
   steps: mapSteps(plan.steps, (step) => (step.id === id ? { ...step, status: "done" } : step)),
 });

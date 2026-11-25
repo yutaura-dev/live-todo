@@ -31,6 +31,7 @@ describe("decodeAppConfig", () => {
       assert.deepStrictEqual(config.accounts[0]?.repositories, { include: ["acme/*"], exclude: ["acme/legacy"] });
       assert.deepStrictEqual(config.llmProfiles["personal"]?.decisions, { provider: "openai" });
       assert.isFalse(config.accounts[0]?.reviewDependencyPrs);
+      assert.isFalse(config.accounts[0]?.planNextActions);
     }));
 
   it.effect("依存更新の PR を Claude Code で調べるかをアカウントごとに書ける", () =>

@@ -76,6 +76,7 @@ const withAgent = (options: { fail?: string; sessionId?: string; onRun?: Effect.
       return yield* effect.pipe(
         Effect.provideService(ClaudeCode, claude),
         Effect.provideService(AgentWorkspace, AgentWorkspace.of({
+            writeContext: () => Effect.die(new Error("依存更新の調査では使わない")),
             prepare: (repository, taskId) =>
               Effect.succeed({ cwd: `/work/${taskId}/repo/${repository}`, contextDir: `/work/${taskId}/context`, headSha: "head-sha-1" }),
           })),

@@ -1,0 +1,79 @@
+import { assert, describe, it } from "@effect/vitest";
+import { Effect } from "effect";
+import { NEXT_ACTION_PLAN_JSON_SCHEMA, decodeProposedPlan, nextActionPrompt, planFromProposal } from "./next-action-planning.js";
+
+describe("planFromProposal", () => {
+  it("AI が返した手順を、手順の並び（id・未着手）に変える", () => {
+    const plan = planFromProposal({
+      steps: [
+        { title: "Slack で状況を聞く", effort: "easy", mode: "serial", options: [] },
+        { title: "PR をレビューする", effort: "hard", mode: "parallel", options: [] },
+      ],
+    });
+
+    assert.deepStrictEqual(plan.steps.map((step) => [step.id, step.kind, step.title, step.effort, step.mode, step.status]), [
+      ["s1", "manual", "Slack で状況を聞く", "easy", "serial", "todo"],
+      ["s2", "manual", "PR をレビューする", "hard", "parallel", "todo"],
+    ]);
+  });
+
+  it("選択肢のある手順は分かれ道にし、選んだ側の手順を持たせる", () => {
+    const plan = planFromProposal({
+      steps: [
+        {
+          title: "対応するか決める",
+          effort: "easy",
+          mode: "serial",
+          options: [
+            { label: "対応する", steps: [{ title: "直す", effort: "normal", mode: "serial" }] },
+            { label: "断る", steps: [{ title: "返信する", effort: "easy", mode: "serial" }] },
+          ],
+        },
+      ],
+    });
+    const decision = plan.steps[0]!;
+
+    assert.strictEqual(decision.kind, "decision");
+    if (decision.kind !== "decision") return;
+    assert.deepStrictEqual(decision.options.map((option) => [option.key, option.label, option.steps.map((step) => step.id)]), [
+      ["o1", "対応する", ["s1.o1.s1"]],
+      ["o2", "断る", ["s1.o2.s1"]],
+    ]);
+  });
+});
+
+describe("decodeProposedPlan", () => {
+  it.effect("手順が 1 つもない回答はエラーにする（すべての Task に次にやることを入れるため）", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(decodeProposedPlan({ steps: [] }));
+      assert.strictEqual(error._tag, "SchemaError");
+    }));
+
+  it.effect("知らない手間はエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(decodeProposedPlan({ steps: [{ title: "x", effort: "quick", mode: "serial", options: [] }] }));
+      assert.strictEqual(error._tag, "SchemaError");
+    }));
+});
+
+describe("nextActionPrompt", () => {
+  const prompt = nextActionPrompt({ title: "障害の調査依頼（acme/app）", contextDir: "/work/task-1/context" });
+
+  it("Task のタイトルと、集めた情報のファイルを伝える", () => {
+    assert.include(prompt, "障害の調査依頼（acme/app）");
+    assert.include(prompt, "/work/task-1/context/task.json");
+  });
+
+  it("手間の基準（10 秒・5 分・15 分）をプロンプトの中にだけ持つ", () => {
+    assert.include(prompt, "10 秒");
+    assert.include(prompt, "5 分");
+    assert.include(prompt, "15 分");
+  });
+});
+
+describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
+  it("手順は 1 つ以上で、内容・手間・直列か並列か・選択肢を持つ", () => {
+    assert.strictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.minItems, 1);
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.required, ["title", "effort", "mode", "options"]);
+  });
+});

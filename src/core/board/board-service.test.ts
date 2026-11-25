@@ -280,6 +280,32 @@ describe("次にやること", () => {
       }),
     ));
 
+  it.effect("Todo のレーンは、いま着手できる手順の手間が少ない順に並べ、次にやることがない Task は最後にする", () =>
+    run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskRepository;
+        const step = (id: string, effort: string, mode = "serial") => ({ id, kind: "manual", title: id, effort, mode, status: "todo" });
+        const hard = yield* taskWithItem("hard", "todo");
+        yield* tasks.updateTask(hard.id, { nextActions: { steps: [step("h", "hard")] } });
+        yield* taskWithItem("none", "todo");
+        const parallelEasy = yield* taskWithItem("parallel", "todo");
+        // 直列の先頭は難しいが、並列でできる簡単な手順があるので「簡単」
+        yield* tasks.updateTask(parallelEasy.id, { nextActions: { steps: [step("p1", "tedious"), step("p2", "easy", "parallel")] } });
+        const normal = yield* taskWithItem("normal", "todo");
+        yield* tasks.updateTask(normal.id, { nextActions: { steps: [step("n", "normal"), step("n2", "easy")] } });
+
+        const board = yield* (yield* BoardService).board;
+
+        assert.deepStrictEqual(board.columns.find((column) => column.id === "todo")?.cards.map((card) => card.title), [
+          "parallel",
+          "normal",
+          "hard",
+          "none",
+        ]);
+        assert.strictEqual(board.columns.find((column) => column.id === "todo")?.cards[0]?.effort, "easy");
+      }),
+    ));
+
   it.effect("手順を済ませると次の手順に進み、詳細には手順の並び全体を返す", () =>
     run(
       Effect.gen(function* () {

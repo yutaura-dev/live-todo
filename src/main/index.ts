@@ -14,6 +14,7 @@ import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from 
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { backfillNextActions, recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
+import { runNextActionPlanning } from "../core/agent/next-action-runner.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
@@ -119,10 +120,30 @@ const startSync = Effect.gen(function* () {
   const reviewSources = config.accounts
     .filter((account) => account.reviewDependencyPrs)
     .flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]);
-  const agentJobs: ReadonlyArray<SyncJob<never, AgentWorkspace | ClaudeCode | Database | TaskRepository>> =
-    reviewSources.length === 0
+  const planSources = config.accounts
+    .filter((account) => account.planNextActions)
+    .flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]);
+  const planJobs: ReadonlyArray<SyncJob<never, AgentWorkspace | ClaudeCode | Database | TaskRepository>> =
+    planSources.length === 0
       ? []
       : [
+          {
+            name: "agent:next-actions",
+            interval: AGENT_JOB_INTERVAL,
+            run: runNextActionPlanning({
+              sources: planSources,
+              model: DEPENDENCY_REVIEW_MODEL,
+              maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD,
+              concurrency: DEPENDENCY_REVIEW_CONCURRENCY,
+            }),
+            backoffUntil: () => Option.none<DateTime.Utc>(),
+          },
+        ];
+  const agentJobs: ReadonlyArray<SyncJob<never, AgentWorkspace | ClaudeCode | Database | TaskRepository>> =
+    reviewSources.length === 0
+      ? planJobs
+      : [
+          ...planJobs,
           {
             name: "agent:dependency-review",
             interval: AGENT_JOB_INTERVAL,

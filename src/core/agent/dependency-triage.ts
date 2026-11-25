@@ -18,7 +18,7 @@ import {
 
 const KIND = "dependency_review";
 // 失敗を繰り返して使用量を使い切らないよう、失敗してから調べ直すまでの間
-const RETRY_FAILED_AFTER_MILLIS = 60 * 60 * 1000;
+export const RETRY_FAILED_AFTER_MILLIS = 60 * 60 * 1000;
 const hasCurrentReviewShape = (result: unknown) => typeof result === "object" && result !== null && "canMergeAsIs" in result;
 const PROVIDER = "claude-code";
 // 自分で手を付けた（進行中）ものや終わったものには割り込まない
@@ -228,7 +228,7 @@ export const requestDependencyReview = Effect.fnUntraced(function* (taskId: numb
 });
 
 /** 状態を変える。ただし、調べている間に同期などが状態を変えていたら（merge されて完了など）上書きしない */
-const moveTask = (taskId: number, expected: TaskStatus, next: TaskStatus) =>
+export const moveTask = (taskId: number, expected: TaskStatus, next: TaskStatus) =>
   Effect.gen(function* () {
     const taskRepository = yield* TaskRepository;
     const current = Option.getOrThrow(yield* taskRepository.findTask(taskId)).status;
