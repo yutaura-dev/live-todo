@@ -96,6 +96,11 @@ describe("dependencyReviewPrompt", () => {
     assert.include(prompt, "/work/task-1/context/dependency-dashboard.md");
   });
 
+  it("先に要る更新の PR がまだなければ、今すぐ作らせるか schedule を待つかを選べる分かれ道にするよう伝える", () => {
+    assert.include(prompt, "schedule");
+    assert.include(prompt, "分かれ道");
+  });
+
   it("アプリが集めておいた PR の情報（本文・CI・差分）を読むよう伝える", () => {
     assert.include(prompt, "/work/task-1/context/pr.json");
     assert.include(prompt, "/work/task-1/context/pr.diff");

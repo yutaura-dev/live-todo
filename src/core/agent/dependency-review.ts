@@ -145,8 +145,10 @@ export function dependencyReviewPrompt(subject: { url: string; repository: strin
     "- 修正が必要なら、具体的にどこをどう直すか",
     "- merge できないなら、その理由と、renovate / dependabot の設定ファイルをどう直せばよいか",
     "- 修正すれば merge できる場合でも、条件付きで修正せずにそのまま merge してよいなら、そのことと条件",
-    "- 自分が次にやること（手順の並び）。先に別の依存の更新が要るなら、その PR がもう開いているかを open-prs.json で確かめ、" +
-      "まだなら Dependency Dashboard（dependency-dashboard.md）で今すぐ作らせるか、出るのを待つ（wait）手順にする",
+    "- 自分が次にやること（手順の並び）。先に別の依存の更新が要るなら、その PR がもう開いているかを open-prs.json で確かめる。" +
+      "まだ開いていなければ、どちらにするかはユーザーが決めるので、options を持つ分かれ道にする: " +
+      "「今すぐ作らせる」（Dependency Dashboard（dependency-dashboard.md）でチェックを入れる manual と、PR が出るのを待つ wait）と、" +
+      "「renovate の schedule を待つ」（wait）。そのあとの手順は分かれ道の後ろに続ける",
     "",
     "書き込みはしないでください（コメント・承認・push・ファイルの編集など）。調べて答えるだけにしてください。",
     "日本語で、根拠となるファイル名やリリースノートの記述を添えて答えてください。",
