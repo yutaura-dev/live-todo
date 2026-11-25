@@ -8,7 +8,7 @@ import type {
   SettingsSnapshot,
 } from "../../shared/api.js";
 import { api } from "./api.js";
-import { type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
+import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
 
@@ -91,9 +91,6 @@ export function Settings() {
             <AccountEditor
               key={account.id || index}
               account={account}
-              judge={judgeSettingOf(draft, account.id)}
-              onJudgeChange={(setting) => setDraft((current) => withJudgeSetting(current, account.id, setting))}
-              secrets={snapshot.secrets}
               tokenStatus={snapshot.secrets[`github.${account.id}.token`] ?? "missing"}
               tokenSummary={snapshot.githubTokens[account.id]}
               onChange={(next) => updateAccount(index, next)}
@@ -107,6 +104,22 @@ export function Settings() {
           />
         </section>
 
+        <section className="settings-section" aria-labelledby="judge-heading">
+          <h3 id="judge-heading" className="section-title">
+            判定に使う LLM
+          </h3>
+          {hasAccountOverrides(draft) && (
+            <p className="preview-warning">
+              設定ファイルでアカウントごとに別の LLM を指定しています。ここで保存すると、すべてのアカウントがこの設定を使います。
+            </p>
+          )}
+          <JudgeEditor
+            setting={judgeSettingOf(draft)}
+            onChange={(setting) => setDraft((current) => withJudgeSetting(current, setting))}
+            secrets={snapshot.secrets}
+            onSecretChanged={reload}
+          />
+        </section>
       </div>
 
       <footer className="settings-footer">
@@ -124,9 +137,6 @@ export function Settings() {
 
 function AccountEditor(props: {
   account: Account;
-  judge: JudgeSetting;
-  onJudgeChange: (setting: JudgeSetting) => void;
-  secrets: Record<string, SecretStatus>;
   tokenStatus: SecretStatus;
   tokenSummary: GitHubTokenSummary | undefined;
   onChange: (next: Account) => void;
@@ -168,8 +178,6 @@ function AccountEditor(props: {
       {props.tokenStatus === "env" && (
         <p className="token-summary">環境変数のトークンは確かめていません。ここに貼り付けて保存すると、権限と有効期限を確かめます。</p>
       )}
-
-      <JudgeEditor setting={props.judge} onChange={props.onJudgeChange} secrets={props.secrets} onSecretChanged={props.onSecretChanged} />
 
       <div className="field-row">
         <label className="field">
@@ -356,9 +364,8 @@ function JudgeEditor(props: {
     props.onChange({ ...setting, provider, model: MODEL_CHOICES[provider]?.[0]?.value ?? (provider === "none" ? "-" : "") });
 
   return (
-    <fieldset className="judge">
-      <legend className="field-label">判定</legend>
-      <p className="field-hint">届いた通知が、自分の対応が要るものかを決める方法です。</p>
+    <div className="judge">
+      <p className="field-hint">届いた通知が、自分の対応が要るものかを決める方法です。すべてのアカウントで使います。</p>
       <div className="judge-options">
         {JUDGE_OPTIONS.map((option) => (
           <label key={option.value} className={`judge-option${setting.provider === option.value ? " judge-option--selected" : ""}`}>
@@ -407,7 +414,7 @@ function JudgeEditor(props: {
       {(setting.provider === "openai" || setting.probabilities) && (
         <SecretField label="OpenAI の API キー" secretKey="llm.openai.api_key" status={props.secrets["llm.openai.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
       )}
-    </fieldset>
+    </div>
   );
 }
 

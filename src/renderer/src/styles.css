@@ -627,10 +627,6 @@ button:disabled {
   border-radius: 6px;
 }
 
-.judge legend {
-  padding: 0 6px;
-}
-
 .judge > .field-hint {
   margin: 0;
 }
