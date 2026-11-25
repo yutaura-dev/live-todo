@@ -93,9 +93,14 @@ const runEvaluation = Effect.gen(function* () {
       );
       if (Option.isSome(prediction)) predictions[evalCase.id] = prediction.value;
     }
-    const report = evaluate(cases, predictions);
+    const { cases: perCase, ...report } = evaluate(cases, predictions);
     const titleOf = (id: string) => cases.find((evalCase) => evalCase.id === id)?.title ?? id;
+    const MARK = { correct: "✓", missed: "✗ 取りこぼし", false_todo: "✗ 余計な todo", review: "? 要確認" } as const;
     console.log(`\n## ${method.name}`);
+    for (const result of perCase) {
+      const probability = result.probability === undefined ? "" : ` p=${result.probability.toFixed(2)}`;
+      console.log(`  ${MARK[result.outcome]}  正解=${result.expected} 判定=${result.verdict}${probability}  ${result.title}`);
+    }
     console.log(JSON.stringify({ ...report, missedTodos: report.missedTodos.map(titleOf), falseTodos: report.falseTodos.map(titleOf) }, null, 2));
   }
 });

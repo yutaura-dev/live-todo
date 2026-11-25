@@ -41,6 +41,20 @@ describe("evaluate", () => {
   });
 });
 
+describe("1 件ごとの結果", () => {
+  it("正解・判定・確率を 1 件ごとに並べ、外れた件に印を付ける", () => {
+    const report = evaluate([evalCase("a", "todo"), evalCase("b", "not_todo")], {
+      a: { verdict: "not_todo", probability: 0.02 },
+      b: { verdict: "needs_review" },
+    });
+
+    assert.deepStrictEqual(report.cases, [
+      { id: "a", title: "a", expected: "todo", verdict: "not_todo", probability: 0.02, outcome: "missed" },
+      { id: "b", title: "b", expected: "not_todo", verdict: "needs_review", outcome: "review" },
+    ]);
+  });
+});
+
 describe("mergeDataset", () => {
   it("書き出し直しても、すでに付けた正解は残し、新しい件は正解なしで足す", () => {
     const merged = mergeDataset(

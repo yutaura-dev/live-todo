@@ -9,8 +9,21 @@ export type DatasetEntry = { id: string; title: string; request: JudgeRequest; e
 
 export type EvalPrediction = { verdict: TodoVerdict; probability?: number };
 
+export type CaseOutcome = "correct" | "missed" | "false_todo" | "review";
+
+export type CaseResult = {
+  id: string;
+  title: string;
+  expected: EvalLabel;
+  verdict: TodoVerdict;
+  probability?: number;
+  /** missed: 正解は todo なのに対象外 / false_todo: 正解は対象外なのに todo / review: 要確認に回った */
+  outcome: CaseOutcome;
+};
+
 export type EvalReport = {
   total: number;
+  cases: CaseResult[];
   /** 正解は todo なのに対象外と判定した件。いちばん避けたい失敗 */
   missedTodos: string[];
   /** 正解は対象外なのに todo と判定した件 */
@@ -33,6 +46,7 @@ export function evaluate(cases: readonly EvalCase[], predictions: Readonly<Recor
   let correct = 0;
   const brier: number[] = [];
   const todoProbabilities: number[] = [];
+  const results: CaseResult[] = [];
 
   for (const evalCase of cases) {
     const prediction = predictions[evalCase.id];
@@ -44,18 +58,36 @@ export function evaluate(cases: readonly EvalCase[], predictions: Readonly<Recor
       if (evalCase.expected === "todo") todoProbabilities.push(prediction.probability);
     }
 
+    let outcome: CaseOutcome;
     if (verdict === "needs_review") {
       needsReview++;
-      continue;
+      outcome = "review";
+    } else {
+      decided++;
+      if (verdict === evalCase.expected) {
+        correct++;
+        outcome = "correct";
+      } else if (evalCase.expected === "todo") {
+        missedTodos.push(evalCase.id);
+        outcome = "missed";
+      } else {
+        falseTodos.push(evalCase.id);
+        outcome = "false_todo";
+      }
     }
-    decided++;
-    if (verdict === evalCase.expected) correct++;
-    else if (evalCase.expected === "todo") missedTodos.push(evalCase.id);
-    else falseTodos.push(evalCase.id);
+    results.push({
+      id: evalCase.id,
+      title: evalCase.title,
+      expected: evalCase.expected,
+      verdict,
+      ...(prediction?.probability === undefined ? {} : { probability: prediction.probability }),
+      outcome,
+    });
   }
 
   return {
     total: cases.length,
+    cases: results,
     missedTodos,
     falseTodos,
     needsReview,
