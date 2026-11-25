@@ -188,6 +188,25 @@ describe("BoardService.taskDetail", () => {
       }),
     ));
 
+  it.effect("処理中のレーンへの出入りと、値の変わらない変更は、履歴に出さない（調べ直すたびに同じ行が並ぶため）", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "todo");
+        const tasks = yield* TaskRepository;
+        yield* tasks.recordChange(task.id, { kind: "field_changed", field: "status", before: "todo", after: "agent_running", unread: false, actor: "agent" });
+        yield* tasks.recordChange(task.id, { kind: "field_changed", field: "brief", before: "merge できない", after: "merge できない", unread: true, actor: "agent" });
+        yield* tasks.recordChange(task.id, { kind: "field_changed", field: "status", before: "agent_running", after: "todo", unread: false, actor: "agent" });
+        yield* tasks.recordChange(task.id, { kind: "field_changed", field: "brief", before: "merge できない", after: "merge できる", unread: true, actor: "agent" });
+
+        const detail = yield* (yield* BoardService).taskDetail(task.id);
+
+        assert.deepStrictEqual(
+          detail.changes.map(({ field, after }) => ({ field, after })),
+          [{ field: "brief", after: "merge できる" }],
+        );
+      }),
+    ));
+
   it.effect("存在しない Task なら TaskNotFoundError にする", () =>
     run(
       Effect.gen(function* () {

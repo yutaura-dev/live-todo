@@ -11,6 +11,53 @@ const itemWith = (externalId: string, state: "open" | "resolved" | "removed" = "
     return yield* items.upsertItem({ source: "github", externalId, title: externalId, url: "u", state, fingerprint: "v1" });
   });
 
+describe("次にやることと Task の状態", () => {
+  const step = (status: "todo" | "done") => ({ id: "s1", kind: "manual" as const, title: "直す", effort: "easy" as const, mode: "serial" as const, status });
+
+  it.effect("次にやることがすべて済んだら、Task を完了にして、更新マークで知らせる", () =>
+    Effect.gen(function* () {
+      const tasks = yield* TaskRepository;
+      const task = yield* tasks.createTask({ title: "conflict を直す", status: "todo" });
+      yield* tasks.updateTask(task.id, { nextActions: { steps: [step("todo")] } });
+
+      const updated = yield* tasks.updateTask(task.id, { nextActions: { steps: [step("done")] } });
+
+      assert.strictEqual(updated.status, "done");
+      const last = (yield* tasks.listChanges(task.id)).at(-1);
+      assert.deepInclude(last, { field: "status", before: "todo", after: "done", actor: "agent" });
+      assert.isNull(last?.seenAt);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("ユーザーが済ませて完了になったときは、自分の操作として既読で記録する", () =>
+    Effect.gen(function* () {
+      const tasks = yield* TaskRepository;
+      const task = yield* tasks.createTask({ title: "a", status: "in_progress" });
+
+      yield* tasks.updateTask(task.id, { nextActions: { steps: [step("done")] } }, "user");
+
+      const last = (yield* tasks.listChanges(task.id)).at(-1);
+      assert.deepInclude(last, { field: "status", after: "done", actor: "user" });
+      assert.isNotNull(last?.seenAt);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("完了した Task の手順を戻して、まだの手順ができたら Todo に戻す", () =>
+    Effect.gen(function* () {
+      const tasks = yield* TaskRepository;
+      const task = yield* tasks.createTask({ title: "a", status: "done" });
+
+      assert.strictEqual((yield* tasks.updateTask(task.id, { nextActions: { steps: [step("todo")] } }, "user")).status, "todo");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("要確認・処理中・片付けた Task は、手順が済んでも動かさない（調査中の手順の差し替えなど）", () =>
+    Effect.gen(function* () {
+      const tasks = yield* TaskRepository;
+      for (const status of ["needs_review", "agent_running", "dismissed"] as const) {
+        const task = yield* tasks.createTask({ title: status, status });
+        assert.strictEqual((yield* tasks.updateTask(task.id, { nextActions: { steps: [step("done")] } })).status, status);
+      }
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
 describe("TaskRepository", () => {
   it.effect("Item に紐づけた Task を、その Item から取得できる", () =>
     Effect.gen(function* () {

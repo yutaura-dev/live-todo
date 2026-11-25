@@ -94,6 +94,11 @@ export type TaskDetail = {
   currentStepIds?: string[];
 };
 
+/** 処理中のレーンへの出入りは、調べ直すたびに起きる裏の動きなので履歴に出さない。値の変わらない変更も出さない */
+const isMeaningfulChange = (change: { kind: string; field: string | null; before: unknown; after: unknown }) =>
+  !(change.kind === "field_changed" && change.field === "status" && (change.before === "agent_running" || change.after === "agent_running")) &&
+  !(change.kind === "field_changed" && JSON.stringify(change.before) === JSON.stringify(change.after));
+
 export type Board = { columns: ReadonlyArray<{ id: BoardColumnId; title: string; cards: BoardCard[] }> };
 
 // 完了の列は増え続けるので、新しいものから一定数だけ出す
@@ -271,7 +276,7 @@ export class BoardService extends Context.Service<BoardService, {
           createdAt: task.createdAt,
           updatedAt: task.updatedAt,
           items: itemRows.map((row) => ({ ...row, judgment: toJudgment(row.judgment) })),
-          changes: changes.toReversed().map((change) => ({
+          changes: changes.toReversed().filter(isMeaningfulChange).map((change) => ({
             kind: change.kind,
             field: change.field,
             before: change.before,
@@ -307,7 +312,7 @@ export class BoardService extends Context.Service<BoardService, {
         if (Option.isNone(found)) return yield* new TaskNotFoundError({ taskId });
         const plan = decodePlan(found.value.nextActions);
         if (Option.isNone(plan)) return;
-        yield* tasks.updateTask(taskId, { nextActions: change(plan.value) });
+        yield* tasks.updateTask(taskId, { nextActions: change(plan.value) }, "user");
       });
 
       return BoardService.of({

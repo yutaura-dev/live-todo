@@ -186,7 +186,9 @@ const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
       const brief = briefOf(review);
       yield* taskRepository.updateTask(target.taskId, { brief, nextActions: planFromDependencyReview(review, finishedAt) });
       // 結論が出たことを更新マークで知らせる
-      yield* taskRepository.recordChange(target.taskId, { kind: "field_changed", field: "brief", before: current.brief, after: brief, unread: true, actor: "agent" });
+      if (current.brief !== brief) {
+        yield* taskRepository.recordChange(target.taskId, { kind: "field_changed", field: "brief", before: current.brief, after: brief, unread: true, actor: "agent" });
+      }
       yield* moveTask(target.taskId, "agent_running", "todo");
       return Option.some({ taskId: target.taskId, succeeded: true });
     }

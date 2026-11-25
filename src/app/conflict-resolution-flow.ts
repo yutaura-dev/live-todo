@@ -65,13 +65,13 @@ const moveTask = Effect.fnUntraced(function* (taskId: number, to: TaskStatus, ac
   yield* tasks.recordChange(taskId, { kind: "field_changed", field: "status", before: task.status, after: to, unread: false, actor });
 });
 
-const completeCurrent = Effect.fnUntraced(function* (taskId: number, kind: "resolve_conflicts" | "push_conflict_resolution") {
+const completeCurrent = Effect.fnUntraced(function* (taskId: number, kind: "resolve_conflicts" | "push_conflict_resolution", actor: "user" | "agent" = "agent") {
   const tasks = yield* TaskRepository;
   const task = Option.getOrThrow(yield* tasks.findTask(taskId));
   const plan = decodePlan(task.nextActions);
   if (Option.isNone(plan)) return;
   const step = currentSteps(plan.value).find((candidate) => candidate.kind === kind);
-  if (step !== undefined) yield* tasks.updateTask(taskId, { nextActions: completeStep(plan.value, step.id) });
+  if (step !== undefined) yield* tasks.updateTask(taskId, { nextActions: completeStep(plan.value, step.id) }, actor);
 });
 
 /** コンフリクトを直し始める。Task を処理中のレーンに移し、直すのは finishConflictResolution で裏で行う */
@@ -207,6 +207,6 @@ export const pushConflictResolution = Effect.fnUntraced(function* <E, R>(
     return yield* failure(pushed.failure.message);
   }
   yield* db.insert(approvals).values({ ...record, status: "executed", executedAt }).pipe(Effect.orDie);
-  yield* completeCurrent(taskId, "push_conflict_resolution");
+  yield* completeCurrent(taskId, "push_conflict_resolution", "user");
   yield* tasks.recordChange(taskId, { kind: "field_changed", field: "conflict", before: null, after: `直した内容を ${result.headRef} に push した`, unread: false, actor: "user" });
 });
