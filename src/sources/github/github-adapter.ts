@@ -12,16 +12,23 @@ export class GitHubResponseError extends Schema.TaggedError<GitHubResponseError>
   message: Schema.String,
 }) {}
 
+/** レート制限にかかった。resetAt（ISO 8601）まで、そのアカウントの同期を休む */
+export class GitHubRateLimitedError extends Schema.TaggedError<GitHubRateLimitedError>()("GitHubRateLimitedError", {
+  resetAt: Schema.String,
+}) {}
+
+export type GitHubClientError = GitHubRequestError | GitHubRateLimitedError;
+
 export class GitHubClient extends Context.Service<GitHubClient, {
-  listNotifications(params: { since: string; all: boolean }): Effect.Effect<unknown, GitHubRequestError>;
+  listNotifications(params: { since: string; all: boolean }): Effect.Effect<unknown, GitHubClientError>;
   /** 対象が削除された・見られなくなったときは Option.none を返す */
-  getSubject(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubRequestError>;
+  getSubject(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
   /** 自分が author の open な PR（Search API: is:pr is:open author:@me） */
-  readonly searchMyOpenPullRequests: Effect.Effect<unknown, GitHubRequestError>;
+  readonly searchMyOpenPullRequests: Effect.Effect<unknown, GitHubClientError>;
   /** 対象が削除された・見られなくなったときは Option.none を返す */
-  getPullRequest(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubRequestError>;
-  listCheckRuns(repository: string, sha: string): Effect.Effect<unknown, GitHubRequestError>;
-  listReviews(pullApiUrl: string): Effect.Effect<unknown, GitHubRequestError>;
+  getPullRequest(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
+  listCheckRuns(repository: string, sha: string): Effect.Effect<unknown, GitHubClientError>;
+  listReviews(pullApiUrl: string): Effect.Effect<unknown, GitHubClientError>;
 }>()("live-todo/sources/github/GitHubClient") {}
 
 const GitHubNotification = Schema.Struct({
@@ -68,7 +75,7 @@ export type GitHubAdapterOptions = {
   repositoryFilter?: RepositoryFilterConfig;
 };
 
-export type GitHubAdapterError = GitHubRequestError | GitHubResponseError;
+export type GitHubAdapterError = GitHubClientError | GitHubResponseError;
 
 const RULE_TODO_REASONS = new Set(["review_requested", "assign", "ci_activity"]);
 

@@ -71,6 +71,16 @@ WatchProvider（対象の一覧）× Condition（holds / clear / unknown）
 - アカウントごとに Source 名を分ける（`github:<id>`、見張りは `github:<id>:watch`）
 - アカウントが LLM Profile を省略したら `defaultLlmProfile` を使う。当面は PC 単位の 1 つで運用し、データ構造だけ先にアカウント単位にしてある（charter の前提と制約）
 
+## GitHub API の呼び出し
+
+`src/sources/github/github-client-live.ts`（`effect/http` の HttpClient）。
+
+- `Link` ヘッダーの next をたどって全ページを取る（1 回の取得で最大 10 ページ）
+- 404 / 410 は「ない」として `Option.none`。レート制限（403 / 429 で残り 0、または `retry-after`）は解除時刻つきの `GitHubRateLimitedError`。それ以外は `GitHubRequestError`
+- クライアントの中では待たず、再試行もしない。いつまで休むか・いつやり直すかは定期実行の側で決める（待ち時間は最大 1 時間あり、クライアントの中で待つとアカウントの同期全体が止まるため）
+- 応答に含まれる URL を取りに行くとき、宛先が `api.github.com` でなければトークンを付けずにエラーにする
+- エラーの `cause` に HttpClient のエラーを入れない（送ったリクエストの `authorization` ヘッダーがログに出るため）
+
 ## 技術スタック
 
 決定の経緯は [ADR-0002](decisions/0002-desktop-app-stack.md) と [ADR-0005](decisions/0005-adopt-effect.md) を参照。
