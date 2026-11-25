@@ -48,6 +48,16 @@ describe("backfillGitHubPullAuthors", () => {
       assert.strictEqual(yield* authorOf("github:personal", target), "renovate[bot]");
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("作成者が依存更新の bot になっている PR も GitHub で確かめ直し、違えば上書きする（判定の記録から埋めた値を信用しない）", () =>
+    Effect.gen(function* () {
+      const spoofed = yield* pull("github:personal", 1, { author: "renovate[bot]" });
+      const client = gitHubClientStub({ getPullRequest: () => Effect.succeed(Option.some({ user: { login: "mallory" } })) });
+
+      yield* backfillGitHubPullAuthors("personal", client);
+
+      assert.strictEqual(yield* authorOf("github:personal", spoofed), "mallory");
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("PR が見つからない・作成者が読めないときは空のままにして、ほかの PR は続ける", () =>
     Effect.gen(function* () {
       const missing = yield* pull("github:personal", 1);

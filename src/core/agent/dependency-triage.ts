@@ -101,7 +101,7 @@ export const runNextDependencyReview = (options: DependencyReviewOptions) =>
     yield* moveTask(target.taskId, target.status, "agent_running");
 
     const outcome = yield* Effect.gen(function* () {
-      const cwd = yield* workspace.prepare(target.repository, target.taskId);
+      const cwd = yield* workspace.prepare(target.repository, target.taskId, target.url);
       const [thread] = yield* db.select().from(agentThreads).where(eq(agentThreads.taskId, target.taskId)).pipe(Effect.orDie);
       const result = yield* claude.run({
         prompt: dependencyReviewPrompt({ url: target.url, repository: target.repository, title: target.title }),

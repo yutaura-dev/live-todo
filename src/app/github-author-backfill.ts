@@ -1,9 +1,10 @@
-import { and, eq, inArray, isNull, like } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, or } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
 import { Database } from "../core/db/database.js";
 import { sourceItems } from "../core/db/schema.js";
 import type { GitHubClient } from "../sources/github/github-adapter.js";
 import { githubSourceName } from "../sources/github/github-binding.js";
+import { DEPENDENCY_BOT_LOGINS } from "../core/agent/dependency-review.js";
 
 const PullAuthor = Schema.Struct({ user: Schema.NullOr(Schema.Struct({ login: Schema.String })) });
 const decodePullAuthor = Schema.decodeUnknownOption(PullAuthor);
@@ -25,7 +26,9 @@ export const backfillGitHubPullAuthors = Effect.fnUntraced(function* (accountId:
       and(
         inArray(sourceItems.source, [githubSourceName(accountId), `${githubSourceName(accountId)}:watch`]),
         eq(sourceItems.state, "open"),
-        isNull(sourceItems.author),
+        // bot になっている作成者も確かめ直す。一時期、判定の記録（PR の本文を含む信頼できない入力）から
+        // 作成者を埋めていたので、その値で自動の調査が動かないようにする
+        or(isNull(sourceItems.author), inArray(sourceItems.author, [...DEPENDENCY_BOT_LOGINS])),
         like(sourceItems.url, "%/pull/%"),
       ),
     )

@@ -1,5 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { pullRequestCommands, REVIEW_CONTEXT_DIR, truncateDiff } from "./pull-request-context.js";
 
 export class AgentWorkspaceError extends Schema.TaggedError<AgentWorkspaceError>()("AgentWorkspaceError", {
   message: Schema.String,
@@ -9,7 +10,8 @@ const RepositoryName = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** AI に調べさせる作業場所。リポジトリを Task ごとのフォルダに clone して渡す */
 export class AgentWorkspace extends Context.Service<AgentWorkspace, {
-  prepare(repository: string, taskId: number): Effect.Effect<string, AgentWorkspaceError>;
+  /** リポジトリを用意し、PR の情報を集めて作業場所に書き出す。作業場所のパスを返す */
+  prepare(repository: string, taskId: number, pullUrl: string): Effect.Effect<string, AgentWorkspaceError>;
 }>()("live-todo/core/agent/AgentWorkspace") {
   static readonly layer = (root: string) =>
     Layer.effect(
@@ -19,7 +21,7 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const fail = (message: string) => () => new AgentWorkspaceError({ message });
 
-        const prepare = Effect.fn("AgentWorkspace.prepare")(function* (repository: string, taskId: number) {
+        const prepare = Effect.fn("AgentWorkspace.prepare")(function* (repository: string, taskId: number, pullUrl: string) {
           // パスに使うので、owner/repo の形以外（.. など）は受け付けない
           if (!RepositoryName.test(repository) || repository.split("/").includes("..")) {
             return yield* new AgentWorkspaceError({ message: `リポジトリ名が不正: ${repository}` });
@@ -35,6 +37,16 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
           if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
             return yield* new AgentWorkspaceError({ message: `${repository} を取得できない（終了コード ${exitCode}）` });
           }
+
+          const commands = pullRequestCommands(pullUrl);
+          const view = yield* spawner.string(ChildProcess.make("gh", commands.view)).pipe(Effect.mapError(fail("PR の情報を取れない")));
+          const diff = yield* spawner.string(ChildProcess.make("gh", commands.diff)).pipe(Effect.mapError(fail("PR の差分を取れない")));
+          const contextDir = `${dir}/${REVIEW_CONTEXT_DIR}`;
+          yield* Effect.all([
+            fs.makeDirectory(contextDir, { recursive: true }),
+            fs.writeFileString(`${contextDir}/pr.json`, view),
+            fs.writeFileString(`${contextDir}/pr.diff`, truncateDiff(diff)),
+          ]).pipe(Effect.mapError(fail("PR の情報を書き出せない")));
           return dir;
         });
 

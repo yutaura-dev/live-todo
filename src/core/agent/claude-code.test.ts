@@ -27,6 +27,18 @@ describe("claudeArgs", () => {
     }
   });
 
+  it("リポジトリの設定（hooks など）と MCP を読み込まず、ファイルの読み取りを作業ディレクトリに閉じる", () => {
+    const args = claudeArgs(request);
+
+    assert.includeMembers(args, ["--restricted", "--strict-mcp-config"]);
+  });
+
+  it("使えるツールを、許可したツールの名前だけにする", () => {
+    const args = claudeArgs(request);
+
+    assert.deepStrictEqual(args.slice(args.indexOf("--tools") + 1, args.indexOf("--tools") + 3), ["Read", "Bash"]);
+  });
+
   it("プロンプトは引数に入れない（--allowedTools が後ろの引数をツール名として読むため、標準入力で渡す）", () => {
     assert.notInclude(claudeArgs(request), "調べて");
   });

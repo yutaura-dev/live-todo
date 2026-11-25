@@ -60,9 +60,18 @@ describe("dependencyReviewPrompt", () => {
   it("書き込みをしないよう伝える（ツールでも禁じているが、試みて止まるのを避ける）", () => {
     assert.include(prompt, "書き込み");
   });
+
+  it("アプリが集めておいた PR の情報（本文・CI・差分）を読むよう伝える", () => {
+    assert.include(prompt, ".live-todo-review/pr.json");
+    assert.include(prompt, ".live-todo-review/pr.diff");
+  });
 });
 
 describe("DEPENDENCY_REVIEW_TOOLS", () => {
+  it("ファイルの読み取りと検索だけを許す（Bash は読み取りだけのコマンドを確認なしで通すので、渡さない）", () => {
+    assert.deepStrictEqual([...DEPENDENCY_REVIEW_TOOLS], ["Read", "Grep", "Glob"]);
+  });
+
   it("読み取りだけを許す（ファイルの編集・任意のコマンド・GitHub API への送信は許さない）", () => {
     for (const tool of DEPENDENCY_REVIEW_TOOLS) {
       assert.notMatch(tool, /^(Edit|Write|NotebookEdit)$/);

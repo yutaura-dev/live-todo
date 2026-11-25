@@ -11,7 +11,6 @@ import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
-import { backfillAuthorsFromJudgments } from "../core/agent/backfill-authors.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { recoverInterruptedAgentRuns, runNextDependencyReview } from "../core/agent/dependency-triage.js";
 import { BoardService } from "../core/board/board-service.js";
@@ -109,7 +108,6 @@ const startSync = Effect.gen(function* () {
   const jobs = (yield* Effect.forEach(config.accounts, makeGitHubJobs)).flat();
   syncProblem = undefined;
 
-  yield* backfillAuthorsFromJudgments;
   const recovered = yield* recoverInterruptedAgentRuns;
   if (recovered > 0) yield* Effect.log(`途中で止まった AI の調査を ${recovered} 件戻した`);
   const reviewSources = config.accounts

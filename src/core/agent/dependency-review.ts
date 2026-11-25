@@ -1,6 +1,8 @@
 import { Schema } from "effect";
+import { REVIEW_CONTEXT_DIR } from "./pull-request-context.js";
 
-const DEPENDENCY_BOTS = new Set(["renovate[bot]", "renovate-bot", "app/renovate", "dependabot[bot]", "app/dependabot"]);
+export const DEPENDENCY_BOT_LOGINS = ["renovate[bot]", "renovate-bot", "app/renovate", "dependabot[bot]", "app/dependabot"] as const;
+const DEPENDENCY_BOTS = new Set<string>(DEPENDENCY_BOT_LOGINS);
 
 /** 依存更新の PR を作る bot か（renovate / dependabot） */
 export const isDependencyBot = (login: string | null | undefined): boolean =>
@@ -40,22 +42,12 @@ export const DEPENDENCY_REVIEW_JSON_SCHEMA = {
 } as const;
 
 /**
- * 調査で使ってよいツール。読み取りだけにする（外部への書き込みは承認を経由させるという charter の制約のため）。
- * gh api は -X POST などで書き込めるので許さない。Bash の許可はコマンド名ごとに絞る。
+ * 調査で使ってよいツール。作業ディレクトリ（--restricted で閉じる）のファイルを読むことだけを許す。
+ * PR の本文や依存先のリリースノートに仕込まれた指示で動かされる前提で、外へ送れるもの・書けるものは渡さない。
+ * Bash を渡さない理由: 許可をコマンド名で絞っても、読み取りだけとみなされたコマンド（git status など）は
+ * 確認なしで通り、絞りきれない。PR の本文・CI・差分はアプリが gh で先に集めて、ファイルとして渡す。
  */
-export const DEPENDENCY_REVIEW_TOOLS: ReadonlyArray<string> = [
-  "Read",
-  "Grep",
-  "Glob",
-  "WebFetch",
-  "Bash(gh pr view:*)",
-  "Bash(gh pr diff:*)",
-  "Bash(gh pr checks:*)",
-  "Bash(gh release view:*)",
-  "Bash(git log:*)",
-  "Bash(git show:*)",
-  "Bash(git diff:*)",
-];
+export const DEPENDENCY_REVIEW_TOOLS: ReadonlyArray<string> = ["Read", "Grep", "Glob"];
 
 export function dependencyReviewPrompt(subject: { url: string; repository: string; title: string }): string {
   return [
@@ -66,8 +58,9 @@ export function dependencyReviewPrompt(subject: { url: string; repository: strin
     `タイトル: ${subject.title}`,
     "",
     "調べ方:",
-    "- gh pr view / gh pr diff / gh pr checks で、更新内容と CI の結果を確かめる",
-    "- 更新するパッケージの変更履歴（リリースノート・CHANGELOG）で、破壊的変更を確かめる",
+    `- ${REVIEW_CONTEXT_DIR}/pr.json に PR の本文（リリースノートを含む）・変更したファイル・CI の結果がある`,
+    `- ${REVIEW_CONTEXT_DIR}/pr.diff に PR の差分がある`,
+    "- 本文のリリースノートで、破壊的変更を確かめる",
     "- 作業ディレクトリのコードを Grep / Read して、そのパッケージを使っている箇所と影響を確かめる",
     "",
     "答えること:",

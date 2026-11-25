@@ -24,6 +24,9 @@ export type ClaudeResult = { sessionId: string; structured: unknown; costUsd: nu
  * claude -p に渡す引数。外部への書き込みを承認なしにさせない（charter）ため、
  * 許可したツール以外は確認を出さずに拒否させ、権限の確認を飛ばすオプションは決して付けない。
  */
+/** "Bash(gh pr view:*)" のような許可の書き方から、ツールの名前（Bash）だけを取り出す */
+const toolNamesOf = (allowedTools: ReadonlyArray<string>) => [...new Set(allowedTools.map((tool) => tool.replace(/\(.*$/, "")))];
+
 export function claudeArgs(request: ClaudeRequest): string[] {
   return [
     "-p",
@@ -33,6 +36,12 @@ export function claudeArgs(request: ClaudeRequest): string[] {
     JSON.stringify(request.jsonSchema),
     "--permission-prompts",
     "none",
+    // 作業ディレクトリは clone したリポジトリなので、その中の設定（.claude の hooks や .mcp.json）を読ませない。
+    // --restricted は設定ファイルを読まず、ファイルの読み取りを作業ディレクトリに閉じ、--tools に挙げないツールを外す
+    "--restricted",
+    "--strict-mcp-config",
+    "--tools",
+    ...toolNamesOf(request.allowedTools),
     ...(request.resumeSessionId === undefined ? [] : ["--resume", request.resumeSessionId]),
     ...(request.model === undefined ? [] : ["--model", request.model]),
     ...(request.maxBudgetUsd === undefined ? [] : ["--max-budget-usd", String(request.maxBudgetUsd)]),
