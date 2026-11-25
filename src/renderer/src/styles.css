@@ -752,7 +752,7 @@ button:disabled {
   inset-inline-end: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  inline-size: min(440px, 92vw);
+  inline-size: min(680px, 92vw);
   background: var(--card);
   border-inline-start: 1px solid var(--card-edge);
   box-shadow: -16px 0 40px rgb(0 0 0 / 0.5);
@@ -782,10 +782,12 @@ button:disabled {
 
 .drawer-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-content: start;
   padding: 16px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .drawer-title {
@@ -1003,10 +1005,12 @@ button:disabled {
   font-size: 11px;
 }
 
+/* ドロワーを横にスクロールさせないため、長い行は折り返す */
 .markdown pre {
   margin: 8px 0;
   padding: 8px 10px;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   background: var(--field);
   border-radius: 4px;
 }
@@ -1017,6 +1021,8 @@ button:disabled {
 }
 
 .markdown table {
+  inline-size: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   margin: 8px 0;
   font-size: 11px;
@@ -1027,6 +1033,7 @@ button:disabled {
   padding: 3px 8px;
   border: 1px solid var(--rule);
   text-align: start;
+  overflow-wrap: anywhere;
 }
 
 .markdown a {
