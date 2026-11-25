@@ -47,6 +47,8 @@ export type GitHubTokenSummary = {
   expiryWarning?: { daysLeft: number };
 };
 
+export type RepositoryChoiceList = { owners: string[]; repositories: string[]; truncated: boolean };
+
 export type Outcome = { ok: true; detail?: string } | { ok: false; message: string };
 
 export type FilterPreviewRequest = {
@@ -66,4 +68,6 @@ export interface LiveTodoApi {
   setSecret(key: string, value: string): Promise<Outcome>;
   removeSecret(key: string): Promise<Outcome>;
   previewFilter(request: FilterPreviewRequest): Promise<AccountFilterPreview | { error: string }>;
+  /** トークンで見られるリポジトリ。フィルタを一覧から選べるようにするため */
+  listRepositories(accountId: string): Promise<RepositoryChoiceList | { error: string }>;
 }

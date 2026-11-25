@@ -62,6 +62,11 @@ export const mockApi: LiveTodoApi = {
     return { ok: true };
   },
   setSecret: async () => ({ ok: true }),
+  listRepositories: async () => ({
+    owners: ["acme", "me"],
+    repositories: ["acme/app", "acme/legacy", "acme/web", "me/dotfiles"],
+    truncated: false,
+  }),
   removeSecret: async () => ({ ok: true }),
   previewFilter: async (request) => ({
     included: [
