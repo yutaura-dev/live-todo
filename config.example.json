@@ -2,7 +2,11 @@
   "llmProfiles": {
     "work": {
       "provider": "openai",
-      "model": "gpt-5.2"
+      "model": "gpt-5.2",
+      "decisions": {
+        "provider": "openai",
+        "model": "gpt-6-luna"
+      }
     },
     "personal": {
       "provider": "anthropic",

@@ -95,7 +95,11 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 - 評価対象（通知のタイトルなど）は外部から来たデータなので、プロンプトでは区切りの中に入れ、指示として従わないよう明示する
 - `src/app/llm.ts`（`makeStructuredClassifier`）: LLM Profile から classifier を作る。対応済みは `none`（LLM を使わない）・`anthropic`・`openai`。API キーは `SecretStore` の `llm.<provider>.api_key`
 - classifier は**アカウントごと**に作り、そのアカウントのジョブにだけ渡す（会社のデータを許可外の LLM に送らないため）
-- Effect の `effect/ai` には provider に依存しない `DecisionModel`（Probability / Classify / Rate）があり、`@effect/ai-openai` に `OpenAiDecisionModel` がある。Decisions provider はこれで実装する予定
+- **Decisions provider**（`src/core/judge/decision-model-provider.ts`）: `effect/ai` の `DecisionModel` で確率付きの todo 判定（Probability）をする。LLM Profile に `decisions` があるアカウントだけ使い、ないアカウントは structured output で判定する（ADR-0003）
+  - 評価対象（外部から来た文字列）は判定の input、質問と信頼できる情報は instructions に入れる
+  - `decideSettled` で答えが返らなかったもの（拒否・欠落・不正）は refusal として要確認に回す
+  - 対応済みは OpenAI（`gpt-6-luna`）。Jev・Gemini Decisions は `DecisionModel.make` で足す
+  - ラベル・優先度・カスタムラベル（Classify / Rate）は、Task に保存する項目を作るときに同じ `decide` にまとめる
 
 ## 定期実行
 

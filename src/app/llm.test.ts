@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { EnvSecretStore, MissingSecretError } from "../core/config/secret-store.js";
-import { makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
+import { Option } from "effect";
+import { makeDecisionsProvider, makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
 
 const withEnv = (env: Record<string, string>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -65,3 +66,51 @@ describe("makeStructuredClassifier", () => {
     }).pipe(withEnv({})));
 });
 
+
+describe("makeDecisionsProvider", () => {
+  it.effect("LLM Profile に decisions がなければ none（structured output で判定する）", () =>
+    Effect.gen(function* () {
+      const provider = yield* makeDecisionsProvider({ provider: "anthropic", model: "claude-haiku-5-5" });
+
+      assert.isTrue(Option.isNone(provider));
+    }).pipe(withEnv({})));
+
+  it.effect("OpenAI の Decisions を使うのに API キーがなければ、どのキーがないかを示すエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(makeDecisionsProvider({ provider: "none", model: "-", decisions: { provider: "openai" } }));
+
+      assert.instanceOf(error, MissingSecretError);
+      assert.strictEqual(error.key, "llm.openai.api_key");
+    }).pipe(withEnv({})));
+
+  it.effect("OpenAI の Decisions を、既定のモデル gpt-6-luna で呼ぶ", () => {
+    const requests: { path: string; body: unknown }[] = [];
+    const http = HttpClient.make((request, url) => {
+      requests.push({
+        path: url.pathname,
+        body: request.body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(request.body.body)) : undefined,
+      });
+      return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}", { status: 500 })));
+    });
+    return Effect.gen(function* () {
+      const provider = yield* makeDecisionsProvider({ provider: "none", model: "-", decisions: { provider: "openai" } });
+
+      yield* Effect.exit(Option.getOrThrow(provider).judgePredicate({ input: "x", question: "q" }));
+
+      assert.match(requests[0]?.path ?? "", /decisions$/);
+      assert.deepInclude(requests[0]?.body, { model: "gpt-6-luna" });
+    }).pipe(
+      Effect.provide(EnvSecretStore),
+      Effect.provideService(HttpClient.HttpClient, http),
+      Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: { LIVE_TODO_SECRET_LLM_OPENAI_API_KEY: "sk-test" } })),
+    );
+  });
+
+  it.effect("まだ対応していない Decisions provider は、起動時にエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(makeDecisionsProvider({ provider: "none", model: "-", decisions: { provider: "jev" } }));
+
+      assert.instanceOf(error, UnsupportedLlmProviderError);
+      assert.strictEqual(error.provider, "jev");
+    }).pipe(withEnv({})));
+});

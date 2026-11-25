@@ -7,8 +7,8 @@ import { type GitHubAdapterError, GitHubClient } from "../sources/github/github-
 import { makeGitHubBinding } from "../sources/github/github-binding.js";
 import { GitHubClientLive } from "../sources/github/github-client-live.js";
 import { makeGitHubPullRequestWatchProvider, pullRequestConditions } from "../sources/github/github-watch.js";
-import { type JudgeRequestError, StructuredClassifier } from "../core/judge/todo-judge.js";
-import { makeStructuredClassifier } from "./llm.js";
+import { DecisionsProvider, type JudgeRequestError, StructuredClassifier } from "../core/judge/todo-judge.js";
+import { makeDecisionsProvider, makeStructuredClassifier } from "./llm.js";
 import type { ResolvedAccount } from "./config/app-config.js";
 
 export const NOTIFICATION_SYNC_INTERVAL = "1 minute";
@@ -44,9 +44,14 @@ export const makeGitHubJobs = Effect.fnUntraced(function* (account: ResolvedAcco
   // classifier をアカウントごとに作ってそのジョブにだけ渡す理由: 会社のデータは会社が許可した LLM にだけ
   // 送るという charter の制約を、組み立ての段階で守らせるため（外から 1 つ渡すと全アカウントで共有される）。
   const classifier = yield* makeStructuredClassifier(account.resolvedLlmProfile);
+  const decisions = yield* makeDecisionsProvider(account.resolvedLlmProfile);
+  const withJudges = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
+    const withClassifier = effect.pipe(Effect.provideService(StructuredClassifier, classifier));
+    return Option.isSome(decisions) ? withClassifier.pipe(Effect.provideService(DecisionsProvider, decisions.value)) : withClassifier;
+  };
 
   return [
-    { name: notifications.source, interval: NOTIFICATION_SYNC_INTERVAL, run: syncSource(notifications).pipe(Effect.provideService(StructuredClassifier, classifier)), backoffUntil: githubBackoffUntil },
+    { name: notifications.source, interval: NOTIFICATION_SYNC_INTERVAL, run: withJudges(syncSource(notifications)), backoffUntil: githubBackoffUntil },
     { name: watch.source, interval: WATCH_SYNC_INTERVAL, run: syncSource(watch), backoffUntil: githubBackoffUntil },
   ] satisfies ReadonlyArray<SyncJob<GitHubJobError, unknown>>;
 });

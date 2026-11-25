@@ -1,10 +1,11 @@
 import { AnthropicClient, AnthropicLanguageModel } from "@effect/ai-anthropic";
-import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai";
-import { Effect, Layer, Schema } from "effect";
+import { OpenAiClient, OpenAiDecisionModel, OpenAiLanguageModel } from "@effect/ai-openai";
+import { Effect, Layer, Option, Schema } from "effect";
 import { SecretStore } from "../core/config/secret-store.js";
 import { ConservativeClassifier } from "../core/judge/conservative-classifier.js";
 import { LlmStructuredClassifier } from "../core/judge/llm-classifier.js";
-import { StructuredClassifier } from "../core/judge/todo-judge.js";
+import { DecisionModelDecisionsProvider } from "../core/judge/decision-model-provider.js";
+import { DecisionsProvider, StructuredClassifier } from "../core/judge/todo-judge.js";
 import type { LlmProfile } from "./config/app-config.js";
 
 // 判定は verdict と 1 文の理由だけなので、出力トークンに上限を付けて料金の上振れを防ぐ。
@@ -52,5 +53,35 @@ export const makeStructuredClassifier = Effect.fnUntraced(function* (profile: Ll
     default:
       // Gemini（@effect/ai-google が v4 に未対応）・Azure OpenAI・Bedrock は、使うときに足す
       return yield* new UnsupportedLlmProviderError({ provider: profile.provider });
+  }
+});
+
+const DEFAULT_OPENAI_DECISIONS_MODEL = "gpt-6-luna";
+
+/**
+ * LLM Profile の decisions から DecisionsProvider を作る。decisions がなければ none で、TodoJudge は structured output に落とす。
+ * アカウントごとに呼び、そのアカウントのジョブにだけ渡す。
+ */
+export const makeDecisionsProvider = Effect.fnUntraced(function* (profile: LlmProfile) {
+  if (profile.decisions === undefined) return Option.none<DecisionsProvider["Service"]>();
+  const secrets = yield* SecretStore;
+  switch (profile.decisions.provider) {
+    case "openai": {
+      const apiKey = yield* secrets.require("llm.openai.api_key");
+      const provider = yield* Effect.gen(function* () {
+        return yield* DecisionsProvider;
+      }).pipe(
+        Effect.provide(
+          DecisionModelDecisionsProvider.pipe(
+            Layer.provide(OpenAiDecisionModel.layer({ model: profile.decisions.model ?? DEFAULT_OPENAI_DECISIONS_MODEL })),
+            Layer.provide(OpenAiClient.layer({ apiKey })),
+          ),
+        ),
+      );
+      return Option.some(provider);
+    }
+    default:
+      // Jev・Gemini Decisions は effect/ai の provider がないので、使うときに DecisionModel.make で足す
+      return yield* new UnsupportedLlmProviderError({ provider: profile.decisions.provider });
   }
 });
