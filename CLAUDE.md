@@ -36,11 +36,12 @@
 ## 触れてほしくない領域
 
 - `.env.local` — API キー・トークンの置き場所。読まない、出力しない
-- ローカル DB ファイル（場所は技術スタック確定後に追記）— 実データが入っているため直接編集しない
+- ローカル DB ファイル（場所は実装時に追記）— 実データが入っているため直接編集しない
 
 ## 開発環境
 
 - **ツールを追加するとき**: `flake.nix` の `devShells.default` の `packages` へ追加する。グローバルインストールはしない
+- **npm 依存を追加するとき**: `pnpm add` を使う。pnpm の設定は `pnpm-workspace.yaml` に書き、`.npmrc` や `package.json` の `"pnpm"` フィールドには書かない。`ERR_PNPM_IGNORED_BUILDS` が出たら、ビルドが本当に必要か判断してから `pnpm approve-builds <pkg>` する
 - **環境変数を増やすとき**: `.env.example` にキーと説明だけを追記する（非秘匿値は `.env`、秘匿値は `.env.local`）
 - **worktree で足りないファイルがあるとき**: `.worktreeinclude` に追記する
 
@@ -54,4 +55,4 @@ TBD（次回更新時に決定）
 
 - データはローカル保存、推論は外部の LLM API（プロバイダは切り替え可能）
 - Source ごとの差異は Source Adapter で吸収し、Task 側は Source に依存しない
-- 技術スタックは未確定。候補は [docs/architecture.md](docs/architecture.md) にある
+- macOS 向けの Electron + TypeScript。Sync・Adapter・Agent・秘匿情報は main プロセスに置き、renderer には API キーもトークンも渡さない（[ADR-0002](docs/decisions/0002-desktop-app-stack.md)）

@@ -15,7 +15,7 @@ live-todo は各ツールから自分の todo を自動で集め、ラベルと�
 ```sh
 direnv allow          # nix devShell と .env を有効化（初回のみ）
 cp .env.example .env  # 自分の環境の値を記入（秘匿値は .env.local へ）
-# セットアップコマンドは技術スタック確定後に追記（TBD）
+pnpm install          # pnpm は corepack が packageManager の版で起動する
 ```
 
 > 依存は nix flake で固定されている。詳細は [docs/architecture.md](docs/architecture.md) を参照。

@@ -1,6 +1,6 @@
 > **Stability**: 🌀 evolving
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: なし（初版）
+> **直近の変更 ADR**: [ADR-0002](decisions/0002-desktop-app-stack.md)
 
 # Plan — live-todo
 
@@ -10,7 +10,7 @@
 
 **Phase 0: 立ち上げ**
 
-charter・計画の整備と、技術スタックの決定。
+charter・計画の整備と技術スタックの決定は完了（[ADR-0002](decisions/0002-desktop-app-stack.md)）。残りは Source Adapter の共通インターフェースの初版。
 
 ## MVP 定義
 
@@ -30,7 +30,7 @@ charter・計画の整備と、技術スタックの決定。
 **目標**: 技術スタックを決めて、開発を始められる状態にする
 
 **完了条件 (Definition of Done)**:
-- [ ] GUI の形態（デスクトップアプリかブラウザ UI か）と主要な技術スタックを ADR で決定する
+- [x] GUI の形態と主要な技術スタックを ADR で決定する（[ADR-0002](decisions/0002-desktop-app-stack.md)）
 - [ ] Source Adapter の共通インターフェースの初版を決める
 
 ### Phase 1 (MVP): 自動収集とカンバン
@@ -71,7 +71,7 @@ charter・計画の整備と、技術スタックの決定。
 
 | マイルストーン | 内容 | 状態 |
 |----------------|------|------|
-| M0 | 技術スタック決定（ADR） | ⬜ 未着手 |
+| M0 | 技術スタック決定（ADR） | ✅ 完了 |
 | M1 | GitHub Adapter + カンバン表示 | ⬜ 未着手 |
 | M2 | Slack・Gmail Adapter + 自動更新 | ⬜ 未着手 |
 | M3 | MVP で 2 週間運用 | ⬜ 未着手 |

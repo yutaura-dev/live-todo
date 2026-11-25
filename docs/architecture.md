@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
 > **最終更新**: 2026-11-25
-> **直近の変更 ADR**: なし（初版）
+> **直近の変更 ADR**: [ADR-0002](decisions/0002-desktop-app-stack.md)
 
 # Architecture — live-todo
 
@@ -8,7 +8,7 @@
 
 ## 全体構成
 
-ローカルで動く GUI アプリ。アプリ内でポーリングして Source から取得し、ローカル DB に保存する。推論だけを外部の LLM API に投げる。
+macOS 向けの Electron アプリ。main プロセスがポーリングして Source から取得し、ローカル DB に保存する。推論だけを外部の LLM API に投げる。renderer は UI だけを担い、トークンや API キーには触れない。
 
 ```
 [Slack] [Gmail] [GitHub] [Calendar] [Docs] [Notion] [Outlook] [Teams]
@@ -26,34 +26,48 @@
 
 ## 技術スタック
 
-**未確定**。Phase 0 で ADR を書いて決める。下の表は候補であり、決定ではない。
+決定の経緯は [ADR-0002](decisions/0002-desktop-app-stack.md) を参照。
 
-| 領域 | 候補 | 備考 |
-|------|------|------|
-| GUI 形態 | デスクトップアプリ（Tauri など）/ ローカル Web サーバー + ブラウザ | ローカル完結・常駐ポーリングならデスクトップアプリが自然 |
-| 言語 | TypeScript（+ Tauri なら Rust） | TBD |
-| データストア | SQLite | ローカル完結のため |
-| LLM 抽象 | Vercel AI SDK / LiteLLM など | 複数プロバイダと tool calling の差分を吸収できるもの |
-| 秘匿情報の保存 | OS のキーチェーン | トークンを平文の設定ファイルに置かないため。TBD |
+| 領域 | 採用技術 | 採用理由 / 関連 ADR |
+|------|----------|---------------------|
+| アプリ基盤 | Electron（macOS のみ） | 常駐・キーチェーン・Node SDK をまとめて満たす。[ADR-0002](decisions/0002-desktop-app-stack.md) |
+| 言語 | TypeScript | main と renderer を 1 言語にそろえる |
+| UI | React + Vite | |
+| カンバン | dnd-kit | |
+| データストア | SQLite（better-sqlite3）+ Drizzle ORM | ローカル完結。マイグレーションを型付きで管理する |
+| LLM 抽象 | Vercel AI SDK | 複数プロバイダと tool calling を共通 API で扱える |
+| 秘匿情報 | Electron `safeStorage`（macOS Keychain） | トークンを平文の設定ファイルに置かない |
+| テスト | Vitest（UI の E2E は必要に応じて Playwright） | |
+| パッケージ管理 | pnpm 12（`packageManager` で固定、corepack で起動） | |
 | 開発環境 | nix flake + direnv | 版を `flake.lock` で固定し、手元・CI・worktree を揃える |
+
+### プロセス構成
+
+| プロセス | 担当 |
+|----------|------|
+| main | Sync（ポーリング）、Source Adapter、AI Agent、LLM 呼び出し、Approval、DB、秘匿情報 |
+| renderer | カンバン UI、Agent Thread の表示、承認ダイアログ。IPC で main に依頼するだけ |
 
 ## 開発環境
 
 | ファイル | 役割 |
 |----------|------|
 | `flake.nix` / `flake.lock` | 言語ランタイム・CLI ツールの固定。追加は `devShells.default` の `packages` へ |
+| `package.json` / `pnpm-lock.yaml` | npm 依存と pnpm の版（`packageManager`）の固定 |
+| `pnpm-workspace.yaml` | pnpm の設定（供給網対策など） |
 | `.envrc` | `use flake` で devShell を有効化し、`dotenv_if_exists` で `.env` / `.env.local` を読み込む |
 | `.env` | 非秘匿の環境差分。gitignore |
 | `.env.local` | 秘匿値（API キー・トークン）。gitignore |
 | `.env.example` | 上の 2 つの雛形。キーと説明だけを書く |
 | `.worktreeinclude` | worktree 作成時にコピーする gitignore 対象ファイルの一覧 |
 
-devShell には現時点で Node.js と pnpm だけを入れている。技術スタックが決まったら追加する。
+devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs の版を使わず、corepack が `packageManager` の版（12.23.0）を取得して起動する。nixpkgs の pnpm は版が遅れており、新しい設定キーを含む `pnpm-workspace.yaml` を読めないため。
 
 ## 主要な設計判断
 
 - [ADR-0001: アーキテクチャ判断記録方式の採用](decisions/0001-record-architecture-decisions.md)
-- 設計の方針（ADR 化は技術スタック決定時に行う）
+- [ADR-0002: アプリ基盤に Electron + TypeScript を採用する](decisions/0002-desktop-app-stack.md)
+- 設計の方針
   - Source ごとの差異は Source Adapter に閉じ込め、Task・UI は Source に依存させない
   - 外部への書き込みは Approval を必ず通す。Adapter の書き込みメソッドは、承認済みの操作しか受け付けない形にする
   - 設定は最初から `Account → LLM Profile` の構造で持ち、当面は PC 単位の既定値だけを使う（Phase 4 で作り直しにならないように）
@@ -85,4 +99,4 @@ TBD（次回更新時に決定）。少なくとも、Source ごとの最終同�
 
 ## デプロイ
 
-自分の PC にインストールして使う。配布形式は技術スタックの決定に合わせて決める（TBD）。
+自分の macOS にインストールして使う。パッケージング手段（electron-builder など）は TBD（次回更新時に決定）。

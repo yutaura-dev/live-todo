@@ -1,0 +1,12 @@
+# --- 供給網対策 ---
+minimumReleaseAge: 1440        # 公開から 24 時間経っていない版は入れない（分単位）
+trustPolicy: no-downgrade      # 過去版より信頼性（trusted publisher / provenance）が下がった版を拒否
+blockExoticSubdeps: true       # 推移的依存の git / tarball URL を拒否
+strictDepBuilds: true          # 未承認のビルドスクリプトがあれば install を失敗させる
+allowBuilds: {}                # ビルドを許可するパッケージ。pnpm approve-builds で追記される
+
+# --- 依存の衛生 ---
+autoDedupe: true               # 全範囲を満たす版が 1 つあれば全体でそれに揃える
+saveTypes: true                # pnpm add 時に @types/* を devDependencies へ自動追加
+lockfile:
+  includeResolutionSettings: true  # autoDedupe 等を lockfile に記録し、他マシンでも再解決させない
