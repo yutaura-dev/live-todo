@@ -151,14 +151,11 @@ export interface LiveTodoApi {
   merge(taskId: number, approved: { method: MergeMethod; sha: string }): Promise<Outcome>;
   /** AI にもう一度調べてもらう（調査待ちに入れ直す） */
   requestReview(taskId: number): Promise<Outcome>;
-  /** 次にやることの手順を済ませる */
   completeStep(taskId: number, stepId: string): Promise<Outcome>;
-  /** 次にやることの分かれ道を選ぶ */
   chooseOption(taskId: number, stepId: string, optionKey: string): Promise<Outcome>;
   /** 済んだにした手順・選んだ分かれ道を戻す */
   reopenStep(taskId: number, stepId: string): Promise<Outcome>;
-  /** 次にやることを考え直させる。済んだ手順は残し、残りだけを AI が考える */
-  /** 次にやることを考え直す。request はユーザーの希望（こうしたい）で、あればそれに合わせて書き換える */
+  /** 次にやることを考え直させる。済んだ手順は残し、残りだけを AI が考える。request はユーザーの希望で、あればそれに合わせる */
   replanNextActions(taskId: number, request?: string): Promise<Outcome>;
   /** Claude Code に PR を修正させる（コマンドも使うが、push はしない）。裏で進み、Task は処理中のレーンに移る */
   fixPullRequest(taskId: number): Promise<Outcome>;
@@ -170,7 +167,6 @@ export interface LiveTodoApi {
   conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;
   /** 直した内容を PR のブランチに push する。外部への書き込み。差分を確かめて承認したあとにだけ呼ぶ */
   pushConflictResolution(taskId: number, commitSha: string): Promise<Outcome>;
-  /** Task を手で追加する */
   addTask(input: { title: string; brief?: string }): Promise<Outcome>;
   recurringList(): Promise<RecurringTaskView[]>;
   recurringGhosts(): Promise<RecurringGhost[]>;

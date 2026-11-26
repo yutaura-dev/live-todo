@@ -261,7 +261,6 @@ describe("GitHubClientLive", () => {
 
       assert.deepStrictEqual(result, { urls: ["https://github.com/acme/app/pull/9"] });
       assert.strictEqual(requests[0]?.url.pathname, "/search/issues");
-      // 本文まで探すと、待っている PR の話をしている別の PR（Task 自身が追う PR など）にも当たるため、タイトルだけを探す
       assert.strictEqual(requests[0]?.url.searchParams.get("q"), "repo:acme/app is:pr is:open in:title @changesets/cli v3");
     }));
 

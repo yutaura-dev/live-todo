@@ -207,7 +207,7 @@ export const gmailRunStep = Effect.fnUntraced(function* <E, R>(
     return yield* new GmailWriteError({ message: `${done.length} 通に行ったところで止めた: ${failure}` });
   }
   yield* db.insert(approvals).values({ ...record, status: "executed" }).pipe(Effect.orDie);
-  // 手順を済みにする（すべて済めば Task は完了になる）
+  // すべての手順が済めば Task は完了になる
   yield* tasks.updateTask(taskId, { nextActions: completeStep(Option.getOrThrow(plan), stepId) }, "user");
   if (actions.archive === true && (yield* candidates(group)).every((row) => !row.inInbox)) yield* applyItemState(group.source, group.externalId, "resolved");
   return { processed: done.length };

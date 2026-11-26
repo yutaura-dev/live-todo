@@ -42,7 +42,6 @@ export type ActionStep = StepBase & {
   gmail?: GmailStepActions;
   /** 手作業の手順を誰がやるか。なければ人 */
   actor?: StepActor;
-  /** Claude Code に手順をやらせた結果 */
   run?: StepRun;
 };
 /** human: 人がやる / claude_auto: Claude Code が自動でやる / claude_on_request: ボタンを押したら Claude Code がやる */
@@ -298,7 +297,6 @@ export function stepLinkOf(plan: NextActionPlan, stepId: string): StepLink | und
   return find(plan.steps);
 }
 
-/** AI が考えた手順の並びを、手順の並びに変える。id は位置から決める。now はレビューを待ち始めた時刻 */
 /**
  * 開く先がなく、手順の文に https の URL が書いてあれば、それを開く先にして文から外す。
  * プロンプトで「URL は link に入れる」と伝えても文に書くことが多く（plan:eval）、そのままではボタンにならないため
@@ -325,6 +323,7 @@ function withLinkFromTitle<T extends { title: string; link?: { url: string; labe
   return { ...step, title: title === "" ? step.title : title, link: { url: found, label: host === "github.com" ? "GitHub" : host, unverified: true as const } };
 }
 
+/** AI が考えた手順の並びを、手順の並びに変える。id は位置から決める。now はレビューを待ち始めた時刻 */
 export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>, now?: string): NextActionPlan {
   const steps = proposed.map((original, index): Step => {
     const step = withLinkFromTitle(original);

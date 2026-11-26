@@ -133,9 +133,7 @@ export class BoardService extends Context.Service<BoardService, {
   moveTask(taskId: number, status: TaskStatus): Effect.Effect<void, TaskNotFoundError>;
   markSeen(taskId: number): Effect.Effect<void>;
   taskDetail(taskId: number): Effect.Effect<TaskDetail, TaskNotFoundError>;
-  /** 次にやることの手順を済ませる */
   completeStep(taskId: number, stepId: string): Effect.Effect<void, TaskNotFoundError>;
-  /** 次にやることの分かれ道を選ぶ */
   chooseOption(taskId: number, stepId: string, optionKey: string): Effect.Effect<void, TaskNotFoundError>;
   /** 済んだにした手順・選んだ分かれ道を戻す（押し間違えたとき） */
   reopenStep(taskId: number, stepId: string): Effect.Effect<void, TaskNotFoundError>;

@@ -120,7 +120,6 @@ export const NEXT_ACTION_PLAN_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** AI が返した手順を、手順の並びに変える */
 export const planFromProposal = (proposal: Pick<ProposedPlan, "steps">, now?: string): NextActionPlan => planFromProposedSteps(proposal.steps, now);
 
 export function nextActionPrompt(subject: { title: string; contextDir: string; repository?: string | undefined; replanning?: boolean; request?: string | undefined }): string {

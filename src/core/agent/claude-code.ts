@@ -39,13 +39,13 @@ export type ClaudeRequest = {
 
 export type ClaudeResult = { sessionId: string; structured: unknown; costUsd: number | undefined; permissionDenials: number };
 
+/** "Bash(gh pr view:*)" のような許可の書き方から、ツールの名前（Bash）だけを取り出す */
+const toolNamesOf = (allowedTools: ReadonlyArray<string>) => [...new Set(allowedTools.map((tool) => tool.replace(/\(.*$/, "")))];
+
 /**
  * claude -p に渡す引数。外部への書き込みを承認なしにさせない（charter）ため、
  * 許可したツール以外は確認を出さずに拒否させ、権限の確認を飛ばすオプションは決して付けない。
  */
-/** "Bash(gh pr view:*)" のような許可の書き方から、ツールの名前（Bash）だけを取り出す */
-const toolNamesOf = (allowedTools: ReadonlyArray<string>) => [...new Set(allowedTools.map((tool) => tool.replace(/\(.*$/, "")))];
-
 export function claudeArgs(request: ClaudeRequest): string[] {
   return [
     "-p",

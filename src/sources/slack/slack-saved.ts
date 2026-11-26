@@ -11,7 +11,7 @@ export type SlackSavedItem = {
   channel: string;
   ts: string;
   todoState: "saved" | "to_do" | "completed";
-  /** 期限（Unix 秒）。なければ undefined */
+  /** 期限（Unix 秒） */
   dueAt: number | undefined;
   title: string;
   url: string;

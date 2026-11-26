@@ -46,9 +46,8 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
         ),
       );
 
-      // トークンごとに 1 本のキューで順番に送る理由: GitHub は同じユーザーからのリクエストを並行ではなく
-      // 順番に送ることを推奨しており、並行に送ると短時間の集中に対する制限（secondary rate limit）にかかりやすい。
-      // 上限はトークン単位で数えられるので、通知の同期と見張りの同期もこのキューを共有する。
+      // トークンごとに 1 本のキューで順番に送る理由: GitHub は並行に送ると secondary rate limit にかかりやすく、
+      // 上限はトークン単位なので、通知の同期と見張りの同期もこのキューを共有する。
       const queue = yield* Semaphore.make(1);
       // レート制限を受けたら解除時刻を覚え、それまではキューに並んでいるリクエストも送らずに失敗させる。
       // 送り続けると同じ 403 がまとめて返り、secondary rate limit の最中なら制限が延びることもあるため。

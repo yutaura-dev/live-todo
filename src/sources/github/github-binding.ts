@@ -35,9 +35,8 @@ export function githubItemDraft(item: GitHubItem): ItemDraft {
     // CI の通知など状態を取れない（unknown）ものは open として扱う。解決の合図が取れないため、
     // 自動では done にならず、ユーザーが閉じる前提になる。
     state: item.state === "merged" || item.state === "closed" ? "resolved" : "open",
-    // updated_at を含める理由: 新しいコメントやレビューなどの動きを Activity（changed）として残し、
-    // あとで Task の brief を書き直す材料にするため。更新マークは Task の項目が変わったときだけ付くので、
-    // ここに含めても目印が増えることはない（ADR-0007）。
+    // updated_at を含める理由: コメントやレビューの動きを Activity（changed）として残し、brief を書き直す材料にするため。
+    // 更新マークは Task の項目の変化にだけ付くので、目印は増えない（ADR-0007）。
     fingerprint: JSON.stringify([item.title, item.state, item.updatedAt]),
     ...(item.author === undefined ? {} : { author: item.author }),
   };
@@ -76,9 +75,8 @@ function describeGitHubItem(item: GitHubItem, context: Context): JudgeInput {
 
 /**
  * 自分のアカウントで作った PR なら、本人が merge まで進める PR だと信頼できる情報に書き足す。
- * 足す理由: 理由が author の通知（自分の PR への bot のコメントなど）は、作成者が自分だと分かっても対応が要るかを決めきれず、
- * judge:eval で 6 件中 5 件が要確認になっていた（実際にはどれもユーザーが片付けた）。保存してある判定の入力にも同じように当てられるよう、
- * 信頼できる情報の文から決める
+ * 足す理由: 理由が author の通知は対応が要るかを決めきれず、judge:eval で 6 件中 5 件が要確認になっていた。
+ * 保存してある判定の入力にも当てられるよう、信頼できる情報の文から決める
  */
 export function withOwnershipNote(trusted: string): string {
   const viewer = /^あなた（ユーザー本人）の GitHub アカウント: @(\S+)$/m.exec(trusted)?.[1];
@@ -105,8 +103,7 @@ export const makeGitHubBinding = Effect.fnUntraced(function* (options: GitHubBin
     return fetched;
   });
 
-  // コメントが取れなくても判定は止めない理由: コメントは判定の材料を増やすためのもので、取れなければ
-  // コメントなしの説明文で判定すればよい。
+  // コメントが取れなくても判定は止めない。コメントは判定の材料を増やすためだけのもの
   const latestComment = (url: string) =>
     client.getComment(url).pipe(
       Effect.map((raw) =>

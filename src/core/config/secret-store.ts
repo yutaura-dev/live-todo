@@ -12,9 +12,7 @@ export class SecretStore extends Context.Service<SecretStore, {
 
 const envNameOf = (key: string) => `LIVE_TODO_SECRET_${key.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 
-/**
- * 環境変数（.env.local）から秘密情報を読む実装。開発用で、Electron に載せるときに safeStorage 版に差し替える。
- */
+/** 環境変数（.env.local）から秘密情報を読む実装。開発用で、Electron に載せるときに safeStorage 版に差し替える。 */
 export const EnvSecretStore = Layer.effect(
   SecretStore,
   Effect.gen(function* () {

@@ -16,7 +16,6 @@ export function workspaceCommands(options: { exists: boolean; repository: string
   ];
 }
 
-// 読み取りだけの gh pr view で取る項目
 const PULL_STATE_FIELDS = "url,author,state,isDraft,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,mergeable,mergeStateStatus";
 
 const RepositoryName = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;

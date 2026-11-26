@@ -764,7 +764,6 @@ function registerGmailActions() {
       ),
     ),
   );
-  // 外部への書き込み。renderer で一覧を見せて確認を出し、ユーザーが承認したメールだけを渡す
   // 外部への書き込み。renderer で対象のメールと操作を見せ、ユーザーが押して承認したときだけ呼ばれる
   ipcMain.handle(IPC_CHANNELS.gmailRunStep, (_event, input: unknown) =>
     outcomeOf(
@@ -776,6 +775,7 @@ function registerGmailActions() {
       }),
     ),
   );
+  // 外部への書き込み。renderer で一覧を見せて確認を出し、ユーザーが承認したメールだけを渡す
   ipcMain.handle(IPC_CHANNELS.gmailProcess, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {
