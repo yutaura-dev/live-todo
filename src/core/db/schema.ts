@@ -60,6 +60,8 @@ export const tasks = sqliteTable("tasks", {
   /** 次にやること（手順の並び。src/core/task/next-actions.ts） */
   nextActions: text("next_actions", { mode: "json" }),
   status: text({ enum: TASK_STATUSES }).notNull(),
+  /** AI が「定期の Task にした方がよい」と提案したときの下書き（毎月何日・何日前から・タイトル・メモ・理由） */
+  recurringSuggestion: text("recurring_suggestion", { mode: "json" }),
   /** 定期の Task から作ったなら、その決まりと何月分か */
   recurringTaskId: integer("recurring_task_id").references(() => recurringTasks.id),
   recurrencePeriod: text("recurrence_period"),

@@ -41,6 +41,7 @@ export const mockApi: LiveTodoApi = {
     return {
       id: card.id,
       title: card.title,
+      fromRecurring: false,
       brief: null,
       status: card.status,
       createdAt: ago(60 * 24),

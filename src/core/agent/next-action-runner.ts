@@ -171,7 +171,8 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
         Effect.mapError((error) => ({ message: `claude の回答の形が想定と違う: ${error.message}` })),
       );
       const proposed = planFromProposal(proposal, yield* nowIso);
-      return { result, plan: { steps: [...(history ?? []), ...proposed.steps] } };
+      const { suggest, ...suggestion } = proposal.recurring;
+      return { result, plan: { steps: [...(history ?? []), ...proposed.steps] }, recurringSuggestion: suggest ? suggestion : null };
     }).pipe(Effect.result);
 
     const finishedAt = yield* nowIso;
@@ -182,13 +183,13 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
       return Option.some({ taskId: run.taskId, succeeded: false });
     }
 
-    const { result, plan } = outcome.success;
+    const { result, plan, recurringSuggestion } = outcome.success;
     yield* db
       .update(agentRuns)
       .set({ status: "succeeded", result: plan, sessionId: result.sessionId, costUsd: result.costUsd?.toString() ?? null, finishedAt })
       .where(eq(agentRuns.id, runId))
       .pipe(Effect.orDie);
-    yield* taskRepository.updateTask(run.taskId, { nextActions: plan });
+    yield* taskRepository.updateTask(run.taskId, { nextActions: plan, recurringSuggestion });
     yield* taskRepository.recordChange(run.taskId, {
       kind: "field_changed",
       field: "next_actions",

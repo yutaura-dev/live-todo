@@ -109,6 +109,15 @@ describe("ゴースト（作る日が近い定期の Task の予告）", () => {
 });
 
 describe("Task から定期の Task を作る（AI の提案もこの入口を使う）", () => {
+  it.effect("提案のタイトルがあれば、Task のタイトルの代わりにそれを使う", () =>
+    Effect.gen(function* () {
+      const task = yield* (yield* TaskRepository).createTask({ title: "DM: 11月分の請求書から倍に増やす", status: "todo" });
+
+      yield* createRecurringFromTask(task.id, { schedule: monthly(1), note: "", title: "請求書を送る" }, { year: 2026, month: 11, day: 26 });
+
+      assert.strictEqual((yield* listRecurringTasks)[0]?.title, "請求書を送る");
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("Task のタイトル（何月分は除く）と次にやること（すべて未着手に戻す）をひな形にする", () =>
     Effect.gen(function* () {
       const tasks = yield* TaskRepository;

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { conclusionLabel, describeChange, effortLabel, judgmentText, openLabel, statusLabel, taskNumber } from "./task-text.js";
+import { conclusionLabel, describeChange, effortLabel, judgmentText, openLabel, statusLabel, taskNumber, tracksSlackSaved } from "./task-text.js";
 
 const change = (overrides: Partial<Parameters<typeof describeChange>[0]>) => ({
   kind: "field_changed",
@@ -89,6 +89,14 @@ describe("statusLabel", () => {
   it("削除した Task と、元の項目が消えた Task も名前で返す", () => {
     assert.strictEqual(statusLabel("dismissed"), "削除済み");
     assert.strictEqual(statusLabel("archived"), "元の項目が消えた");
+  });
+});
+
+describe("tracksSlackSaved", () => {
+  it("Slack の To-do・Saved を追う Task だけ true（メンション・DM から取り込んだ Task は、To-do の操作ができない）", () => {
+    assert.isTrue(tracksSlackSaved([{ role: "tracks", source: "slack:home" }]));
+    assert.isFalse(tracksSlackSaved([{ role: "tracks", source: "slack:home:inbox" }]));
+    assert.isFalse(tracksSlackSaved([{ role: "context", source: "slack:home" }, { role: "tracks", source: "github:personal" }]));
   });
 });
 

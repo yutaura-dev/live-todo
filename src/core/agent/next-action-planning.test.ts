@@ -85,6 +85,12 @@ describe("nextActionPrompt", () => {
     assert.notInclude(prompt, "済んだ手順");
   });
 
+  it("決まった周期で繰り返す仕事だと読み取れるときだけ、定期の Task の提案（頻度・何をするか・理由）を書かせる", () => {
+    assert.include(prompt, "recurring");
+    assert.include(prompt, "繰り返す");
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.recurring.required, ["suggest", "day", "leadDays", "title", "note", "reason"]);
+  });
+
   it("Task が追う PR を merge する手順は、アプリから merge できる手順にさせる", () => {
     assert.include(prompt, "merge_pull_request");
   });

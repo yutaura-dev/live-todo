@@ -48,14 +48,14 @@ export const createRecurringTask = Effect.fnUntraced(function* (input: Recurring
 /** Task をもとに定期の Task を作る（ドロワーのボタンと、将来の AI の提案の入口）。タイトルの「（何月分）」は除く */
 export const createRecurringFromTask = Effect.fnUntraced(function* (
   taskId: number,
-  input: { schedule: RecurrenceSchedule; note: string; includeCurrent?: boolean },
+  input: { schedule: RecurrenceSchedule; note: string; includeCurrent?: boolean; title?: string | undefined },
   today: CalendarDate,
 ) {
   const task = yield* (yield* TaskRepository).findTask(taskId);
   if (Option.isNone(task)) return yield* new RecurringTaskError({ message: "Task が見つからない" });
   return yield* createRecurringTask(
     {
-      title: task.value.title.replace(/（(\d{4}年)?\d{1,2}月分）$/, ""),
+      title: input.title !== undefined && input.title.trim() !== "" ? input.title : task.value.title.replace(/（(\d{4}年)?\d{1,2}月分）$/, ""),
       note: input.note,
       schedule: input.schedule,
       nextActions: Option.getOrUndefined(decodePlan(task.value.nextActions)),

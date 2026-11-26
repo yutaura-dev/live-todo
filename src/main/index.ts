@@ -544,7 +544,7 @@ function registerTasksAndRecurring() {
     outcomeOf(
       Effect.gen(function* () {
         const request = yield* Schema.decodeUnknownEffect(
-          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), note: TextInput, schedule: ScheduleInput, includeCurrent: Schema.Boolean }),
+          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), title: Schema.optional(TextInput), note: TextInput, schedule: ScheduleInput, includeCurrent: Schema.Boolean }),
         )(input);
         yield* createRecurringFromTask(request.taskId, request, yield* localToday);
         yield* runRecurringTasks(yield* localToday);

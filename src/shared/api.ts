@@ -126,7 +126,7 @@ export interface LiveTodoApi {
   /** 定期の Task の決まりを登録する。includeCurrent なら、時期を過ぎた今月の分もすぐに作る */
   recurringCreate(input: { title: string; note: string; schedule: RecurrenceScheduleView; includeCurrent: boolean }): Promise<Outcome>;
   /** Task をもとに定期の Task を作る（タイトルと次にやることをひな形にする） */
-  recurringFromTask(input: { taskId: number; note: string; schedule: RecurrenceScheduleView; includeCurrent: boolean }): Promise<Outcome>;
+  recurringFromTask(input: { taskId: number; title?: string; note: string; schedule: RecurrenceScheduleView; includeCurrent: boolean }): Promise<Outcome>;
   recurringUpdate(input: { id: number; title?: string; note?: string; schedule?: RecurrenceScheduleView; active?: boolean }): Promise<Outcome>;
   /** Slack の To-do を完了にする・To-do から外す。外部への書き込み。確認で承認したあとにだけ呼ぶ */
   slackAction(taskId: number, action: "complete" | "remove"): Promise<Outcome>;

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { EFFORTS, type NextActionPlan, planFromProposedSteps } from "../task/next-actions.js";
 import { ProposedWaitConditionSchema, WAIT_CONDITION_JSON_SCHEMA, WAIT_CONDITION_PROMPT } from "./wait-condition-schema.js";
 
@@ -9,7 +9,19 @@ const ProposedStep = Schema.Struct({
   effort: Schema.Literals(EFFORTS),
   mode: Schema.Literals(["serial", "parallel"]),
 });
+const RecurringProposal = Schema.Struct({
+  suggest: Schema.Boolean,
+  day: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 31 })),
+  leadDays: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 27 })),
+  title: Schema.String,
+  note: Schema.String,
+  reason: Schema.String,
+});
+const NO_RECURRING = { suggest: false, day: 1, leadDays: 0, title: "", note: "", reason: "" };
+
 const ProposedPlan = Schema.Struct({
+  // 前の形の回答（この項目がない）も読めるよう、なければ提案なしとする
+  recurring: RecurringProposal.pipe(Schema.withDecodingDefaultKey(Effect.succeed(NO_RECURRING))),
   steps: Schema.Array(
     Schema.Struct({
       ...ProposedStep.fields,
@@ -42,6 +54,21 @@ const stepSchema = {
 export const NEXT_ACTION_PLAN_JSON_SCHEMA = {
   type: "object",
   properties: {
+    recurring: {
+      type: "object",
+      description:
+        "この Task が毎月決まった時期に繰り返す仕事なら、定期の Task にする提案。繰り返すと読み取れなければ suggest を false にし、ほかは day 1・leadDays 0・空文字にする",
+      properties: {
+        suggest: { type: "boolean" },
+        day: { type: "integer", minimum: 1, maximum: 31, description: "毎月何日に作るか" },
+        leadDays: { type: "integer", minimum: 0, maximum: 27, description: "何日前から出すか（準備に日数が要るなら）" },
+        title: { type: "string", description: "毎月作る Task のタイトル（何月分かは付けない）" },
+        note: { type: "string", description: "毎月の Task に載せるメモ（金額の決まりなど、毎回思い出したいこと）" },
+        reason: { type: "string", description: "繰り返す仕事だと考えた根拠（本文のどこからそう読み取ったか）" },
+      },
+      required: ["suggest", "day", "leadDays", "title", "note", "reason"],
+      additionalProperties: false,
+    },
     steps: {
       type: "array",
       minItems: 1,
@@ -65,12 +92,12 @@ export const NEXT_ACTION_PLAN_JSON_SCHEMA = {
       },
     },
   },
-  required: ["steps"],
+  required: ["steps", "recurring"],
   additionalProperties: false,
 } as const;
 
 /** AI が返した手順を、手順の並びに変える */
-export const planFromProposal = (proposal: ProposedPlan, now?: string): NextActionPlan => planFromProposedSteps(proposal.steps, now);
+export const planFromProposal = (proposal: Pick<ProposedPlan, "steps">, now?: string): NextActionPlan => planFromProposedSteps(proposal.steps, now);
 
 export function nextActionPrompt(subject: { title: string; contextDir: string; repository?: string | undefined; replanning?: boolean }): string {
   return [
@@ -97,6 +124,8 @@ export function nextActionPrompt(subject: { title: string; contextDir: string; r
     "- 渡した情報（PR の状態など）で分かることを、確認する手順にしない。アプリが見張っているので、人が確かめる必要はない",
     "- レビュー待ち・CI 待ち・返信待ちのように、相手が動くのを待つしかないときは、その手順を wait にする",
     WAIT_CONDITION_PROMPT,
+    "- 本文から、毎月など決まった周期で繰り返す仕事（月初の請求書・定例の報告など）だと読み取れるときだけ、recurring に定期の Task の提案を書く。" +
+      "推測で提案しない（1 回きりの仕事なら suggest を false にする）",
     "- この Task が追う PR を merge する手順は merge_pull_request にする（アプリのボタンで merge できる）。ほかの PR の merge は manual にする",
     "- 手間（effort）は次の基準で付ける: easy は 10 秒で終わる（ボタンを押す・一言返す）、normal は 5 分あれば終わる、" +
       "hard は 15 分あれば終わる、tedious はそれ以上かかる",

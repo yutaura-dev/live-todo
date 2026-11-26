@@ -92,7 +92,14 @@ export type TaskDetail = {
   nextActions?: NextActionPlan;
   /** いま着手できる手順の id */
   currentStepIds?: string[];
+  /** AI が「定期の Task にした方がよい」と提案したときの下書き */
+  recurringSuggestion?: RecurringSuggestion;
+  /** 定期の Task から作った Task か（その Task から定期の Task は作らない） */
+  fromRecurring: boolean;
 };
+
+export type RecurringSuggestion = { day: number; leadDays: number; title: string; note: string; reason: string };
+const RecurringSuggestionSchema = Schema.Struct({ day: Schema.Number, leadDays: Schema.Number, title: Schema.String, note: Schema.String, reason: Schema.String });
 
 /** 処理中のレーンへの出入りは、調べ直すたびに起きる裏の動きなので履歴に出さない。値の変わらない変更も出さない */
 const isMeaningfulChange = (change: { kind: string; field: string | null; before: unknown; after: unknown }) =>
@@ -294,6 +301,11 @@ export class BoardService extends Context.Service<BoardService, {
             onSome: (plan) => ({ nextActions: plan, currentStepIds: currentSteps(plan).map((step) => step.id) }),
           }),
           ...(agentRunProblem === undefined ? {} : { agentRunProblem }),
+          ...Option.match(Schema.decodeUnknownOption(RecurringSuggestionSchema)(task.recurringSuggestion), {
+            onNone: () => ({}),
+            onSome: (recurringSuggestion) => ({ recurringSuggestion }),
+          }),
+          fromRecurring: task.recurringTaskId !== null,
           ...(lastRun === undefined
             ? {}
             : {

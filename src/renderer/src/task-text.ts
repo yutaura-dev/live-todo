@@ -68,3 +68,8 @@ export function openLabel(url: string): string {
   if (host === "slack.com" || host.endsWith(".slack.com")) return "Slack で開く";
   return "開く";
 }
+
+/** Slack の To-do・Saved（slack:<id>）を追う Task か。メンション・DM（slack:<id>:inbox）は To-do の操作ができない */
+export function tracksSlackSaved(items: ReadonlyArray<{ role: string; source: string }>): boolean {
+  return items.some((item) => item.role === "tracks" && /^slack:[a-z0-9][a-z0-9-]*$/.test(item.source));
+}

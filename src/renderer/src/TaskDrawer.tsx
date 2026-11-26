@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ConflictResolutionView, MergePlanView, MovableStatus, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
-import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber } from "./task-text.js";
+import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber , tracksSlackSaved } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
 
@@ -239,24 +239,36 @@ function NextAction({ detail, onMerged, onStarted }: { detail: TaskDetail; onMer
 
 /** この Task をもとに定期の Task を作る（タイトルと次にやることをひな形にする）。将来、AI の提案もこの形で出す */
 export function MakeRecurring({ detail, onCreated }: { detail: TaskDetail; onCreated: () => Promise<void> }) {
+  const suggestion = detail.recurringSuggestion;
   const [open, setOpen] = useState(false);
-  const [day, setDay] = useState(1);
-  const [leadDays, setLeadDays] = useState(0);
-  const [note, setNote] = useState("");
+  const [day, setDay] = useState(suggestion?.day ?? 1);
+  const [leadDays, setLeadDays] = useState(suggestion?.leadDays ?? 0);
+  const [note, setNote] = useState(suggestion?.note ?? "");
   const [includeCurrent, setIncludeCurrent] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // 提案があるときだけ出す（すべての Task に出すと、繰り返さない Task にも勧めることになる）
+  if (suggestion === undefined || detail.fromRecurring) return message === null ? null : <p className="field-hint">{message}</p>;
   if (!open) {
     return (
-      <div className="request-review">
-        <button type="button" className="quiet-button" onClick={() => setOpen(true)}>
-          定期の Task にする
-        </button>
-        {message && <span className="field-hint">{message}</span>}
-      </div>
+      <section className="next-action" aria-labelledby="drawer-recurring">
+        <h3 id="drawer-recurring" className="drawer-section-title">
+          定期の Task の提案
+        </h3>
+        <p>
+          毎月 {suggestion.day} 日{suggestion.leadDays > 0 ? `（${suggestion.leadDays} 日前から）` : ""}に「{suggestion.title}」を作る
+        </p>
+        <p className="field-hint">理由: {suggestion.reason}</p>
+        <div className="request-review">
+          <button type="button" className="quiet-button" onClick={() => setOpen(true)}>
+            定期の Task にする
+          </button>
+          {message && <span className="field-hint">{message}</span>}
+        </div>
+      </section>
     );
   }
   const submit = async () => {
-    const outcome = await api.recurringFromTask({ taskId: detail.id, note, schedule: { kind: "monthly", day, leadDays }, includeCurrent });
+    const outcome = await api.recurringFromTask({ taskId: detail.id, title: suggestion.title, note, schedule: { kind: "monthly", day, leadDays }, includeCurrent });
     if (outcome.ok) {
       setOpen(false);
       setMessage(`毎月 ${day} 日${leadDays > 0 ? `（${leadDays} 日前から）` : ""}に作ります。設定画面の「定期の Task」で変えられます`);
@@ -325,8 +337,7 @@ export function RecurrenceFields(props: {
 export function SlackActions({ detail, onDone }: { detail: TaskDetail; onDone: () => Promise<void> }) {
   const [confirming, setConfirming] = useState<"complete" | "remove" | null>(null);
   const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string }>({ kind: "idle" });
-  const tracksSlack = detail.items.some((item) => item.role === "tracks" && item.source.startsWith("slack:"));
-  if (!tracksSlack || detail.status === "done" || detail.status === "dismissed") return null;
+  if (!tracksSlackSaved(detail.items) || detail.status === "done" || detail.status === "dismissed") return null;
   const run = async (action: "complete" | "remove") => {
     setState({ kind: "busy" });
     const outcome = await api.slackAction(detail.id, action);

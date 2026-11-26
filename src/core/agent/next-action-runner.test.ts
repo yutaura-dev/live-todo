@@ -13,7 +13,8 @@ import { requestReplan, runNextActionPlanning } from "./next-action-runner.js";
 
 const NONE = { kind: "none" as const, repository: "", query: "", pullUrl: "" };
 
-const PROPOSAL = { steps: [{ title: "Slack で状況を聞く", type: "manual", until: NONE, effort: "easy", mode: "serial", options: [] }] };
+const NO_RECURRING = { suggest: false, day: 1, leadDays: 0, title: "", note: "", reason: "" };
+const PROPOSAL = { steps: [{ title: "Slack で状況を聞く", type: "manual", until: NONE, effort: "easy", mode: "serial", options: [] }], recurring: NO_RECURRING };
 
 const task = (options: { status?: TaskStatus; author?: string; source?: string; url?: string; nextActions?: unknown } = {}) =>
   Effect.gen(function* () {
@@ -36,7 +37,7 @@ const task = (options: { status?: TaskStatus; author?: string; source?: string; 
     return created.id;
   });
 
-const withAgent = (options: { fail?: string } = {}) => {
+const withAgent = (options: { fail?: string; proposals?: Record<number, unknown> } = {}) => {
   const requests: ClaudeRequest[] = [];
   const contexts: Record<string, string>[] = [];
   const statusesDuringRun: TaskStatus[][] = [];
@@ -53,7 +54,8 @@ const withAgent = (options: { fail?: string } = {}) => {
                 requests.push(request);
                 statusesDuringRun.push((yield* tasks.listTasks).map((t) => t.status));
                 if (options.fail) return yield* new ClaudeCodeError({ message: options.fail });
-                return { sessionId: "plan-session", structured: PROPOSAL, costUsd: 0.05, permissionDenials: 0 };
+                const taskId = Number(/task-(\d+)/.exec(request.cwd)?.[1]);
+                return { sessionId: "plan-session", structured: options.proposals?.[taskId] ?? PROPOSAL, costUsd: 0.05, permissionDenials: 0 };
               }),
           }),
         ),
@@ -107,6 +109,28 @@ describe("runNextActionPlanning（PR の Task）", () => {
       assert.match(agent.requests[0]?.cwd ?? "", /\/repo\/acme\/app$/);
       assert.include([...(agent.requests[0]?.addDirs ?? [])], agent.requests[0]?.cwd.replace(/\/repo\/acme\/app$/, "/context"));
       assert.include(agent.requests[0]?.prompt ?? "", ".github/workflows");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("定期の Task の提案", () => {
+  it.effect("AI が定期の Task にした方がよいと提案したら、その提案を Task に残す。提案しなければ残さない", () =>
+    Effect.gen(function* () {
+      const suggested = yield* task({ url: "https://github.com/acme/app/issues/1" });
+      const plain = yield* task({ url: "https://github.com/acme/app/issues/2" });
+      const recurring = { suggest: true, day: 1, leadDays: 3, title: "請求書を送る", note: "金額は前月と同じ", reason: "毎月初めに送ると書かれている" };
+      const agent = withAgent({ proposals: { [suggested]: { ...PROPOSAL, recurring }, [plain]: PROPOSAL } });
+
+      yield* agent.provide(run);
+
+      const tasks = yield* TaskRepository;
+      assert.deepStrictEqual(Option.getOrThrow(yield* tasks.findTask(suggested)).recurringSuggestion, {
+        day: 1,
+        leadDays: 3,
+        title: "請求書を送る",
+        note: "金額は前月と同じ",
+        reason: "毎月初めに送ると書かれている",
+      });
+      assert.isNull(Option.getOrThrow(yield* tasks.findTask(plain)).recurringSuggestion);
     }).pipe(Effect.provide(TestDatabase)));
 });
 

@@ -221,6 +221,21 @@ describe("BoardService.taskDetail", () => {
       }),
     ));
 
+  it.effect("定期の Task の提案と、定期の Task から作ったかどうかを、詳細に出す", () =>
+    run(
+      Effect.gen(function* () {
+        const service = yield* BoardService;
+        const id = yield* service.addTask({ title: "請求書を送る" });
+        const suggestion = { day: 1, leadDays: 3, title: "請求書を送る", note: "", reason: "毎月初めと書かれている" };
+        yield* (yield* TaskRepository).updateTask(id, { recurringSuggestion: suggestion });
+
+        const detail = yield* service.taskDetail(id);
+
+        assert.deepStrictEqual(detail.recurringSuggestion, suggestion);
+        assert.isFalse(detail.fromRecurring);
+      }),
+    ));
+
   it.effect("タイトルが空なら追加しない", () =>
     run(
       Effect.gen(function* () {
