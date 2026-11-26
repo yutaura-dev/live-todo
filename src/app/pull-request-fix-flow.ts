@@ -68,7 +68,7 @@ export const startPullRequestFix = Effect.fnUntraced(function* (taskId: number) 
 export type PullRequestFixOptions = {
   model?: string;
   maxBudgetUsd?: number;
-  /** sandbox の中から読ませない場所（アプリのデータ・ソースなど）。認証情報の置き場はここで足す */
+  /** sandbox の中から読ませない場所（アプリのデータ・ソース・作業場所の置き場全体など）。認証情報の置き場はここで足す */
   denyRead?: ReadonlyArray<string>;
   home?: string;
 };
@@ -76,7 +76,7 @@ export type PullRequestFixOptions = {
 // 依存の更新に要る通信先だけを許す
 const PACKAGE_REGISTRIES = ["registry.npmjs.org", "registry.yarnpkg.com"];
 const credentialPaths = (home: string | undefined) =>
-  home === undefined ? [] : [".ssh", ".config/gh", ".aws", ".npmrc", ".netrc", ".docker", ".kube", ".gnupg"].map((path) => `${home}/${path}`);
+  home === undefined ? [] : [".ssh", ".config", ".aws", ".npmrc", ".yarnrc.yml", ".netrc", ".git-credentials", ".docker", ".kube", ".gnupg", ".pypirc", ".claude", ".claude.json"].map((path) => `${home}/${path}`);
 
 const fix = Effect.fnUntraced(function* (runId: number, options: PullRequestFixOptions) {
   const db = yield* Database;
@@ -110,10 +110,19 @@ const fix = Effect.fnUntraced(function* (runId: number, options: PullRequestFixO
     sandbox: {
       allowedDomains: PACKAGE_REGISTRIES,
       denyRead: [...credentialPaths(options.home), ...(options.denyRead ?? [])],
+      // 作業場所の置き場を塞いだうえで、このタスクの作業ディレクトリとキャッシュだけ読ませる（ほかのタスクの作業場所は読ませない）
+      allowRead: [prepared.cwd, prepared.cacheDir],
       allowWrite: [prepared.cacheDir],
     },
     // 作業ディレクトリの外には書けないので、パッケージマネージャーのキャッシュは書いてよい場所に置かせる
-    env: { npm_config_cache: `${prepared.cacheDir}/npm`, npm_config_store_dir: `${prepared.cacheDir}/pnpm`, YARN_CACHE_FOLDER: `${prepared.cacheDir}/yarn` },
+    env: {
+      npm_config_cache: `${prepared.cacheDir}/npm`,
+      npm_config_store_dir: `${prepared.cacheDir}/pnpm`,
+      YARN_CACHE_FOLDER: `${prepared.cacheDir}/yarn`,
+      // ユーザーと全体の npm の設定（レジストリのトークンが入りうる）を読ませず、publish などの書き込みをできなくする
+      npm_config_userconfig: "/dev/null",
+      npm_config_globalconfig: "/dev/null",
+    },
     model: options.model,
     maxBudgetUsd: options.maxBudgetUsd,
   });

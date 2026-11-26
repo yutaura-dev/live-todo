@@ -21,7 +21,9 @@ export type ClaudeRequest = {
   /** コマンドを任せるときに、git・gh の認証を渡さない（外部への書き込みを承認なしにさせないため）。空のフォルダを gh の設定に使う */
   withoutCredentials?: { ghConfigDir: string } | undefined;
   /** Bash を OS の sandbox に閉じ込める（書き込みは作業ディレクトリと allowWrite、通信は allowedDomains だけ。ADR-0012） */
-  sandbox?: { allowedDomains: ReadonlyArray<string>; denyRead: ReadonlyArray<string>; allowWrite: ReadonlyArray<string> } | undefined;
+  sandbox?:
+    | { allowedDomains: ReadonlyArray<string>; denyRead: ReadonlyArray<string>; allowRead?: ReadonlyArray<string>; allowWrite: ReadonlyArray<string> }
+    | undefined;
   /** 追加で渡す環境変数（パッケージのキャッシュの場所など） */
   env?: Readonly<Record<string, string>> | undefined;
   model?: string | undefined;
@@ -67,7 +69,11 @@ export function claudeArgs(request: ClaudeRequest): string[] {
               // sandbox を起動できないときに、閉じ込めずに動かすことをさせない
               failIfUnavailable: true,
               allowUnsandboxedCommands: false,
-              filesystem: { denyRead: request.sandbox.denyRead, allowWrite: request.sandbox.allowWrite },
+              filesystem: {
+                denyRead: request.sandbox.denyRead,
+                ...(request.sandbox.allowRead === undefined ? {} : { allowRead: request.sandbox.allowRead }),
+                allowWrite: request.sandbox.allowWrite,
+              },
               network: { allowedDomains: request.sandbox.allowedDomains, strictAllowlist: true },
             },
           }),

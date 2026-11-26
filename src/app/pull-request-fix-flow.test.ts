@@ -111,6 +111,8 @@ describe("Claude Code に PR を修正させる", () => {
       assert.deepStrictEqual(request.withoutCredentials, { ghConfigDir: `/w/task-${taskId}/no-credentials` });
       assert.deepStrictEqual(request.sandbox?.allowWrite, [`/w/task-${taskId}/package-cache`]);
       assert.includeMembers([...(request.sandbox?.denyRead ?? [])], ["/app/data"]);
+      assert.deepStrictEqual(request.sandbox?.allowRead, [`/w/task-${taskId}/fix`, `/w/task-${taskId}/package-cache`]);
+      assert.deepInclude(request.env as object, { npm_config_userconfig: "/dev/null", npm_config_globalconfig: "/dev/null" });
       assert.include([...(request.sandbox?.allowedDomains ?? [])], "registry.npmjs.org");
       assert.deepInclude(request.env as object, { npm_config_cache: `/w/task-${taskId}/package-cache/npm`, npm_config_store_dir: `/w/task-${taskId}/package-cache/pnpm` });
       assert.deepStrictEqual(h.commits, [{ anyChanges: true, message: "CLI v3 への更新をまとめて push する", headSha: "a".repeat(40) }]);

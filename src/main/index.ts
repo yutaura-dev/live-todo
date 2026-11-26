@@ -631,7 +631,15 @@ function registerPullRequestFix() {
             home: app.getPath("home"),
             // アプリの秘密情報・DB・設定と、アプリのソース（.env.local がある）は読ませない。
             // userData を丸ごと塞がない理由: Claude Code の作業場所（agent-workspaces）もその中にあるため
-            denyRead: [secretsPath, tokenInfoPath, dbPath, configPath, app.getAppPath(), process.cwd()],
+            denyRead: [
+              secretsPath,
+              tokenInfoPath,
+              ...[dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`],
+              configPath,
+              app.getAppPath(),
+              process.cwd(),
+              agentWorkspaceRoot,
+            ],
           }),
         );
       }),
