@@ -16,6 +16,10 @@ export type ClaudeRequest = {
   addDirs?: ReadonlyArray<string> | undefined;
   jsonSchema: object;
   allowedTools: ReadonlyArray<string>;
+  /** 許したツールの中でも禁止するもの（Bash を許すときの git push・gh など） */
+  disallowedTools?: ReadonlyArray<string> | undefined;
+  /** コマンドを任せるときに、git・gh の認証を渡さない（外部への書き込みを承認なしにさせないため）。空のフォルダを gh の設定に使う */
+  withoutCredentials?: { ghConfigDir: string } | undefined;
   model?: string | undefined;
   maxBudgetUsd?: number | undefined;
 };
@@ -48,6 +52,7 @@ export function claudeArgs(request: ClaudeRequest): string[] {
     ...(request.addDirs ?? []).flatMap((dir) => ["--add-dir", dir]),
     ...(request.model === undefined ? [] : ["--model", request.model]),
     ...(request.maxBudgetUsd === undefined ? [] : ["--max-budget-usd", String(request.maxBudgetUsd)]),
+    ...(request.disallowedTools === undefined || request.disallowedTools.length === 0 ? [] : ["--disallowedTools", ...request.disallowedTools]),
     // 可変長の引数なので最後に置く。プロンプトは標準入力で渡す
     "--allowedTools",
     ...request.allowedTools,
@@ -55,10 +60,26 @@ export function claudeArgs(request: ClaudeRequest): string[] {
 }
 
 /** claude に渡す環境変数。アプリの秘密情報（トークンや API キー）は調査に要らないので渡さない */
-export function childEnv(env: Record<string, string | undefined>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && !entry[0].startsWith("LIVE_TODO_SECRET_")),
+const CREDENTIAL_KEYS = new Set(["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"]);
+
+export function childEnv(env: Record<string, string | undefined>, options: { withoutCredentials?: { ghConfigDir: string } | undefined } = {}): Record<string, string> {
+  const base = Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && !entry[0].startsWith("LIVE_TODO_SECRET_") && (options.withoutCredentials === undefined || !CREDENTIAL_KEYS.has(entry[0])),
+    ),
   );
+  if (options.withoutCredentials === undefined) return base;
+  return {
+    ...base,
+    // git の全体の設定（gh の認証を使う credential.helper など）とシステムの設定を読ませない
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_SSH_COMMAND: "false",
+    // 空のフォルダを gh の設定にして、ログインしていない状態にする
+    GH_CONFIG_DIR: options.withoutCredentials.ghConfigDir,
+  };
 }
 
 const ClaudeOutput = Schema.Struct({
@@ -109,7 +130,7 @@ export class ClaudeCode extends Context.Service<ClaudeCode, {
           .spawn(
             ChildProcess.make("claude", claudeArgs(request), {
               cwd: request.cwd,
-              env: childEnv(process.env),
+              env: childEnv(process.env, { withoutCredentials: request.withoutCredentials }),
               extendEnv: false,
               stdin: Stream.make(new TextEncoder().encode(request.prompt)),
             }),

@@ -65,6 +65,36 @@ describe("claudeArgs", () => {
   });
 });
 
+describe("claudeArgs（禁止するツール）", () => {
+  it("禁止したツール（git push など）を --disallowedTools で渡す", () => {
+    const args = claudeArgs({ ...request, disallowedTools: ["Bash(git push:*)", "Bash(gh:*)"] });
+    const at = args.indexOf("--disallowedTools");
+
+    assert.isAbove(at, -1);
+    assert.deepStrictEqual(args.slice(at + 1, at + 3), ["Bash(git push:*)", "Bash(gh:*)"]);
+    assert.isBelow(at, args.indexOf("--allowedTools"));
+  });
+});
+
+describe("childEnv（認証を渡さない）", () => {
+  it("書き込みを伴うコマンドを任せるときは、git・gh の認証と SSH エージェントを使えないようにする", () => {
+    const env = childEnv(
+      { PATH: "/usr/bin", HOME: "/Users/me", GH_TOKEN: "ghp_x", GITHUB_TOKEN: "ghp_y", SSH_AUTH_SOCK: "/tmp/agent" },
+      { withoutCredentials: { ghConfigDir: "/work/empty-gh" } },
+    );
+
+    assert.deepStrictEqual(env, {
+      PATH: "/usr/bin",
+      HOME: "/Users/me",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_SSH_COMMAND: "false",
+      GH_CONFIG_DIR: "/work/empty-gh",
+    });
+  });
+});
+
 describe("childEnv", () => {
   it("アプリの秘密情報（LIVE_TODO_SECRET_*）は claude に渡さない", () => {
     const env = childEnv({ PATH: "/usr/bin", HOME: "/Users/me", LIVE_TODO_SECRET_GITHUB_PERSONAL_TOKEN: "ghp_x", LIVE_TODO_SECRET_LLM_OPENAI_API_KEY: "sk", EMPTY: undefined });

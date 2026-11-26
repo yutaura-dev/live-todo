@@ -23,6 +23,8 @@ export type PreparedMerge = {
   /** 直し始めたときの PR の head。push の前に、これから動いていないことを確かめる */
   headSha: string;
   conflicted: ReadonlyArray<string>;
+  /** AI にコマンドを任せるときに使う、認証情報のない gh の設定の場所（空のフォルダ） */
+  isolationDir: string;
 };
 
 const PullInfo = Schema.Struct({
@@ -34,9 +36,15 @@ const PullInfo = Schema.Struct({
 
 /** コンフリクトを直す作業場所。clone・merge・commit・push はアプリが行い、AI にはファイルの編集だけをさせる */
 export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
-  prepare(taskId: number, pullUrl: string): Effect.Effect<PreparedMerge, ConflictWorkspaceError>;
+  /** purpose が fix なら、PR のブランチを取り出すだけ（ベースは merge しない） */
+  prepare(taskId: number, pullUrl: string, options?: { purpose?: "conflict" | "fix" }): Effect.Effect<PreparedMerge, ConflictWorkspaceError>;
   /** 印が残っていないこと・ほかのファイルを変えていないことを確かめて、手元で commit する。差分は PR のブランチから見た変化 */
-  commit(cwd: string, conflicted: ReadonlyArray<string>): Effect.Effect<{ commitSha: string; diff: string }, ConflictWorkspaceError>;
+  /** anyChanges なら、コンフリクトの確かめをせず、作業ツリーの変更をすべて commit する（AI に修正させたとき） */
+  commit(
+    cwd: string,
+    conflicted: ReadonlyArray<string>,
+    options?: { anyChanges?: boolean; message?: string },
+  ): Effect.Effect<{ commitSha: string; diff: string }, ConflictWorkspaceError>;
   /** ユーザーが承認したあとだけ呼ぶ。PR のブランチが直し始めたときから動いていたら push しない（force はしない） */
   /** commitSha: 承認画面で見せた commit。その commit を名指しで push する */
   push(cwd: string, repository: string, headRef: string, expectedHeadSha: string, commitSha: string, token: string): Effect.Effect<void, ConflictWorkspaceError>;
@@ -59,7 +67,8 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
         const git = (cwd: string, args: ReadonlyArray<string>, message: string, env: Record<string, string> = safeGitEnv) =>
           text("git", trustedGitArgs(gitDirOf(cwd), cwd, args), message, env);
 
-        const prepare = Effect.fn("ConflictWorkspace.prepare")(function* (taskId: number, pullUrl: string) {
+        const prepare = Effect.fn("ConflictWorkspace.prepare")(function* (taskId: number, pullUrl: string, options?: { purpose?: "conflict" | "fix" }) {
+          const purpose = options?.purpose ?? "conflict";
           const repository = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/\d+$/.exec(pullUrl)?.[1];
           if (repository === undefined) return yield* new ConflictWorkspaceError({ message: `GitHub の PR の URL ではない: ${pullUrl}` });
           const info = yield* text("gh", ["pr", "view", pullUrl, "--json", "headRefName,baseRefName,headRefOid,isCrossRepository"], "PR の情報を取れない").pipe(
@@ -71,7 +80,9 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
             return yield* new ConflictWorkspaceError({ message: "ブランチ名に使えない文字がある" });
           }
 
-          const dir = `${root}/task-${taskId}/conflict`;
+          const dir = `${root}/task-${taskId}/${purpose}`;
+          const isolationDir = `${root}/task-${taskId}/no-credentials`;
+          yield* fs.makeDirectory(isolationDir, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
           yield* fs.remove(dir, { recursive: true }).pipe(Effect.ignore);
           yield* fs.remove(gitDirOf(dir), { recursive: true }).pipe(Effect.ignore);
           const commands = conflictWorkspaceCommands({ repository, dir, gitDir: gitDirOf(dir), headRef: info.headRefName, baseRef: info.baseRefName });
@@ -82,15 +93,31 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
           const head = (yield* git(dir, ["rev-parse", "HEAD"], "PR のブランチの commit を読めない")).trim();
           if (head !== info.headRefOid) return yield* new ConflictWorkspaceError({ message: "PR のブランチが取得の途中で進んだ。もう一度直してください" });
 
+          if (purpose === "fix") {
+            return { cwd: dir, repository, headRef: info.headRefName, baseRef: info.baseRefName, headSha: head, conflicted: [], isolationDir } satisfies PreparedMerge;
+          }
           // コンフリクトがあると終了コードは 1 になる。それ以外の失敗は、コンフリクトしたファイルの一覧で見分ける
           yield* exitCode(commands.merge[0], commands.merge[1], `${info.baseRefName} を merge できない`);
           const conflicted = (yield* git(dir, ["diff", "--name-only", "--diff-filter=U"], "コンフリクトしたファイルを読めない"))
             .split("\n")
             .filter((line) => line !== "");
-          return { cwd: dir, repository, headRef: info.headRefName, baseRef: info.baseRefName, headSha: head, conflicted } satisfies PreparedMerge;
+          return { cwd: dir, repository, headRef: info.headRefName, baseRef: info.baseRefName, headSha: head, conflicted, isolationDir } satisfies PreparedMerge;
         });
 
-        const commit = Effect.fn("ConflictWorkspace.commit")(function* (cwd: string, conflicted: ReadonlyArray<string>) {
+        const commit = Effect.fn("ConflictWorkspace.commit")(function* (
+          cwd: string,
+          conflicted: ReadonlyArray<string>,
+          options?: { anyChanges?: boolean; message?: string },
+        ) {
+          if (options?.anyChanges === true) {
+            yield* git(cwd, ["add", "-A"], "変更を登録できない");
+            const staged = yield* git(cwd, ["diff", "--cached", "--name-only"], "変更を読めない");
+            if (staged.trim() === "") return yield* new ConflictWorkspaceError({ message: "AI が何も変更しなかった" });
+            yield* git(cwd, ["-c", "user.name=live-todo", "-c", "user.email=live-todo@localhost", "commit", "--no-verify", "-m", options.message ?? "修正"], "commit できない");
+            const commitSha = (yield* git(cwd, ["rev-parse", "HEAD"], "commit を読めない")).trim();
+            const diff = yield* git(cwd, ["diff", "--no-ext-diff", "--no-textconv", "HEAD^1", "HEAD"], "差分を読めない");
+            return { commitSha, diff: truncateDiff(diff) };
+          }
           for (const path of conflicted) {
             const content = yield* fs.readFileString(`${cwd}/${path}`).pipe(Effect.orElseSucceed(() => ""));
             if (hasConflictMarkers(content)) return yield* new ConflictWorkspaceError({ message: `コンフリクトの印が残っている: ${path}` });

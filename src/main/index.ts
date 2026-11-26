@@ -38,6 +38,7 @@ import {
   startConflictResolution,
 } from "../app/conflict-resolution-flow.js";
 import { ConflictWorkspace } from "../core/agent/conflict-workspace.js";
+import { finishPullRequestFix, latestPullRequestFix, pushPullRequestFix, startPullRequestFix } from "../app/pull-request-fix-flow.js";
 import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
@@ -610,6 +611,48 @@ function registerReplan() {
   );
 }
 
+// 修正はコマンドも使うので、調査より時間と予算がかかる
+const PULL_FIX_BUDGET_USD = 5;
+
+function registerPullRequestFix() {
+  ipcMain.handle(IPC_CHANNELS.fixPullRequest, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const taskId = yield* decodeTaskId(input);
+        const target = yield* conflictTarget(taskId);
+        if (!(yield* claudeAllowedFor(target.accountId))) {
+          return yield* new GitHubRequestError({ message: "このアカウントでは Claude Code を使わない設定です。設定画面で AI の調査を有効にしてから直してください" });
+        }
+        const runId = yield* startPullRequestFix(taskId);
+        runtime.runFork(finishPullRequestFix(runId, { model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: PULL_FIX_BUDGET_USD }));
+      }),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.pullRequestFix, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const latest = yield* latestPullRequestFix(yield* decodeTaskId(input));
+        if (Option.isNone(latest)) return { error: "Claude Code が修正した記録がない" };
+        const { cwd: _cwd, ...view } = latest.value.result;
+        return view;
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+  // 外部への書き込み。renderer で差分を見せ、ユーザーが承認したときだけ呼ばれる
+  ipcMain.handle(IPC_CHANNELS.pushPullRequestFix, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* decodeConflictPushRequest(input);
+        yield* pushPullRequestFix(request.taskId, request.commitSha, (accountId) =>
+          Effect.gen(function* () {
+            return Redacted.value(yield* (yield* SecretStore).require(yield* decodeSecretKey(`github.${accountId}.token`)));
+          }),
+        );
+      }),
+    ),
+  );
+}
+
 function registerConflictResolution() {
   ipcMain.handle(IPC_CHANNELS.resolveConflicts, (_event, input: unknown) =>
     outcomeOf(
@@ -770,6 +813,7 @@ void app.whenReady().then(() => {
   registerIpc();
   registerMerge();
   registerConflictResolution();
+  registerPullRequestFix();
   registerReplan();
   registerTasksAndRecurring();
   registerSlackSettings();

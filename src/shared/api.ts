@@ -84,6 +84,9 @@ export type RecurringTaskView = { id: number; title: string; note: string; sched
 /** 作る日が近い定期の Task の予告（Todo にゴーストとして出す） */
 export type RecurringGhost = { ruleId: number; title: string; period: string; date: { year: number; month: number; day: number }; daysLeft: number };
 
+/** Claude Code が PR を修正した結果。push の確認に出す */
+export type PullRequestFixView = { repository: string; headRef: string; step: string; summary: string; verification: string; concerns: string; diff: string; commitSha: string };
+
 export type Outcome = { ok: true; detail?: string } | { ok: false; message: string };
 
 export type FilterPreviewRequest = {
@@ -112,6 +115,11 @@ export interface LiveTodoApi {
   reopenStep(taskId: number, stepId: string): Promise<Outcome>;
   /** 次にやることを考え直させる。済んだ手順は残し、残りだけを AI が考える */
   replanNextActions(taskId: number): Promise<Outcome>;
+  /** Claude Code に PR を修正させる（コマンドも使うが、push はしない）。裏で進み、Task は処理中のレーンに移る */
+  fixPullRequest(taskId: number): Promise<Outcome>;
+  pullRequestFix(taskId: number): Promise<PullRequestFixView | { error: string }>;
+  /** 修正した commit を PR のブランチに push する。外部への書き込み。差分を確かめて承認したあとにだけ呼ぶ */
+  pushPullRequestFix(taskId: number, commitSha: string): Promise<Outcome>;
   /** Claude Code にコンフリクトを直させる。裏で進み、Task は処理中のレーンに移る */
   resolveConflicts(taskId: number): Promise<Outcome>;
   conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;

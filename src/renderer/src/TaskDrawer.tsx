@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ConflictResolutionView, MergePlanView, MovableStatus, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
+import type { ConflictResolutionView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
 import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber , tracksSlackSaved } from "./task-text.js";
@@ -514,7 +514,7 @@ function StepItem(props: {
       )}
       {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push") && (
         <div className="step-actions">
-          {step.kind === "fix_and_push" && <span className="field-hint">アプリからの修正はまだできません。修正して push したら「済んだ」を押してください</span>}
+          {step.kind === "fix_and_push" && <PullRequestFixFlow taskId={detail.id} step={step.title} onStarted={props.onStarted} onPushed={props.onChanged} />}
           <button type="button" className="quiet-button" onClick={() => void run(api.completeStep(detail.id, step.id))}>
             済んだ
           </button>
@@ -648,6 +648,65 @@ function ConflictPushFlow({ taskId, onPushed }: { taskId: number; onPushed: () =
         </div>
       </div>
       {state.kind === "failed" && <p className="problem">push できませんでした: {state.message}</p>}
+    </div>
+  );
+}
+
+/** Claude Code に PR を修正させ、直した内容を確かめて push する。自分で直したなら「済んだ」でもよい */
+function PullRequestFixFlow({ taskId, step, onStarted, onPushed }: { taskId: number; step: string; onStarted: () => Promise<void>; onPushed: () => Promise<void> }) {
+  const [view, setView] = useState<PullRequestFixView | null>(null);
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string }>({ kind: "idle" });
+  useEffect(() => {
+    void api.pullRequestFix(taskId).then((result) => setView("error" in result || result.step !== step ? null : result));
+  }, [taskId, step]);
+  const start = async () => {
+    setState({ kind: "busy" });
+    const outcome = await api.fixPullRequest(taskId);
+    if (outcome.ok) await onStarted();
+    else setState({ kind: "failed", message: outcome.message });
+  };
+  const push = async () => {
+    if (view === null) return;
+    setState({ kind: "busy" });
+    const outcome = await api.pushPullRequestFix(taskId, view.commitSha);
+    if (outcome.ok) await onPushed();
+    else setState({ kind: "failed", message: outcome.message });
+  };
+
+  return (
+    <div className="step-actions step-actions--column">
+      {view === null ? (
+        <>
+          <span className="field-hint">PR のブランチを取り出して、Claude Code が調査の内容どおりに直します。確認のコマンドも実行しますが、push は確かめてからです</span>
+          <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void start()}>
+            Claude Code に修正させる
+          </button>
+        </>
+      ) : (
+        <>
+          <Markdown text={view.summary} onOpenLink={(url) => void api.openExternal(url)} />
+          <p className="field-hint">確かめたこと: {view.verification}</p>
+          {view.concerns !== "" && <p className="field-hint">確かめてほしい点: {view.concerns}</p>}
+          <details className="conflict-diff">
+            <summary>差分</summary>
+            <pre>{view.diff}</pre>
+          </details>
+          <div className="merge-confirm" role="alertdialog" aria-labelledby={`fix-push-${taskId}`}>
+            <p id={`fix-push-${taskId}`} className="merge-confirm-title">
+              {view.repository} の {view.headRef} に、この修正の commit（<code className="session-id">{view.commitSha.slice(0, 7)}</code>）を push します
+            </p>
+            <div className="merge-confirm-actions">
+              <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void push()}>
+                push する
+              </button>
+              <button type="button" className="quiet-button" disabled={state.kind === "busy"} onClick={() => void start()}>
+                もう一度直させる
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+      {state.kind === "failed" && <p className="problem">{state.message}</p>}
     </div>
   );
 }
