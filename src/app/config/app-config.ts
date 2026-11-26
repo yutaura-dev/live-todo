@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Option, Schema } from "effect";
 import { isRepositoryPattern } from "../../sources/github/repository-filter.js";
+import { NOTION_ORIGINS } from "../../sources/notion/notion-client-live.js";
 
 export class InvalidAppConfigError extends Schema.TaggedError<InvalidAppConfigError>()("InvalidAppConfigError", {
   message: Schema.String,
@@ -54,6 +55,19 @@ const SlackAccount = Schema.Struct({
 });
 export type SlackAccount = typeof SlackAccount.Type;
 
+const NotionAccount = Schema.Struct({
+  kind: Schema.Literal("notion"),
+  id: AccountId,
+  // セッションの持ち主。Cookie の notion_user_id とヘッダに入れる（ADR-0015）
+  userId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)),
+  // セッションを取ったブラウザの User-Agent。ログインと同期で同じ値を使う
+  userAgent: Schema.NonEmptyString,
+  // notion.so から notion.com への移行中で、ログインしたドメインによって API の接続先が違う
+  origin: Schema.Literals(NOTION_ORIGINS).pipe(Schema.withDecodingDefaultKey(Effect.succeed("https://www.notion.so" as const))),
+  llmProfile: Schema.optional(Schema.String),
+});
+export type NotionAccount = typeof NotionAccount.Type;
+
 /** 利用者が決めたルール（ADR-0014）。条件は言葉で書き、操作は Source ごとに持つ（今は Gmail のラベル・既読・アーカイブだけ） */
 const Rule = Schema.Struct({
   id: Schema.NonEmptyString,
@@ -91,6 +105,7 @@ const AppConfigFile = Schema.Struct({
   // GitHub の accounts と分ける理由: GitHub だけの項目（リポジトリのフィルタ・依存更新の調査）を読む箇所を、種類で分けずに済ませるため
   slackAccounts: Schema.Array(SlackAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   gmailAccounts: Schema.Array(GmailAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  notionAccounts: Schema.Array(NotionAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   // 利用者が決めたルール。決めたルールの範囲の書き込みは、決めたことを承認とみなして自動で行う（ADR-0014）
   rules: Schema.Array(Rule).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 });
@@ -101,10 +116,13 @@ export type ResolvedSlackAccount = SlackAccount & { resolvedLlmProfile: LlmProfi
 
 export type ResolvedGmailAccount = GmailAccount & { resolvedLlmProfile: LlmProfile };
 
-export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts" | "gmailAccounts"> & {
+export type ResolvedNotionAccount = NotionAccount & { resolvedLlmProfile: LlmProfile };
+
+export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts" | "gmailAccounts" | "notionAccounts"> & {
   accounts: ReadonlyArray<ResolvedAccount>;
   slackAccounts: ReadonlyArray<ResolvedSlackAccount>;
   gmailAccounts: ReadonlyArray<ResolvedGmailAccount>;
+  notionAccounts: ReadonlyArray<ResolvedNotionAccount>;
 };
 
 const decodeFile = Schema.decodeUnknownEffect(AppConfigFile);
@@ -174,6 +192,18 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
     gmailAccounts.push({ ...account, resolvedLlmProfile });
   });
 
+  const notionAccounts: ResolvedNotionAccount[] = [];
+  file.notionAccounts.forEach((account, index) => {
+    if (seenIds.has(account.id)) issues.push(`notionAccounts[${index}].id: "${account.id}" が重複している`);
+    seenIds.add(account.id);
+    const resolvedLlmProfile = profileOf(account.llmProfile ?? file.defaultLlmProfile);
+    if (resolvedLlmProfile === undefined) {
+      if (account.llmProfile !== undefined) issues.push(`notionAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
+      return;
+    }
+    notionAccounts.push({ ...account, resolvedLlmProfile });
+  });
+
   file.rules.forEach((rule, at) => {
     if (rule.when.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「どういう時」を書いてください`);
     if (rule.then.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書いてください`);
@@ -187,7 +217,7 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
   if (issues.length > 0) {
     return yield* new InvalidAppConfigError({ message: issues.join("\n") });
   }
-  return { ...file, accounts, slackAccounts, gmailAccounts };
+  return { ...file, accounts, slackAccounts, gmailAccounts, notionAccounts };
 });
 
 /** 設定画面に出すための、検証前の設定。ファイルがなければ none */

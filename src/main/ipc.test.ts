@@ -31,6 +31,16 @@ describe("isAllowedExternalUrl（Gmail）", () => {
   });
 });
 
+describe("isAllowedExternalUrl（Notion）", () => {
+  it.each(["https://www.notion.so/33333333333343338333333333333333?d=d1", "https://notion.so/abc", "https://app.notion.com/p/abc"])("Notion のページは開いてよい: %s", (url) => {
+    assert.isTrue(isAllowedExternalUrl(url));
+  });
+
+  it.each(["http://www.notion.so/abc", "https://www.notion.so.evil.example/", "https://evil-notion.so/"])("それ以外は開かない: %s", (url) => {
+    assert.isFalse(isAllowedExternalUrl(url));
+  });
+});
+
 describe("isAllowedExternalUrl", () => {
   it.each(["https://github.com/acme/app/pull/42", "https://github.com/acme/app/issues/7#issuecomment-1"])(
     "github.com の https の URL は開いてよい: %s",
@@ -78,7 +88,7 @@ describe("decodeTaskId", () => {
 });
 
 describe("decodeSecretKey", () => {
-  it.effect.each(["github.work.token", "github.my-account.token", "llm.anthropic.api_key", "llm.openai.api_key", "slack.home.token", "slack.home.cookie"])(
+  it.effect.each(["github.work.token", "github.my-account.token", "llm.anthropic.api_key", "llm.openai.api_key", "slack.home.token", "slack.home.cookie", "notion.notes.token"])(
     "アプリが使う秘密情報のキーを受け取る: %s",
     (key) =>
       Effect.gen(function* () {
@@ -86,7 +96,7 @@ describe("decodeSecretKey", () => {
       }),
   );
 
-  it.effect.each(["github.work", "github.Work.token", "github.a:b.token", "llm.gemini.api_key", "slack.home.user_agent", "anything", 1])(
+  it.effect.each(["github.work", "github.Work.token", "github.a:b.token", "llm.gemini.api_key", "slack.home.user_agent", "notion.notes.cookie", "anything", 1])(
     "それ以外のキーはエラーにする: %s",
     (key) =>
       Effect.gen(function* () {

@@ -1,0 +1,522 @@
+{
+  "notificationIds": [
+    "n-mention-comment",
+    "n-reply-answered",
+    "n-resolved",
+    "n-reminder",
+    "n-edited",
+    "n-mention-page",
+    "n-old"
+  ],
+  "recordMap": {
+    "notification": {
+      "n-mention-comment": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "n-mention-comment",
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "activity_id": "a1",
+            "space_id": "44444444-4444-4444-8444-444444444444",
+            "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+            "channel": "mentions",
+            "read": false,
+            "invalid": false,
+            "end_time": "1764100000000"
+          },
+          "role": "reader"
+        }
+      },
+      "n-reply-answered": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "n-reply-answered",
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "activity_id": "a2",
+            "space_id": "44444444-4444-4444-8444-444444444444",
+            "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+            "channel": "following",
+            "read": false,
+            "invalid": false,
+            "end_time": "1764099999000"
+          },
+          "role": "reader"
+        }
+      },
+      "n-resolved": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "n-resolved",
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "activity_id": "a3",
+            "space_id": "44444444-4444-4444-8444-444444444444",
+            "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+            "channel": "following",
+            "read": false,
+            "invalid": false,
+            "end_time": "1764099998000"
+          },
+          "role": "reader"
+        }
+      },
+      "n-reminder": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "n-reminder",
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "activity_id": "a4",
+            "space_id": "44444444-4444-4444-8444-444444444444",
+            "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+            "channel": "mentions",
+            "read": false,
+            "invalid": false,
+            "end_time": "1764099997000"
+          },
+          "role": "reader"
+        }
+      },
+      "n-edited": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "n-edited",
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "activity_id": "a5",
+            "space_id": "44444444-4444-4444-8444-444444444444",
+            "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+            "channel": "following",
+            "read": false,
+            "invalid": false,
+            "end_time": "1764099996000"
+          },
+          "role": "reader"
+        }
+      },
+      "n-mention-page": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "n-mention-page",
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "activity_id": "a6",
+            "space_id": "44444444-4444-4444-8444-444444444444",
+            "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+            "channel": "mentions",
+            "read": true,
+            "invalid": false,
+            "end_time": "1764099995000"
+          },
+          "role": "reader"
+        }
+      },
+      "n-old": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "n-old",
+            "user_id": "11111111-1111-4111-8111-111111111111",
+            "activity_id": "a7",
+            "space_id": "44444444-4444-4444-8444-444444444444",
+            "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+            "channel": "mentions",
+            "read": false,
+            "invalid": false,
+            "end_time": "1763200000000"
+          },
+          "role": "reader"
+        }
+      }
+    },
+    "activity": {
+      "a1": {
+        "role": "reader",
+        "value": {
+          "id": "a1",
+          "type": "user-mentioned",
+          "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+          "mentioned_user_id": "11111111-1111-4111-8111-111111111111",
+          "end_time": "1764100000000",
+          "edits": [
+            {
+              "type": "comment-created",
+              "authors": [
+                {
+                  "id": "22222222-2222-4222-8222-222222222222",
+                  "table": "notion_user"
+                }
+              ],
+              "timestamp": 1764100000000,
+              "comment_id": "c1",
+              "discussion_id": "d1",
+              "comment_data": {
+                "text": [
+                  [
+                    "‣",
+                    [
+                      [
+                        "u",
+                        "11111111-1111-4111-8111-111111111111"
+                      ]
+                    ]
+                  ],
+                  [
+                    " 来週までにレビューお願いします\n詳細は下に"
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "a2": {
+        "role": "reader",
+        "value": {
+          "id": "a2",
+          "type": "commented",
+          "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+          "end_time": "1764099999000",
+          "edits": [
+            {
+              "type": "comment-created",
+              "authors": [
+                {
+                  "id": "22222222-2222-4222-8222-222222222222",
+                  "table": "notion_user"
+                }
+              ],
+              "timestamp": 1764099999000,
+              "comment_id": "c2",
+              "discussion_id": "d2",
+              "comment_data": {
+                "text": [
+                  [
+                    "この数字で合っていますか？"
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "a3": {
+        "role": "reader",
+        "value": {
+          "id": "a3",
+          "type": "commented",
+          "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+          "end_time": "1764099998000",
+          "edits": [
+            {
+              "type": "comment-created",
+              "authors": [
+                {
+                  "id": "22222222-2222-4222-8222-222222222222",
+                  "table": "notion_user"
+                }
+              ],
+              "timestamp": 1764099998000,
+              "comment_id": "c4",
+              "discussion_id": "d3",
+              "comment_data": {
+                "text": [
+                  [
+                    "表記を直しました"
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "a4": {
+        "role": "reader",
+        "value": {
+          "id": "a4",
+          "type": "reminder",
+          "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+          "mentioned_block_id": "blk-reminder",
+          "end_time": "1764099997000",
+          "edits": []
+        }
+      },
+      "a5": {
+        "role": "reader",
+        "value": {
+          "id": "a5",
+          "type": "block-edited",
+          "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+          "end_time": "1764099996000",
+          "edits": [
+            {
+              "type": "block-changed",
+              "authors": [
+                {
+                  "id": "22222222-2222-4222-8222-222222222222",
+                  "table": "notion_user"
+                }
+              ],
+              "timestamp": 1764099996000
+            }
+          ]
+        }
+      },
+      "a6": {
+        "role": "reader",
+        "value": {
+          "id": "a6",
+          "type": "user-mentioned",
+          "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+          "mentioned_user_id": "11111111-1111-4111-8111-111111111111",
+          "mentioned_block_id": "blk-mention",
+          "end_time": "1764099995000",
+          "edits": [
+            {
+              "type": "block-created",
+              "authors": [
+                {
+                  "id": "22222222-2222-4222-8222-222222222222",
+                  "table": "notion_user"
+                }
+              ],
+              "timestamp": 1764099995000
+            }
+          ]
+        }
+      },
+      "a7": {
+        "role": "reader",
+        "value": {
+          "id": "a7",
+          "type": "user-mentioned",
+          "navigable_block_id": "33333333-3333-4333-8333-333333333333",
+          "mentioned_user_id": "11111111-1111-4111-8111-111111111111",
+          "end_time": "1763200000000",
+          "edits": [
+            {
+              "type": "comment-created",
+              "authors": [
+                {
+                  "id": "22222222-2222-4222-8222-222222222222",
+                  "table": "notion_user"
+                }
+              ],
+              "timestamp": 1763200000000,
+              "comment_id": "c9",
+              "discussion_id": "d9",
+              "comment_data": {
+                "text": [
+                  [
+                    "古い依頼"
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "block": {
+      "33333333-3333-4333-8333-333333333333": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "33333333-3333-4333-8333-333333333333",
+            "type": "page",
+            "properties": {
+              "title": [
+                [
+                  "リリース計画"
+                ]
+              ]
+            }
+          },
+          "role": "reader"
+        }
+      },
+      "blk-reminder": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "blk-reminder",
+            "type": "text",
+            "properties": {
+              "title": [
+                [
+                  "請求書を送る "
+                ],
+                [
+                  "‣",
+                  [
+                    [
+                      "d",
+                      {
+                        "type": "date",
+                        "start_date": "2026-11-28"
+                      }
+                    ]
+                  ]
+                ]
+              ]
+            }
+          },
+          "role": "reader"
+        }
+      },
+      "blk-mention": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "blk-mention",
+            "type": "text",
+            "properties": {
+              "title": [
+                [
+                  "‣",
+                  [
+                    [
+                      "u",
+                      "11111111-1111-4111-8111-111111111111"
+                    ]
+                  ]
+                ],
+                [
+                  " 議事録を確認してください"
+                ]
+              ]
+            }
+          },
+          "role": "reader"
+        }
+      }
+    },
+    "notion_user": {
+      "11111111-1111-4111-8111-111111111111": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "yutaura",
+            "email": "me@example.com"
+          },
+          "role": "reader"
+        }
+      },
+      "22222222-2222-4222-8222-222222222222": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "name": "田中",
+            "email": "tanaka@example.com"
+          },
+          "role": "reader"
+        }
+      }
+    },
+    "discussion": {
+      "d1": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "d1",
+            "parent_id": "33333333-3333-4333-8333-333333333333",
+            "parent_table": "block",
+            "resolved": false,
+            "comments": [
+              "c1"
+            ]
+          },
+          "role": "reader"
+        }
+      },
+      "d2": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "d2",
+            "parent_id": "33333333-3333-4333-8333-333333333333",
+            "parent_table": "block",
+            "resolved": false,
+            "comments": [
+              "c2",
+              "c3"
+            ]
+          },
+          "role": "reader"
+        }
+      },
+      "d3": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "d3",
+            "parent_id": "33333333-3333-4333-8333-333333333333",
+            "parent_table": "block",
+            "resolved": true,
+            "comments": [
+              "c4"
+            ]
+          },
+          "role": "reader"
+        }
+      }
+    },
+    "comment": {
+      "c1": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "c1",
+            "parent_id": "d1",
+            "parent_table": "discussion",
+            "created_by_id": "22222222-2222-4222-8222-222222222222",
+            "created_time": 1764100000000
+          },
+          "role": "reader"
+        }
+      },
+      "c2": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "c2",
+            "parent_id": "d2",
+            "parent_table": "discussion",
+            "created_by_id": "22222222-2222-4222-8222-222222222222",
+            "created_time": 1764099999000
+          },
+          "role": "reader"
+        }
+      },
+      "c3": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "c3",
+            "parent_id": "d2",
+            "parent_table": "discussion",
+            "created_by_id": "11111111-1111-4111-8111-111111111111",
+            "created_time": 1764099999500
+          },
+          "role": "reader"
+        }
+      },
+      "c4": {
+        "spaceId": "44444444-4444-4444-8444-444444444444",
+        "value": {
+          "value": {
+            "id": "c4",
+            "parent_id": "d3",
+            "parent_table": "discussion",
+            "created_by_id": "22222222-2222-4222-8222-222222222222",
+            "created_time": 1764099998000
+          },
+          "role": "reader"
+        }
+      }
+    }
+  }
+}

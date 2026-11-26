@@ -14,7 +14,7 @@ export const decodeTaskId = Schema.decodeUnknownEffect(TaskId);
 
 // renderer から書き換えられる秘密情報を、アプリが読むキーだけに絞る（任意の名前で保存させない）
 const SecretKey = Schema.String.check(
-  Schema.isPattern(/^(github\.[a-z0-9][a-z0-9-]*\.token|slack\.[a-z0-9][a-z0-9-]*\.(token|cookie)|llm\.(anthropic|openai)\.api_key)$/),
+  Schema.isPattern(/^(github\.[a-z0-9][a-z0-9-]*\.token|slack\.[a-z0-9][a-z0-9-]*\.(token|cookie)|notion\.[a-z0-9][a-z0-9-]*\.token|llm\.(anthropic|openai)\.api_key)$/),
 );
 export const decodeSecretKey = Schema.decodeUnknownEffect(SecretKey);
 
@@ -60,12 +60,15 @@ export const decodeFilterPreviewRequest = Schema.decodeUnknownEffect(
   }),
 );
 
-/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue、Slack、Gmail）だけに絞る */
+const NOTION_HOSTS = new Set(["notion.so", "www.notion.so", "app.notion.com", "www.notion.com"]);
+
+/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue、Slack、Gmail、Notion）だけに絞る */
 export function isAllowedExternalUrl(url: string): boolean {
   if (!URL.canParse(url)) return false;
   const parsed = new URL(url);
   return (
     parsed.protocol === "https:" &&
-    (parsed.hostname === "github.com" || parsed.hostname === "mail.google.com" || /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(parsed.hostname))
+    (parsed.hostname === "github.com" || parsed.hostname === "mail.google.com" || /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(parsed.hostname) ||
+      NOTION_HOSTS.has(parsed.hostname))
   );
 }

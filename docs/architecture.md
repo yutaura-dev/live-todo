@@ -182,7 +182,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 | Slack API | メッセージ・メンション・スレッドの取得 | レート制限、ワークスペース側のアプリ承認が要る場合がある |
 | Gmail API / Google Calendar API / Google Drive API | メール・予定・Docs のコメントの取得 | Google OAuth の審査範囲、トークンの有効期限 |
 | GitHub API | Issue / PR / レビュー依頼 / 通知の取得 | レート制限 |
-| Notion API | ページ・メンション・割り当ての取得 | インテグレーションへのページ共有が必要 |
+| Notion の Web クライアントの API（非公開） | 受信トレイ（メンション・コメント・リマインダー）の取得（[ADR-0015](decisions/0015-notion-session-and-inbox.md)） | ブラウザのセッション（token_v2）が要る。予告なく仕様が変わる |
 | Microsoft Graph | Outlook（Mail・Calendar）・Teams の取得 | 会社テナントでのアプリ同意が必要な場合がある |
 | LLM API（Claude / OpenAI / Gemini / Azure OpenAI / Bedrock） | fallback の判定、Epic の名前付け、Agent、Pre-work | 従量課金のコスト、会社ポリシー上の利用可否 |
 | Drizzle ORM / drizzle-kit 1.0 rc | クエリとマイグレーション | rc のため正式版までに API が変わる可能性がある |

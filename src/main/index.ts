@@ -32,6 +32,11 @@ import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
 import { releaseUntouchedInboxTasks, runSlackConversationTriage } from "../app/slack-conversations.js";
 import { captureSlackSession } from "./slack-connect.js";
+import { captureNotionSession } from "./notion-connect.js";
+import { withNotionSession } from "../app/notion-session.js";
+import { makeNotionJobs, notionTokenKey } from "../app/notion-jobs.js";
+import { NotionClient, NotionRequestError } from "../sources/notion/notion-client.js";
+import { NotionClientLive } from "../sources/notion/notion-client-live.js";
 import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js";
 import { slackWrite } from "../app/slack-write.js";
 import {
@@ -179,6 +184,19 @@ const startSync = Effect.gen(function* () {
       ),
     )
   ).flat();
+  // Notion も、1 つのアカウントのセッションが切れても、ほかの同期は止めない
+  const notionJobs = (
+    yield* Effect.forEach(config.notionAccounts, (account) =>
+      makeNotionJobs(account).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Notion（${account.id}）の同期を始められない: ${errorMessage(error)}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
   const gmailJobs = (
     yield* Effect.forEach(config.gmailAccounts, (account) =>
       makeGmailJobs(account, config.rules).pipe(
@@ -300,8 +318,8 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
     concurrency: 8,
     discard: true,
   });
@@ -355,12 +373,17 @@ const settingsSnapshot = Effect.gen(function* () {
     Option.map((loaded) => loaded.slackAccounts.map((account) => account.id)),
     Option.getOrElse((): string[] => []),
   );
+  const notionIds = loadedConfig.pipe(
+    Option.map((loaded) => loaded.notionAccounts.map((account) => account.id)),
+    Option.getOrElse((): string[] => []),
+  );
   const stored = new Set(yield* (yield* SecretVault).storedKeys);
   const store = yield* SecretStore;
   const secrets: Record<string, SecretStatus> = {};
   for (const key of [
     ...accountIds.map((id) => `github.${id}.token`),
     ...slackIds.flatMap((id) => [`slack.${id}.token`, `slack.${id}.cookie`]),
+    ...notionIds.map(notionTokenKey),
     ...LLM_SECRET_KEYS,
   ]) {
     secrets[key] = stored.has(key) ? "saved" : Option.isSome(yield* store.get(key)) ? "env" : "missing";
@@ -525,6 +548,22 @@ const slackClientFor = (accountId: string) =>
       return yield* SlackClient;
     }).pipe(
       Effect.provide(SlackClientLive({ workspace: account.workspace, token, cookie, userAgent: account.userAgent })),
+      Effect.provideService(HttpClient.HttpClient, http),
+    );
+  });
+
+/** 保存した設定と秘密情報で、Notion のクライアントを作る（接続の確認のため） */
+const notionClientFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const account = config.notionAccounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) return yield* new NotionRequestError({ message: `設定に Notion のアカウント「${accountId}」がない` });
+    const token = yield* (yield* SecretStore).require(notionTokenKey(accountId));
+    const http = yield* HttpClient.HttpClient;
+    return yield* Effect.gen(function* () {
+      return yield* NotionClient;
+    }).pipe(
+      Effect.provide(NotionClientLive({ token, userId: account.userId, userAgent: account.userAgent, origin: account.origin })),
       Effect.provideService(HttpClient.HttpClient, http),
     );
   });
@@ -835,6 +874,41 @@ function registerSlackSettings() {
         const accountId = yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)))(input);
         const me = yield* (yield* slackClientFor(accountId)).authTest;
         return { user: me.user, team: me.team };
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+}
+
+function registerNotionSettings() {
+  // 外部への書き込みではない（自分のセッションを読み取るだけ）。読み取った値は暗号化して保存し、ログに出さない
+  ipcMain.handle(IPC_CHANNELS.connectNotion, async (_event, input: unknown) => {
+    const request = await runtime
+      .runPromise(Schema.decodeUnknownEffect(Schema.Struct({ accountId: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)) }))(input))
+      .catch(() => undefined);
+    if (request === undefined) return { error: "アカウントの名前が正しくない" };
+    const captured = await captureNotionSession().catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+    if (typeof captured === "string") return { error: captured };
+    const outcome = await outcomeOf(
+      Effect.gen(function* () {
+        yield* (yield* SecretVault).set(notionTokenKey(request.accountId), Redacted.make(captured.token));
+        const document = yield* readAppConfigDocument(configPath);
+        yield* saveAppConfigFile(
+          configPath,
+          withNotionSession(Option.getOrElse(document, () => ({})), { id: request.accountId, userId: captured.userId, userAgent: captured.userAgent, origin: captured.origin }),
+        );
+      }),
+    );
+    if (!outcome.ok) return { error: outcome.message };
+    await restartSync();
+    return { user: captured.userId };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.testNotion, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const accountId = yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)))(input);
+        const me = yield* (yield* notionClientFor(accountId)).me;
+        return { user: me.name, spaces: me.spaces.map((space) => space.name) };
       }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
     ),
   );
@@ -1163,6 +1237,7 @@ void app.whenReady().then(() => {
   registerReplan();
   registerTasksAndRecurring();
   registerSlackSettings();
+  registerNotionSettings();
   registerGmailActions();
   registerTaskQuestions();
   createWindow();

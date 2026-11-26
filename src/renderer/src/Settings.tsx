@@ -16,6 +16,7 @@ import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, 
 type Account = ConfigDocument["accounts"][number];
 type SlackAccountDraft = NonNullable<ConfigDocument["slackAccounts"]>[number];
 type GmailAccountDraft = NonNullable<ConfigDocument["gmailAccounts"]>[number];
+type NotionAccountDraft = NonNullable<ConfigDocument["notionAccounts"]>[number];
 
 const PREVIEW_DELAY_MS = 400;
 
@@ -42,6 +43,7 @@ function toDocument(config: unknown): ConfigDocument {
     slackAccounts: Array.isArray(draft.slackAccounts) ? draft.slackAccounts : [],
     // 画面で扱わない項目も落とさない（ここで落とすと、保存したときに設定ファイルから消える）
     gmailAccounts: Array.isArray(draft.gmailAccounts) ? draft.gmailAccounts : [],
+    notionAccounts: Array.isArray(draft.notionAccounts) ? draft.notionAccounts : [],
     rules: Array.isArray(draft.rules) ? draft.rules : [],
   };
 }
@@ -145,6 +147,39 @@ export function Settings() {
                 slackAccounts: [...(current.slackAccounts ?? []), { kind: "slack", id, workspace: "", userAgent: "" }],
               }))
             }
+          />
+        </section>
+
+        <section className="settings-section" aria-labelledby="notion-heading">
+          <h3 id="notion-heading" className="section-title">
+            Notion
+          </h3>
+          <p className="field-hint">
+            受信トレイに届いたメンション・コメント・リマインダーを Task にします。ブラウザのセッションを使うので、私用のワークスペースか、管理者に確かめたワークスペースだけで使ってください
+          </p>
+          {(draft.notionAccounts ?? []).map((account, index) => (
+            <NotionAccountEditor
+              key={account.id || index}
+              account={account}
+              secrets={snapshot.secrets}
+              onChange={(next) =>
+                setDraft((current) => ({ ...current, notionAccounts: (current.notionAccounts ?? []).map((entry, at) => (at === index ? next : entry)) }))
+              }
+              onRemove={() => setDraft((current) => ({ ...current, notionAccounts: (current.notionAccounts ?? []).filter((_, at) => at !== index) }))}
+              onSecretChanged={reload}
+              onConnected={async () => setDraft(toDocument((await reload()).config))}
+            />
+          ))}
+          <AddAccount
+            label="Notion のアカウントを追加"
+            placeholder="notes"
+            existing={[
+              ...draft.accounts.map((account) => account.id),
+              ...(draft.slackAccounts ?? []).map((account) => account.id),
+              ...(draft.gmailAccounts ?? []).map((account) => account.id),
+              ...(draft.notionAccounts ?? []).map((account) => account.id),
+            ]}
+            onAdd={(id) => setDraft((current) => ({ ...current, notionAccounts: [...(current.notionAccounts ?? []), { kind: "notion", id, userId: "", userAgent: "" }] }))}
           />
         </section>
 
@@ -530,6 +565,83 @@ function SlackAccountEditor(props: {
         </label>
         <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
           このワークスペースを外す
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function NotionAccountEditor(props: {
+  account: NotionAccountDraft;
+  secrets: Record<string, SecretStatus>;
+  onChange: (next: NotionAccountDraft) => void;
+  onRemove: () => void;
+  onSecretChanged: () => Promise<unknown>;
+  onConnected: () => Promise<void>;
+}) {
+  const { account } = props;
+  const [open, setOpen] = useState(account.userId === "");
+  const [connecting, setConnecting] = useState(false);
+  const [check, setCheck] = useState<string | null>(null);
+  const tokenStatus = props.secrets[`notion.${account.id}.token`] ?? "missing";
+  const describe = (result: { user: string; spaces: string[] } | { error: string }) =>
+    "error" in result ? `つながりません: ${result.error}` : `${result.user || "(名前なし)"} としてつながりました（ワークスペース: ${result.spaces.join("、") || "なし"}）`;
+  const connect = async () => {
+    setConnecting(true);
+    setCheck("開いたウィンドウで Notion にログインしてください。ログインが済むと自動で閉じます");
+    const result = await api.connectNotion(account.id);
+    setConnecting(false);
+    if ("error" in result) {
+      setCheck(`取り込めませんでした: ${result.error}`);
+      return;
+    }
+    await props.onConnected();
+    setCheck(describe(await api.testNotion(account.id)));
+  };
+  const test = async () => {
+    setCheck("確かめています");
+    setCheck(describe(await api.testNotion(account.id)));
+  };
+
+  return (
+    <details className="account" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="account-header">
+        <h4 className="account-name">{account.id}</h4>
+        <span className="field-hint">
+          {account.userId === "" ? "未接続" : "接続済み"}・token_v2: {SECRET_LABELS[tokenStatus]}
+        </span>
+      </summary>
+      <div className="account-body">
+        <div className="request-review">
+          <button type="button" className="primary-button" disabled={connecting} onClick={() => void connect()}>
+            ブラウザでログインして取り込む
+          </button>
+          <span className="field-hint">
+            {check ??
+              "Notion のログイン画面を開き、ログインが済んだらセッションを読み取って保存します。このアプリ専用のログインになり、ほかのブラウザのログインには影響しません"}
+          </span>
+        </div>
+        <details className="manual-secrets">
+          <summary className="field-hint">手で入れる</summary>
+          <label className="field">
+            <span className="field-label">ユーザー ID</span>
+            <span className="field-hint">Cookie の notion_user_id の値です</span>
+            <input value={account.userId} onChange={(event) => props.onChange({ ...account, userId: event.target.value.trim() })} />
+          </label>
+          <label className="field">
+            <span className="field-label">ブラウザの User-Agent</span>
+            <span className="field-hint">token_v2 を取ったブラウザで、開発者ツールのコンソールに navigator.userAgent と打って出た値をそのまま貼ります</span>
+            <textarea rows={2} value={account.userAgent} onChange={(event) => props.onChange({ ...account, userAgent: event.target.value.trim() })} />
+          </label>
+          <SecretField label="Cookie の token_v2" secretKey={`notion.${account.id}.token`} status={tokenStatus} onChanged={props.onSecretChanged} />
+        </details>
+        <div className="request-review">
+          <button type="button" className="quiet-button" onClick={() => void test()}>
+            接続を確かめる
+          </button>
+        </div>
+        <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
+          このアカウントを外す
         </button>
       </div>
     </details>

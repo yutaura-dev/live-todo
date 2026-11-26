@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
   previewFilter: "settings:preview-filter",
   testSlack: "settings:test-slack",
   connectSlack: "settings:connect-slack",
+  testNotion: "settings:test-notion",
+  connectNotion: "settings:connect-notion",
   slackAction: "board:slack-action",
   gmailMailTarget: "board:gmail-mail-target",
   taskQuestions: "board:task-questions",

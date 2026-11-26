@@ -93,6 +93,41 @@ describe("decodeAppConfig", () => {
     }));
 });
 
+describe("Notion のアカウント", () => {
+  const notion = { kind: "notion", id: "notes", userId: "11111111-1111-4111-8111-111111111111", userAgent: "Mozilla/5.0 TestBrowser" };
+
+  it.effect("ユーザー ID とブラウザの User-Agent で Notion のアカウントを書ける。接続先は既定で www.notion.so。書かなければ空", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).notionAccounts, []);
+
+      const config = yield* decodeAppConfig({ ...validConfig, notionAccounts: [notion] });
+
+      assert.deepInclude(config.notionAccounts[0], { id: "notes", origin: "https://www.notion.so" });
+      assert.strictEqual(config.notionAccounts[0]?.resolvedLlmProfile.provider, "azure-openai");
+    }));
+
+  it.effect("UUID でないユーザー ID・空の User-Agent・Notion でない接続先はエラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, userId: "me" }] });
+      yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, userAgent: "" }] });
+      yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, origin: "https://evil.example" }] });
+    }));
+
+  it.effect("id はほかのアカウントとも重ならないようにする", () =>
+    Effect.gen(function* () {
+      const reason = yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, id: "work" }] });
+
+      assert.include(reason, "重複");
+    }));
+
+  it.effect("書いた LLM Profile がなければエラーにする", () =>
+    Effect.gen(function* () {
+      const reason = yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, llmProfile: "missing" }] });
+
+      assert.include(reason, "notionAccounts[0].llmProfile");
+    }));
+});
+
 describe("Slack のアカウント", () => {
   const slack = { kind: "slack", id: "home", workspace: "yutaura.slack.com", userAgent: "Mozilla/5.0 TestBrowser" };
 

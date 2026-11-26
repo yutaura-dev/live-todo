@@ -58,6 +58,15 @@ export type ConfigDocument = {
     llmProfile?: string;
     planNextActions?: boolean;
   }>;
+  /** Notion のアカウント（ADR-0015）。token_v2 は秘密情報として別に保存する */
+  notionAccounts?: Array<{
+    kind: "notion";
+    id: string;
+    userId: string;
+    userAgent: string;
+    origin?: "https://www.notion.so" | "https://app.notion.com";
+    llmProfile?: string;
+  }>;
   /** 利用者が決めたルール（ADR-0014）。条件は言葉で書き、操作は Source ごとに持つ */
   rules?: Array<RuleDraft>;
 };
@@ -204,6 +213,10 @@ export interface LiveTodoApi {
   testSlack(accountId: string): Promise<{ user: string; team: string } | { error: string }>;
   /** Slack のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する。workspace が空ならログインしたワークスペースを使う */
   connectSlack(accountId: string, workspace: string): Promise<{ workspace: string; team: string } | { error: string }>;
+  /** Notion のセッションでつながるかを確かめる。誰で、どのワークスペースが見えるか */
+  testNotion(accountId: string): Promise<{ user: string; spaces: string[] } | { error: string }>;
+  /** Notion のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する */
+  connectNotion(accountId: string): Promise<{ user: string } | { error: string }>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

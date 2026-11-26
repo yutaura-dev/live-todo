@@ -46,6 +46,8 @@ const api: LiveTodoApi = {
   gmailRunStep: (taskId, stepId, messageIds) => ipcRenderer.invoke(IPC_CHANNELS.gmailRunStep, { taskId, stepId, messageIds }),
   connectSlack: (accountId, workspace) => ipcRenderer.invoke(IPC_CHANNELS.connectSlack, { accountId, workspace }),
   testSlack: (accountId) => ipcRenderer.invoke(IPC_CHANNELS.testSlack, accountId),
+  connectNotion: (accountId) => ipcRenderer.invoke(IPC_CHANNELS.connectNotion, { accountId }),
+  testNotion: (accountId) => ipcRenderer.invoke(IPC_CHANNELS.testNotion, accountId),
   previewFilter: (request) => ipcRenderer.invoke(IPC_CHANNELS.previewFilter, request),
 };
 
