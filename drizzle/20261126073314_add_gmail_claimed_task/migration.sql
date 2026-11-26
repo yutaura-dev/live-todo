@@ -1,0 +1,1 @@
+ALTER TABLE `gmail_messages` ADD `claimed_task_id` integer;

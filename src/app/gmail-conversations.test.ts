@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import { eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { Database } from "../core/db/database.js";
 import { gmailMessages } from "../core/db/schema.js";
@@ -28,6 +29,7 @@ const harness = (answer: unknown) => {
   gmail.state.texts.set("c", "金曜までにお願いします");
   const requests: ClaudeRequest[] = [];
   const contexts: Array<{ owner: number | string; conversation: { messages: Array<{ who: string; isMe: boolean; subject: string; text: string }> } }> = [];
+  const files: Array<Record<string, string>> = [];
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.provideService(ClaudeCode, ClaudeCode.of({ run: (request) => Effect.sync(() => (requests.push(request), { sessionId: "s", structured: answer, costUsd: 0.01, permissionDenials: 0 })) })),
@@ -36,11 +38,11 @@ const harness = (answer: unknown) => {
         AgentWorkspace.of({
           prepare: () => Effect.die(new Error("使わない")),
           pullRequestState: () => Effect.die(new Error("使わない")),
-          writeContext: (owner, files) => Effect.sync(() => (contexts.push({ owner, conversation: JSON.parse(files["conversation.json"]!) }), `/work/${owner}/context`)),
+          writeContext: (owner, written) => Effect.sync(() => (contexts.push({ owner, conversation: JSON.parse(written["conversation.json"]!) }), files.push({ ...written }), `/work/${owner}/context`)),
         }),
       ),
     );
-  return { gmail, requests, contexts, run: provide(runGmailThreadTriage({ accountId: "me" }, gmail.client)) };
+  return { gmail, requests, contexts, files, run: provide(runGmailThreadTriage({ accountId: "me" }, gmail.client)) };
 };
 
 describe("runGmailThreadTriage（メールのスレッドを読ませて Task にする）", () => {
@@ -123,6 +125,58 @@ describe("runGmailThreadTriage（メールのスレッドを読ませて Task �
       yield* h.run;
       assert.lengthOf(h.requests, 0);
       assert.strictEqual((yield* db.select().from(gmailMessages).pipe(Effect.orDie))[0]!.actionProbability, 0);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("開いている Task の一覧と、受信トレイのまだ Task になっていないメールの一覧も渡す", () =>
+    Effect.gen(function* () {
+      yield* pendingThread("t1");
+      const other = yield* (yield* TaskRepository).createTask({ title: "構造化データを直す", status: "todo" });
+      const db = yield* Database;
+      yield* db
+        .insert(gmailMessages)
+        .values({ accountId: "me", messageId: "bulk1", threadId: "t9", senderKey: "sc@google.com", senderName: "Search Console", subject: "商品スニペットの問題", receivedAt: Date.UTC(2026, 10, 26), kind: "notification", inInbox: true, unread: true, trashed: false, actionChecked: true, actionProbability: 0.2, updatedAt: "2026-11-26T00:00:00.000Z" })
+        .pipe(Effect.orDie);
+      const h = harness({ decision: "none", taskId: 0, title: "", brief: "", reason: "x", related: [] });
+      yield* h.run;
+
+      const files = h.files[0]!;
+      assert.include(files["open-tasks.json"]!, "構造化データを直す");
+      assert.include(files["open-tasks.json"]!, String(other.id));
+      assert.include(files["inbox.json"]!, "商品スニペットの問題");
+      assert.include(files["inbox.json"]!, "bulk1");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("同じ話の Task があれば、新しく作らずにその Task に紐づけて状況を書き直す", () =>
+    Effect.gen(function* () {
+      const item = yield* pendingThread("t1");
+      const existing = yield* (yield* TaskRepository).createTask({ title: "構造化データを直す", status: "todo" });
+      yield* harness({ decision: "update", taskId: existing.id, title: "", brief: "商品スニペットの問題も見つかった", reason: "同じ問題", related: [] }).run;
+
+      const tasks = yield* TaskRepository;
+      assert.strictEqual(Option.getOrThrow(yield* tasks.findTaskByItem(item.id)).id, existing.id);
+      assert.strictEqual(Option.getOrThrow(yield* tasks.findTask(existing.id)).brief, "商品スニペットの問題も見つかった");
+      assert.lengthOf(yield* tasks.listTasks, 1);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("同じ話だとした受信トレイのメールは、送り主の Task から外して同じ Task に紐づける（そのスレッドは読み直さない）", () =>
+    Effect.gen(function* () {
+      yield* pendingThread("t1");
+      const db = yield* Database;
+      yield* db
+        .insert(gmailMessages)
+        .values({ accountId: "me", messageId: "bulk1", threadId: "t9", senderKey: "sc@google.com", senderName: "Search Console", subject: "商品スニペットの問題", receivedAt: Date.UTC(2026, 10, 26), kind: "notification", inInbox: true, unread: true, trashed: false, actionChecked: true, actionProbability: 0.2, updatedAt: "2026-11-26T00:00:00.000Z" })
+        .pipe(Effect.orDie);
+      const h = harness({ decision: "create", taskId: 0, title: "構造化データの問題を直す", brief: "", reason: "x", related: ["bulk1"] });
+      yield* h.run;
+      const tasks = yield* TaskRepository;
+      const created = (yield* tasks.listTasks).find((task) => task.title === "構造化データの問題を直す")!;
+      const [claimed] = yield* db.select().from(gmailMessages).where(eq(gmailMessages.messageId, "bulk1")).pipe(Effect.orDie);
+      assert.deepInclude(claimed, { claimedTaskId: created.id, actionProbability: 1 });
+
+      const t9 = yield* pendingThread("t9");
+      yield* h.run;
+      assert.lengthOf(h.requests, 1);
+      assert.strictEqual(Option.getOrThrow(yield* tasks.findTaskByItem(t9.id)).id, created.id);
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("済んだスレッドは読ませない", () =>

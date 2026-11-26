@@ -214,6 +214,8 @@ export const gmailMessages = sqliteTable(
     actionProbability: real("action_probability"),
     /** メルマガ・お知らせの用件（請求・配送・宣伝など）。送り主を用件ごとに分けてまとめる。判定していなければ null */
     topic: text({ enum: ["billing", "account", "product", "contract", "shipping", "promotion", "news", "other"] }),
+    /** 別のスレッドを読んだ Claude Code が「この Task と同じ話」と決めたメールの Task。スレッドを読み直さずに、その Task に紐づける */
+    claimedTaskId: integer("claimed_task_id"),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [
