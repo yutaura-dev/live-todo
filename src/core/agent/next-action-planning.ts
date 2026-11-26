@@ -4,7 +4,7 @@ import { ProposedWaitConditionSchema, WAIT_CONDITION_JSON_SCHEMA, WAIT_CONDITION
 
 const ProposedStep = Schema.Struct({
   title: Schema.NonEmptyString,
-  type: Schema.Literals(["manual", "wait"]),
+  type: Schema.Literals(["manual", "wait", "merge_pull_request"]),
   until: ProposedWaitConditionSchema,
   effort: Schema.Literals(EFFORTS),
   mode: Schema.Literals(["serial", "parallel"]),
@@ -26,8 +26,9 @@ const stepSchema = {
     title: { type: "string", description: "やること（自分が手を動かす内容を、動詞で終わる短い文で）" },
     type: {
       type: "string",
-      enum: ["manual", "wait"],
-      description: "manual: 自分が手を動かす / wait: 自分では進められず、相手（レビュー・CI・返信など）を待つ",
+      enum: ["manual", "wait", "merge_pull_request"],
+      description:
+        "manual: 自分が手を動かす / wait: 自分では進められず、相手（レビュー・CI・返信など）を待つ / merge_pull_request: この Task が追う PR を merge する（アプリから merge できる）",
     },
     until: WAIT_CONDITION_JSON_SCHEMA,
     effort: { type: "string", enum: [...EFFORTS] },
@@ -85,6 +86,7 @@ export function nextActionPrompt(subject: { title: string; contextDir: string })
     "- 渡した情報（PR の状態など）で分かることを、確認する手順にしない。アプリが見張っているので、人が確かめる必要はない",
     "- レビュー待ち・CI 待ち・返信待ちのように、相手が動くのを待つしかないときは、その手順を wait にする",
     WAIT_CONDITION_PROMPT,
+    "- この Task が追う PR を merge する手順は merge_pull_request にする（アプリのボタンで merge できる）。ほかの PR の merge は manual にする",
     "- 手間（effort）は次の基準で付ける: easy は 10 秒で終わる（ボタンを押す・一言返す）、normal は 5 分あれば終わる、" +
       "hard は 15 分あれば終わる、tedious はそれ以上かかる",
     "",

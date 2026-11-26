@@ -70,6 +70,10 @@ describe("nextActionPrompt", () => {
     assert.include(prompt, "/work/task-1/context/task.json");
   });
 
+  it("Task が追う PR を merge する手順は、アプリから merge できる手順にさせる", () => {
+    assert.include(prompt, "merge_pull_request");
+  });
+
   it("待つ手順には、アプリが見張れるよう何を待つか（レビュー・merge）を書かせる", () => {
     assert.include(prompt, "review_submitted");
     assert.include(prompt, "merged");
@@ -98,6 +102,6 @@ describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
       "merged",
       "none",
     ]);
-    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait"]);
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait", "merge_pull_request"]);
   });
 });

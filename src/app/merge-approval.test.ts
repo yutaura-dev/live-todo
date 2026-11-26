@@ -117,7 +117,7 @@ describe("startMerge / finishMerge（裏で merge する）", () => {
       const taskId = yield* reviewedTask();
       const tasks = yield* TaskRepository;
 
-      const runId = yield* startMerge(taskId, { method: "squash", sha: "head-sha" });
+      const runId = yield* startMerge(taskId, { method: "squash", sha: "head-sha" }, clientFor(gitHubClientStub()));
 
       assert.strictEqual(Option.getOrThrow(yield* tasks.findTask(taskId)).status, "agent_running");
       const [running] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.id, runId));
@@ -134,7 +134,7 @@ describe("startMerge / finishMerge（裏で merge する）", () => {
     Effect.gen(function* () {
       const taskId = yield* reviewedTask({ subjectSha: "newer-sha" });
 
-      const error = yield* Effect.flip(startMerge(taskId, { method: "squash", sha: "head-sha" }));
+      const error = yield* Effect.flip(startMerge(taskId, { method: "squash", sha: "head-sha" }, clientFor(gitHubClientStub())));
 
       assert.strictEqual(error._tag, "MergeNotAllowedError");
       assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
@@ -143,7 +143,7 @@ describe("startMerge / finishMerge（裏で merge する）", () => {
   it.effect("merge に失敗したら、元のレーンに戻して理由を残し、更新マークで知らせる", () =>
     Effect.gen(function* () {
       const taskId = yield* reviewedTask();
-      const runId = yield* startMerge(taskId, { method: "squash", sha: "head-sha" });
+      const runId = yield* startMerge(taskId, { method: "squash", sha: "head-sha" }, clientFor(gitHubClientStub()));
       const client = gitHubClientStub({
         mergePullRequest: () => Effect.fail(new GitHubRequestError({ message: "Head branch was modified", status: 409 })),
       });
@@ -250,3 +250,105 @@ describe("approveAndMerge", () => {
       assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
     }).pipe(Effect.provide(TestDatabase)));
 });
+
+const ownPullTask = (options: { author?: string; nextActions?: unknown } = {}) =>
+  Effect.gen(function* () {
+    const url = "https://github.com/acme/app/pull/733";
+    const item = yield* (yield* SourceItemRepository).upsertItem({
+      source: "github:personal",
+      externalId: "https://api.github.com/repos/acme/app/pulls/733",
+      title: "カレンダーで一覧できるようにする（acme/app）",
+      url,
+      state: "open",
+      fingerprint: "v1",
+      author: options.author ?? "me",
+    });
+    const tasks = yield* TaskRepository;
+    const task = yield* tasks.createTask({ title: item.title, status: "todo" });
+    yield* tasks.linkItem(task.id, item.id, "tracks");
+    if (options.nextActions !== undefined) yield* tasks.updateTask(task.id, { nextActions: options.nextActions as never });
+    return task.id;
+  });
+
+const livePull = (options: { mergeableState?: string; checks?: Array<{ status: string; conclusion: string | null }> } = {}) =>
+  gitHubClientStub({
+    getRepository: () => Effect.succeed({ allowSquashMerge: true, allowMergeCommit: false, allowRebaseMerge: false }),
+    getPullRequest: (apiUrl) =>
+      Effect.succeed(
+        apiUrl === "https://api.github.com/repos/acme/app/pulls/733"
+          ? Option.some<unknown>({ state: "open", draft: false, mergeable_state: options.mergeableState ?? "clean", head: { sha: "live-sha" } })
+          : Option.none(),
+      ),
+    listCheckRuns: (_repository, sha) =>
+      Effect.succeed<unknown>({
+        check_runs: sha === "live-sha" ? (options.checks ?? [{ status: "completed", conclusion: "success" }, { status: "completed", conclusion: "skipped" }]).map((check, index) => ({ name: `c${index}`, ...check })) : [],
+      }),
+  });
+
+describe("自分の PR（依存更新の調査がない PR）の merge", () => {
+  it.effect("CI がすべて通り、コンフリクトもなければ、今の head の commit で merge の確認を出す", () =>
+    Effect.gen(function* () {
+      const taskId = yield* ownPullTask();
+
+      const plan = yield* mergePlan(taskId, clientFor(livePull()));
+
+      assert.deepInclude(plan, { repository: "acme/app", number: 733, sha: "live-sha", method: "squash" });
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("CI が終わっていない・落ちているなら、merge させない", () =>
+    Effect.gen(function* () {
+      const taskId = yield* ownPullTask();
+      for (const checks of [[{ status: "in_progress", conclusion: null }], [{ status: "completed", conclusion: "failure" }]]) {
+        const error = yield* mergePlan(taskId, clientFor(livePull({ checks }))).pipe(Effect.flip);
+        assert.include(error.message, "CI");
+      }
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("コンフリクトがある・必要な承認がないなど、GitHub が merge できる状態と言っていなければ、merge させない", () =>
+    Effect.gen(function* () {
+      const taskId = yield* ownPullTask();
+      for (const mergeableState of ["dirty", "blocked", "unknown"]) {
+        const error = yield* mergePlan(taskId, clientFor(livePull({ mergeableState }))).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "MergeNotAllowedError");
+      }
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("依存更新の bot の PR は、調査なしでは merge させない", () =>
+    Effect.gen(function* () {
+      const taskId = yield* ownPullTask({ author: "renovate[bot]" });
+
+      const error = yield* mergePlan(taskId, clientFor(livePull())).pipe(Effect.flip);
+
+      assert.include(error.message, "調査");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("確認したあとに PR に commit が足されていたら、始めない", () =>
+    Effect.gen(function* () {
+      const taskId = yield* ownPullTask();
+
+      const error = yield* startMerge(taskId, { method: "squash", sha: "older-sha" }, clientFor(livePull())).pipe(Effect.flip);
+
+      assert.strictEqual(error._tag, "MergeNotAllowedError");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("merge したら merge の手順を済ませ、まだ手順が残っていれば Task は元のレーンに戻す", () =>
+    Effect.gen(function* () {
+      const taskId = yield* ownPullTask({
+        nextActions: {
+          steps: [
+            { id: "m", kind: "merge_pull_request", title: "PR を merge する", effort: "easy", mode: "serial", status: "todo" },
+            { id: "ask", kind: "manual", title: "stg で確認してもらう", effort: "normal", mode: "serial", status: "todo" },
+          ],
+        },
+      });
+      const tasks = yield* TaskRepository;
+
+      const runId = yield* startMerge(taskId, { method: "squash", sha: "live-sha" }, clientFor(livePull()));
+      yield* finishMerge(runId, { method: "squash", sha: "live-sha" }, clientFor(livePull()));
+
+      const task = Option.getOrThrow(yield* tasks.findTask(taskId));
+      assert.strictEqual(task.status, "todo");
+      assert.deepInclude((task.nextActions as { steps: Array<{ id: string; status: string }> }).steps[0], { id: "m", status: "done" });
+    }).pipe(Effect.provide(TestDatabase)));
+});
+

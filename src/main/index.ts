@@ -11,6 +11,7 @@ import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { finishMerge, mergePlan, startMerge } from "../app/merge-approval.js";
 import { applyConflictPlans } from "../app/conflict-plans.js";
 import { completeFinishedPlans } from "../app/finished-plans.js";
+import { upgradeMergeSteps } from "../app/merge-steps.js";
 import {
   conflictTarget,
   finishConflictResolution,
@@ -128,6 +129,7 @@ const startSync = Effect.gen(function* () {
   yield* backfillNextActions;
   yield* applyConflictPlans;
   yield* completeFinishedPlans;
+  yield* upgradeMergeSteps;
   const recovered = yield* recoverInterruptedAgentRuns;
   if (recovered > 0) yield* Effect.log(`途中で止まった AI の調査を ${recovered} 件戻した`);
   const reviewSources = config.accounts
@@ -465,7 +467,7 @@ function registerMerge() {
       Effect.gen(function* () {
         const request = yield* decodeMergeRequest(input);
         const approved = { method: request.method, sha: request.sha };
-        const runId = yield* startMerge(request.taskId, approved);
+        const runId = yield* startMerge(request.taskId, approved, githubClientFor);
         runtime.runFork(finishMerge(runId, approved, githubClientFor));
       }),
     ),
