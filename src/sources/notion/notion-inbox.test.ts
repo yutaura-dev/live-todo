@@ -59,6 +59,8 @@ describe("Notion の受信トレイ", () => {
           ["n-resolved", "リリース計画: 表記を直しました", "https://www.notion.so/33333333333343338333333333333333?d=d3", "resolved"],
           ["n-reminder", "リリース計画: 請求書を送る 2026-11-28", "https://www.notion.so/33333333333343338333333333333333", "open"],
           ["n-mention-page", "リリース計画: @yutaura 議事録を確認してください", "https://www.notion.so/33333333333343338333333333333333", "open"],
+          ["n-mention-row", "リリース計画: @yutaura / 見積もりを出す / 2026-11-30", "https://www.notion.so/33333333333343338333333333333333", "open"],
+          ["n-mention-assignee", "週次レポートを書く", "https://www.notion.so/55555555555545558555555555555555", "open"],
         ],
       );
       assert.strictEqual(outcome.binding.source, "notion:home:inbox");
@@ -85,6 +87,15 @@ describe("Notion の受信トレイ", () => {
 
       assert.notInclude(drafts(outcome).map(([id]) => id), "n-old");
       assert.property(outcome.result.nextCursor.items, "n-old");
+    }));
+
+  it.effect("最初の取り込みより前の通知は、あとでタイトルが変わっても Task にしない", () =>
+    Effect.gen(function* () {
+      const first = yield* fetch(stub().client, null);
+      const changed = withRecord("activity", "a7", { edits: [] });
+      const second = yield* fetch(stub(changed).client, first.result.nextCursor);
+
+      assert.deepStrictEqual(second.result.changes, []);
     }));
 
   it.effect("自分が入っているワークスペースごとに、直近 50 件を取る", () =>

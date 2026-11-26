@@ -27,6 +27,8 @@ export type NotionInboxItem = {
 };
 
 export const NotionInboxCursorSchema = Schema.Struct({
+  /** これより前（Unix ミリ秒）の通知は Task にしない。最初の取り込みで決め、あとでタイトルが変わっても古い通知を Task にしないため */
+  since: Schema.optionalKey(Schema.Number),
   items: Schema.Record(Schema.String, Schema.Struct({ fingerprint: Schema.String, state: Schema.Literals(["open", "resolved"]) })),
 });
 export type NotionInboxCursor = typeof NotionInboxCursorSchema.Type;
@@ -48,10 +50,12 @@ const Activity = Schema.Struct({
   type: Schema.String,
   navigable_block_id: Schema.optional(Schema.String),
   mentioned_block_id: Schema.optional(Schema.String),
+  // 表の行のセルや DB のプロパティでのメンションなら、そのプロパティのキー（ページタイトルなら "title"）
+  mentioned_property: Schema.optional(Schema.String),
   end_time: Schema.optional(Time),
   edits: Schema.optional(Schema.Array(Edit)),
 });
-const Block = Schema.Struct({ id: Schema.String, properties: Schema.optional(Schema.Struct({ title: Schema.optional(Schema.Unknown) })) });
+const Block = Schema.Struct({ id: Schema.String, properties: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)) });
 const User = Schema.Struct({
   id: Schema.String,
   name: Schema.optional(Schema.String),
@@ -92,10 +96,24 @@ function namesIn(recordMap: NotionRecordMap): RichTextNames {
   for (const record of Object.values(recordMap["block"] ?? {})) {
     const block = Schema.decodeUnknownOption(Block)(record);
     if (Option.isNone(block)) continue;
-    const title = richTextToPlain(block.value.properties?.title, { users, pages: new Map() }).trim();
+    const title = richTextToPlain(block.value.properties?.["title"], { users, pages: new Map() }).trim();
     if (title !== "") pages.set(block.value.id, title);
   }
   return { users, pages };
+}
+
+/**
+ * メンションされたブロックの文。ページタイトル以外のプロパティでのメンション（DB の担当者・表のセルなど）は、
+ * そのセルだけでは「@自分」しか残らないので、ページならタイトル、表の行なら行のセル全部を使う
+ */
+function mentionedText(block: typeof Block.Type, property: string | undefined, names: RichTextNames): string {
+  const properties = block.properties ?? {};
+  const title = richTextToPlain(properties["title"], names).trim();
+  if (property === undefined || property === "title" || title !== "") return title;
+  return Object.values(properties)
+    .map((value) => richTextToPlain(value, names).trim())
+    .filter((text) => text !== "")
+    .join(" / ");
 }
 
 /** 受信トレイの応答から、メンション・コメント・リマインダーの通知を項目にする。それ以外と、形の分からない通知は除く */
@@ -118,8 +136,11 @@ export function inboxItemsFrom(me: string, log: { notificationIds: ReadonlyArray
     const edits = activity.value.edits ?? [];
     const commentEdit = edits.findLast((edit) => edit.comment_data?.text !== undefined || edit.discussion_id !== undefined);
     const mentionedBlock = recordOf(recordMap, "block", activity.value.mentioned_block_id, Block);
-    const richText = commentEdit?.comment_data?.text ?? Option.getOrUndefined(mentionedBlock)?.properties?.title;
-    const text = richTextToPlain(richText, names).trim();
+    const commentText = commentEdit?.comment_data?.text;
+    const text =
+      commentText !== undefined
+        ? richTextToPlain(commentText, names).trim()
+        : Option.match(mentionedBlock, { onNone: () => "", onSome: (block) => mentionedText(block, activity.value.mentioned_property, names) });
     const at = Number(notification.value.end_time ?? activity.value.end_time ?? 0);
     const authorId = (commentEdit ?? edits[0])?.authors?.[0]?.id;
     const discussionId = commentEdit?.discussion_id;
@@ -144,7 +165,8 @@ export function inboxItemsFrom(me: string, log: { notificationIds: ReadonlyArray
       text,
       at,
       resolved,
-      title: `${pageTitle}: ${line === "" ? FALLBACK_LINES[kind] : line}`,
+      // DB のページの担当者に入ったときなど、本文がページ名そのものならページ名だけにする
+      title: line === pageTitle ? pageTitle : `${pageTitle}: ${line === "" ? FALLBACK_LINES[kind] : line}`,
       url: `${NOTION_LINK_ORIGIN}/${compactId(pageId)}${discussionId === undefined ? "" : `?d=${compactId(discussionId)}`}`,
     });
   }
@@ -164,7 +186,8 @@ export const makeNotionInboxBinding = Effect.fnUntraced(function* (options: { ac
     fetchChanges: (cursor) =>
       Effect.gen(function* () {
         const previous = cursor ?? { items: {} };
-        const firstRunFrom = cursor === null ? DateTime.toEpochMillis(DateTime.subtract(yield* DateTime.now, { days: FIRST_RUN_DAYS })) : 0;
+        // since のないカーソル（境目を残す前に保存したもの）も、今から 3 日前を境目にする
+        const since = previous.since ?? DateTime.toEpochMillis(DateTime.subtract(yield* DateTime.now, { days: FIRST_RUN_DAYS }));
         const me = yield* client.me;
         myName = me.name;
 
@@ -176,11 +199,11 @@ export const makeNotionInboxBinding = Effect.fnUntraced(function* (options: { ac
           if (malformed > 0) yield* Effect.logWarning("形の分からない Notion の通知を取り込まなかった").pipe(Effect.annotateLogs({ count: malformed }));
           for (const item of items) {
             const fingerprint = fingerprintOf(item);
-            if (previous.items[item.externalId]?.fingerprint !== fingerprint && item.at >= firstRunFrom) changes.push({ kind: "upserted", item });
+            if (previous.items[item.externalId]?.fingerprint !== fingerprint && item.at >= since) changes.push({ kind: "upserted", item });
             nextItems[item.externalId] = { fingerprint, state: item.resolved ? "resolved" : "open" };
           }
         }
-        return { changes, nextCursor: { items: nextItems } };
+        return { changes, nextCursor: { since, items: nextItems } };
       }),
   };
 
