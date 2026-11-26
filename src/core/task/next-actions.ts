@@ -227,9 +227,9 @@ function checkedWaitCondition(proposed: ProposedWaitCondition, now: string | und
 }
 
 // https だけを開く先にする（javascript: や file: を開かせない）
-const linkOf = (link: { url: string; label: string } | undefined): StepLink | undefined => {
+const linkOf = (link: { url: string; label: string; unverified?: true } | undefined): StepLink | undefined => {
   if (link === undefined || link.label.trim() === "" || !URL.canParse(link.url)) return undefined;
-  return new URL(link.url).protocol === "https:" ? { url: link.url, label: link.label.trim() } : undefined;
+  return new URL(link.url).protocol === "https:" ? { url: link.url, label: link.label.trim(), ...(link.unverified === true ? { unverified: true as const } : {}) } : undefined;
 };
 
 const URL_IN_TEXT = /https:\/\/[^\s）)」』>"'、。]+/;
@@ -322,7 +322,7 @@ function withLinkFromTitle<T extends { title: string; link?: { url: string; labe
   }
   const title = (before.trimEnd() + (before.endsWith("（") || before.endsWith("(") ? "" : "") + after.trimStart()).replace(/（\s+/g, "（").trim();
   const host = new URL(found).hostname;
-  return { ...step, title: title === "" ? step.title : title, link: { url: found, label: host === "github.com" ? "GitHub" : host } };
+  return { ...step, title: title === "" ? step.title : title, link: { url: found, label: host === "github.com" ? "GitHub" : host, unverified: true as const } };
 }
 
 export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>, now?: string): NextActionPlan {
@@ -432,7 +432,7 @@ const ActionStepSchema = Schema.Struct({
   ...StepBaseSchema,
   kind: Schema.Literals(ACTION_KINDS),
   until: Schema.optionalKey(WaitConditionSchema),
-  link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
+  link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String, unverified: Schema.optionalKey(Schema.Literal(true)) })),
   gmail: Schema.optionalKey(
     Schema.Struct({ labels: Schema.optionalKey(Schema.Array(Schema.String)), markRead: Schema.optionalKey(Schema.Boolean), archive: Schema.optionalKey(Schema.Boolean) }),
   ),
@@ -443,7 +443,7 @@ interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchem
   readonly kind: "decision";
   readonly options: ReadonlyArray<{ readonly key: string; readonly label: string; readonly steps: ReadonlyArray<StepEncoded> }>;
   readonly chosen?: string;
-  readonly link?: { readonly url: string; readonly label: string };
+  readonly link?: { readonly url: string; readonly label: string; readonly unverified?: true };
 }
 type StepEncoded = typeof ActionStepSchema.Encoded | DecisionStepEncoded;
 const StepSchema: Schema.Codec<Step, StepEncoded> = Schema.Union([
@@ -453,7 +453,7 @@ const StepSchema: Schema.Codec<Step, StepEncoded> = Schema.Union([
     kind: Schema.Literal("decision"),
     options: Schema.Array(Schema.Struct({ key: Schema.String, label: Schema.String, steps: Schema.Array(Schema.suspend(() => StepSchema)) })),
     chosen: Schema.optionalKey(Schema.String),
-    link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
+    link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String, unverified: Schema.optionalKey(Schema.Literal(true)) })),
   }),
 ]);
 const PlanSchema = Schema.Struct({ steps: Schema.Array(StepSchema) });

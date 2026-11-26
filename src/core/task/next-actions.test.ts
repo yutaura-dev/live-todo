@@ -375,8 +375,10 @@ describe("手順の文に書かれた URL を開く先にする", () => {
       { title: "prod へ出すときに Promote prod を手動で起動する（https://github.com/acme/app/actions/workflows/promote-prod.yml 、develop のまま実行）", effort: "easy", mode: "serial", type: "manual" },
       { title: "料金ページ https://docs.example.com/pricing/ を稲葉さんに送る", effort: "easy", mode: "serial", type: "manual" },
     ]);
-    assert.deepInclude(plan.steps[0], { title: "prod へ出すときに Promote prod を手動で起動する（develop のまま実行）", link: { url: "https://github.com/acme/app/actions/workflows/promote-prod.yml", label: "GitHub" } });
-    assert.deepInclude(plan.steps[1], { title: "料金ページを稲葉さんに送る", link: { url: "https://docs.example.com/pricing/", label: "docs.example.com" } });
+    // 文から拾った URL は、公式のページか確かめていないことを残す（画面で URL 全体と注意を出すため）
+    assert.deepInclude(plan.steps[0], { title: "prod へ出すときに Promote prod を手動で起動する（develop のまま実行）", link: { url: "https://github.com/acme/app/actions/workflows/promote-prod.yml", label: "GitHub", unverified: true } });
+    assert.deepInclude(plan.steps[1], { title: "料金ページを稲葉さんに送る", link: { url: "https://docs.example.com/pricing/", label: "docs.example.com", unverified: true } });
+    assert.deepStrictEqual(Option.getOrThrow(decodePlan(JSON.parse(JSON.stringify(plan)))).steps[0], plan.steps[0]);
   });
 
   it("開く先があるときは、文はそのままにする", () => {
