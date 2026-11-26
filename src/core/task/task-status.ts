@@ -15,3 +15,8 @@ export function deriveTaskStatus(current: TaskStatus, trackedItemStates: readonl
   }
   return OPEN_STATUSES.has(current) ? "archived" : current;
 }
+
+// 処理中は AI が裏で書き換えている途中で、終わったときに処理前の status へ戻す。途中で動かすとその戻しで上書きされるので、ユーザーには動かさせない
+export function canUserMove(status: TaskStatus): boolean {
+  return status !== "agent_running";
+}

@@ -4,9 +4,14 @@ import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks } from "../db/schema.js";
 import { TaskRepository, type TaskWithUnread } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
+import { canUserMove } from "../task/task-status.js";
 import { chooseOption, completeStep, currentSteps, isWaitingOnly, reopenStep, decodePlan, EFFORTS, type Effort, type NextActionPlan, taskEffort } from "../task/next-actions.js";
 
 export class TaskNotFoundError extends Schema.TaggedError<TaskNotFoundError>()("TaskNotFoundError", {
+  taskId: Schema.Number,
+}) {}
+
+export class TaskBusyError extends Schema.TaggedError<TaskBusyError>()("TaskBusyError", {
   taskId: Schema.Number,
 }) {}
 
@@ -130,7 +135,7 @@ export class InvalidTaskInputError extends Schema.TaggedError<InvalidTaskInputEr
 export class BoardService extends Context.Service<BoardService, {
   readonly board: Effect.Effect<Board>;
   /** ユーザーがカードを動かした。ユーザーの操作として記録し、判定の正解として集められるようにする */
-  moveTask(taskId: number, status: TaskStatus): Effect.Effect<void, TaskNotFoundError>;
+  moveTask(taskId: number, status: TaskStatus): Effect.Effect<void, TaskNotFoundError | TaskBusyError>;
   markSeen(taskId: number): Effect.Effect<void>;
   taskDetail(taskId: number): Effect.Effect<TaskDetail, TaskNotFoundError>;
   completeStep(taskId: number, stepId: string): Effect.Effect<void, TaskNotFoundError>;
@@ -224,6 +229,7 @@ export class BoardService extends Context.Service<BoardService, {
       const moveTask = Effect.fn("BoardService.moveTask")(function* (taskId: number, status: TaskStatus) {
         const found = yield* tasks.findTask(taskId);
         if (Option.isNone(found)) return yield* new TaskNotFoundError({ taskId });
+        if (!canUserMove(found.value.status)) return yield* new TaskBusyError({ taskId });
         if (found.value.status === status) return;
         yield* tasks.updateTask(taskId, { status });
         // 自分の操作なので更新マークは付けない（unread: false）

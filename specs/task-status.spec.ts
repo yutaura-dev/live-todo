@@ -56,7 +56,7 @@ export function createBySync(task: Task, actor: Actor, verdict: Verdict): Task {
 
 /** 手動・定期で Task を作る */
 export function createByHand(task: Task, actor: Actor): Task {
-  // 根拠: src/core/board/board-service.ts:342-346、src/app/recurring-tasks.ts:153
+  // 根拠: src/core/board/board-service.ts:348-352、src/app/recurring-tasks.ts:153
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status === "未作成", "まだ Task がないときだけ");
   return { status: "todo", tracked: "なし", returnTo: "なし" };
@@ -86,10 +86,12 @@ function deriveStatus(current: Status, states: TrackedStates): Status {
 
 /** 列を移す */
 export function move(task: Task, actor: Actor, to: MovableStatus): Task {
-  // 根拠: src/main/ipc.ts:6-12、src/core/board/board-service.ts:224-228（今の status は見ない）
+  // 根拠: src/main/ipc.ts:6-12、src/core/board/board-service.ts:229-234
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status !== "未作成", "Task があるときだけ");
-  return { ...task, status: to, returnTo: "なし" };
+  // 根拠: src/core/task/task-status.ts:19-22
+  ensure(task.status !== "agent_running", "処理中でないときだけ");
+  return { ...task, status: to };
 }
 
 /**
@@ -173,6 +175,7 @@ export const scenarios = {
     { do: move, by: "ユーザー", input: "進行中へ" },
     { do: startAgent, by: "ユーザー", expect: { status: "agent_running" } },
     { do: startAgent, by: "AI", denied: "処理中でないときだけ" },
+    { do: move, by: "ユーザー", input: "完了へ", denied: "処理中でないときだけ" },
     { do: finishAgent, by: "AI", expect: { status: "in_progress" } },
   ],
   "操作はそれぞれ決まった人だけが起こし、Task がないと何もできない": [
@@ -215,11 +218,6 @@ export const reviewed = {
 };
 
 export const questions = [
-  {
-    ask: "処理中（agent_running）の Task も、ユーザーが列を移せてよいか？ 移すと、PR の修正などの処理が終わったときに元の status で上書きされる",
-    about: move,
-    note: "src/core/board/board-service.ts:224-228 は今の status を見ない。src/app/pull-request-fix-flow.ts:153 は今の status を確かめずに previousStatus へ戻す",
-  },
   {
     ask: "処理中に追う Source Item が解決・消えたとき、処理が終わったあとで status を導き直さなくてよいか？ 今は処理前の status（todo など）に戻り、次の Activity まで完了にならない",
     about: finishAgent,
