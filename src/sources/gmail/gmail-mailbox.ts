@@ -50,6 +50,8 @@ export type SenderGroup = {
   pending: ReadonlyArray<string>;
   /** その件名（新しい順） */
   pendingSubjects: ReadonlyArray<string>;
+  /** その届いた時刻（ミリ秒、新しい順。pendingSubjects と同じ並び） */
+  pendingReceivedAt: ReadonlyArray<number>;
   /** 未処理のうち、日程が過ぎた招待 */
   pastInvites: ReadonlyArray<string>;
   /** 直近 60 日に届いた数 */
@@ -82,6 +84,7 @@ export function senderGroups(mails: ReadonlyArray<StoredMail>, now: number): Sen
       kind: notifications * 2 > group.length ? "notification" : "newsletter",
       pending: group.toSorted(byReceived).filter(isPending).map((mail) => mail.messageId),
       pendingSubjects: group.toSorted(byReceived).filter(isPending).map((mail) => mail.subject).toReversed(),
+      pendingReceivedAt: group.toSorted(byReceived).filter(isPending).map((mail) => mail.receivedAt).toReversed(),
       pastInvites: group.toSorted(byReceived).filter((mail) => isPending(mail) && mail.pastInvite).map((mail) => mail.messageId),
       received: recent.length,
       discarded,

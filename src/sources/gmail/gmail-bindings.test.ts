@@ -89,11 +89,11 @@ describe("makeGmailSendersBinding（メルマガ・お知らせを送り主ご�
         const [row] = yield* db.select({ brief: tasks.brief }).from(tasks).pipe(Effect.orDie);
         return row?.brief;
       });
-      assert.strictEqual(yield* briefOf, "受信トレイに残っているメール（新しい順）:\n- 新商品のご案内\n- 冬のセール");
+      assert.strictEqual(yield* briefOf, "受信トレイに残っているメール（新しい順）:\n- 11/25 新商品のご案内\n- 11/24 冬のセール");
 
       yield* setTrashed("b");
       yield* refreshSenderBriefs("me");
-      assert.strictEqual(yield* briefOf, "受信トレイに残っているメール（新しい順）:\n- 冬のセール");
+      assert.strictEqual(yield* briefOf, "受信トレイに残っているメール（新しい順）:\n- 11/24 冬のセール");
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("未処理が減るとタイトルが変わり、なくなると Task は済みになる", () =>

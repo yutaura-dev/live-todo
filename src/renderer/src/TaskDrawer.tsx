@@ -462,6 +462,7 @@ export function GmailMailFlow({ taskId, onDone, onlyPastInvites = false }: { tas
           <ul className="gmail-trash-list">
             {pending.target.messages.slice(0, GMAIL_PREVIEW_LIMIT).map((message) => (
               <li key={message.messageId}>
+                <span className="gmail-trash-date">{dateTimeOf(new Date(message.receivedAt).toISOString())}</span>
                 {message.subject === "" ? "（件名なし）" : message.subject}
                 <span className="gmail-trash-from">{message.senderName}</span>
               </li>

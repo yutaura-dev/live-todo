@@ -64,8 +64,11 @@ const senderTitle = (group: SenderGroup) => {
   return `${label}: ${shorten(subjectText(latest), MAX_SUBJECT)}${others > 0 ? `（ほか ${others} 通）` : ""}`;
 };
 
+// 端末のタイムゾーンでの月日（届いた日が分かるように）
+const monthDay = (millis: number) => new Date(millis).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+
 const senderBrief = (group: SenderGroup) => {
-  const shown = group.pendingSubjects.slice(0, MAX_BRIEF_SUBJECTS).map((subject) => `- ${subjectText(subject)}`);
+  const shown = group.pendingSubjects.slice(0, MAX_BRIEF_SUBJECTS).map((subject, index) => `- ${monthDay(group.pendingReceivedAt[index] ?? 0)} ${subjectText(subject)}`);
   const rest = group.pendingSubjects.length - shown.length;
   return ["受信トレイに残っているメール（新しい順）:", ...shown, ...(rest > 0 ? [`- ほか ${rest} 通`] : [])].join("\n");
 };

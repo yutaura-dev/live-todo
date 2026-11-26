@@ -1517,3 +1517,10 @@ button:disabled {
   font: inherit;
   resize: vertical;
 }
+
+.gmail-trash-date {
+  margin-right: 0.5em;
+  opacity: 0.7;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
