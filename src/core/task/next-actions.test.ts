@@ -13,8 +13,7 @@ import {
   reopenStep,
   senderPlan,
   stepLinkOf,
-  taskEffort,
-} from "./next-actions.js";
+  taskEffort, linkOfStep } from "./next-actions.js";
 
 const review = (overrides: Record<string, unknown> = {}) => ({
   conclusion: "mergeable" as const,
@@ -308,5 +307,30 @@ describe("Gmail の操作の手順（ボタンでアプリが行う）", () => {
   it("保存した Gmail の操作の手順を読める", () => {
     const plan = { steps: [{ id: "s1", kind: "gmail_action", title: "x", effort: "easy", mode: "serial", status: "todo", gmail: { labels: ["レシート"], markRead: true } }] };
     assert.deepInclude(Option.getOrThrow(decodePlan(plan)).steps[0], { gmail: { labels: ["レシート"], markRead: true } });
+  });
+});
+
+describe("Web ページを開く手順のボタン", () => {
+  it("決める手順（分かれ道）にも開く先を付けられ、stepLinkOf で引ける", () => {
+    const plan = planFromProposedSteps([
+      {
+        title: "権限更新のページを読んで承認するか決める",
+        effort: "normal",
+        mode: "serial",
+        link: { url: "https://github.com/settings/installations/1/permissions/update", label: "GitHub の権限更新ページ" },
+        options: [{ label: "承認する", steps: [{ title: "承認する", effort: "easy", mode: "serial" }] }],
+      },
+    ]);
+    assert.deepStrictEqual(stepLinkOf(plan, "s1"), { url: "https://github.com/settings/installations/1/permissions/update", label: "GitHub の権限更新ページ" });
+  });
+
+  it("開く先がなくても、手順の文に https の URL が書いてあれば、そのページを開く先にする", () => {
+    const step = { id: "s1", kind: "decision", title: "権限更新ページ（https://github.com/settings/installations/1/permissions/update）を開き、承認するか決める", effort: "normal", mode: "serial", status: "todo", options: [] } as const;
+    assert.deepStrictEqual(linkOfStep(step), { url: "https://github.com/settings/installations/1/permissions/update", label: "ページ" });
+  });
+
+  it("http や javascript: の URL は開く先にしない", () => {
+    const step = { id: "s1", kind: "manual", title: "http://example.com を開く javascript:alert(1)", effort: "easy", mode: "serial", status: "todo" } as const;
+    assert.isUndefined(linkOfStep(step));
   });
 });

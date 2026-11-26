@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ConflictResolutionView, GmailMailTargetView, TaskQuestionView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
+import { linkOfStep } from "../../core/task/next-actions.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
 import { useDrawerFocus } from "./use-drawer-focus.js";
@@ -746,6 +747,7 @@ function StepItem(props: {
 }) {
   const { step, detail } = props;
   const isCurrent = props.current.has(step.id);
+  const stepLink = linkOfStep(step);
   const [problem, setProblem] = useState<string | null>(null);
   const run = async (action: Promise<{ ok: true } | { ok: false; message: string }>) => {
     const outcome = await action;
@@ -809,12 +811,12 @@ function StepItem(props: {
           <span className="field-hint">{waitHint(step.until ?? { kind: "item_changed" })}</span>
         </div>
       )}
-      {isCurrent && step.kind !== "decision" && step.link !== undefined && (
+      {isCurrent && stepLink !== undefined && (
         <div className="step-actions">
           <button type="button" className="primary-button" onClick={() => void api.openStepLink(detail.id, step.id)}>
-            {step.link.label}を開く
+            {stepLink.label}を開く
           </button>
-          <span className="field-hint">{hostOf(step.link.url)}</span>
+          <span className="field-hint">{hostOf(stepLink.url)}</span>
         </div>
       )}
       {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push") && (

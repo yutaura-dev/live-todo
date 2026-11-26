@@ -58,6 +58,8 @@ export type DecisionStep = StepBase & {
   kind: "decision";
   options: ReadonlyArray<{ key: string; label: string; steps: ReadonlyArray<Step> }>;
   chosen?: string;
+  /** 決めるために開くページ（読んでから決める手順など） */
+  link?: StepLink;
 };
 export type Step = ActionStep | DecisionStep;
 export type NextActionPlan = { steps: ReadonlyArray<Step> };
@@ -219,6 +221,18 @@ const linkOf = (link: { url: string; label: string } | undefined): StepLink | un
   return new URL(link.url).protocol === "https:" ? { url: link.url, label: link.label.trim() } : undefined;
 };
 
+const URL_IN_TEXT = /https:\/\/[^\s）)」』>"'、。]+/;
+
+/**
+ * 手順の開く先。開く先がなくても手順の文に https の URL があれば、それを開く先にする
+ * （AI が URL を link でなく文に書いてしまうことがあり、そのままではボタンにならないため）
+ */
+export function linkOfStep(step: Step): StepLink | undefined {
+  if (step.link !== undefined) return step.link;
+  const found = URL_IN_TEXT.exec(step.title)?.[0];
+  return found === undefined ? undefined : linkOf({ url: found, label: "ページ" });
+}
+
 function actionStepOf(
   base: StepBase,
   step: {
@@ -248,7 +262,7 @@ const gmailActionsOf = (gmail: { labels: ReadonlyArray<string>; markRead: boolea
 export function stepLinkOf(plan: NextActionPlan, stepId: string): StepLink | undefined {
   const find = (steps: ReadonlyArray<Step>): StepLink | undefined => {
     for (const step of steps) {
-      if (step.id === stepId) return step.kind === "decision" ? undefined : step.link;
+      if (step.id === stepId) return linkOfStep(step);
       if (step.kind === "decision") {
         for (const option of step.options) {
           const found = find(option.steps);
@@ -267,9 +281,11 @@ export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>, now
     const id = `s${index + 1}`;
     const base = { id, title: step.title, effort: step.effort, mode: step.mode, status: "todo" as const };
     if (step.options === undefined || step.options.length === 0) return actionStepOf(base, step, now);
+    const link = linkOf(step.link);
     return {
       ...base,
       kind: "decision",
+      ...(link === undefined ? {} : { link }),
       options: step.options.map((option, optionIndex) => {
         const key = `o${optionIndex + 1}`;
         return {
@@ -375,6 +391,7 @@ interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchem
   readonly kind: "decision";
   readonly options: ReadonlyArray<{ readonly key: string; readonly label: string; readonly steps: ReadonlyArray<StepEncoded> }>;
   readonly chosen?: string;
+  readonly link?: { readonly url: string; readonly label: string };
 }
 type StepEncoded = typeof ActionStepSchema.Encoded | DecisionStepEncoded;
 const StepSchema: Schema.Codec<Step, StepEncoded> = Schema.Union([
@@ -384,6 +401,7 @@ const StepSchema: Schema.Codec<Step, StepEncoded> = Schema.Union([
     kind: Schema.Literal("decision"),
     options: Schema.Array(Schema.Struct({ key: Schema.String, label: Schema.String, steps: Schema.Array(Schema.suspend(() => StepSchema)) })),
     chosen: Schema.optionalKey(Schema.String),
+    link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
   }),
 ]);
 const PlanSchema = Schema.Struct({ steps: Schema.Array(StepSchema) });
