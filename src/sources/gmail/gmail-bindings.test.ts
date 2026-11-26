@@ -7,7 +7,7 @@ import { gmailMessages, sourceItems, taskLinks, tasks } from "../../core/db/sche
 import { TestDatabase } from "../../core/db/test-database.js";
 import { SourceItemRepository } from "../../core/source/source-item-repository.js";
 import { syncSource } from "../../core/sync/sync-source.js";
-import { gmailSendersSource, gmailThreadsSource, makeGmailSendersBinding, makeGmailThreadsBinding } from "./gmail-bindings.js";
+import { gmailSendersSource, gmailThreadsSource, makeGmailSendersBinding, makeGmailThreadsBinding, refreshSenderBriefs } from "./gmail-bindings.js";
 
 const NOW = Date.UTC(2026, 10, 26);
 const DAY = 24 * 60 * 60 * 1000;
@@ -54,30 +54,59 @@ const taskOf = (source: string, externalId: string) =>
   });
 
 describe("makeGmailSendersBinding（メルマガ・お知らせを送り主ごとの Task にする）", () => {
-  it.effect("未処理のメールがある送り主ごとに 1 つの Task を作り、タイトルに未処理の数を出す", () =>
+  it.effect("未処理のメールがある送り主ごとに 1 つの Task を作り、タイトルに最新の件名とほかの通数を出す", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(NOW);
-      yield* insertMail({ messageId: "a" });
-      yield* insertMail({ messageId: "b" });
-      yield* insertMail({ messageId: "c", senderKey: "info@bank.example", senderName: "銀行", kind: "notification" });
+      yield* insertMail({ messageId: "a", subject: "冬のセール", receivedAt: NOW - 2 * DAY });
+      yield* insertMail({ messageId: "b", subject: "新商品のご案内", receivedAt: NOW - DAY });
+      yield* insertMail({ messageId: "c", senderKey: "info@bank.example", senderName: "銀行", kind: "notification", subject: "お取引のお知らせ" });
 
       yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
 
-      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")), { title: "Shop のメルマガ（未処理 2 通）", status: "todo" });
-      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "info@bank.example")), { title: "銀行 のお知らせ（未処理 1 通）", status: "todo" });
+      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")), { title: "Shop のメルマガ: 新商品のご案内（ほか 1 通）", status: "todo" });
+      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "info@bank.example")), { title: "銀行 のお知らせ: お取引のお知らせ", status: "todo" });
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("長い件名は切り詰める", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      yield* insertMail({ messageId: "a", subject: "あ".repeat(100) });
+      yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
+      const title = Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")).title;
+      assert.isAtMost(title.length, 80);
+      assert.isTrue(title.endsWith("…"));
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("Task の状況に、受信トレイに残っているメールの件名を新しい順に並べ、変われば書き直す", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      yield* insertMail({ messageId: "a", subject: "冬のセール", receivedAt: NOW - 2 * DAY });
+      yield* insertMail({ messageId: "b", subject: "新商品のご案内", receivedAt: NOW - DAY });
+      yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
+      yield* refreshSenderBriefs("me");
+      const briefOf = Effect.gen(function* () {
+        const db = yield* Database;
+        const [row] = yield* db.select({ brief: tasks.brief }).from(tasks).pipe(Effect.orDie);
+        return row?.brief;
+      });
+      assert.strictEqual(yield* briefOf, "受信トレイに残っているメール（新しい順）:\n- 新商品のご案内\n- 冬のセール");
+
+      yield* setTrashed("b");
+      yield* refreshSenderBriefs("me");
+      assert.strictEqual(yield* briefOf, "受信トレイに残っているメール（新しい順）:\n- 冬のセール");
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("未処理が減るとタイトルが変わり、なくなると Task は済みになる", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(NOW);
-      yield* insertMail({ messageId: "a" });
-      yield* insertMail({ messageId: "b" });
+      yield* insertMail({ messageId: "a", receivedAt: NOW - 2 * DAY });
+      yield* insertMail({ messageId: "b", receivedAt: NOW - DAY });
       const binding = yield* makeGmailSendersBinding({ accountId: "me" });
       yield* syncSource(binding);
 
       yield* setTrashed("a");
       yield* syncSource(binding);
-      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")).title, "Shop のメルマガ（未処理 1 通）");
+      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")).title, "Shop のメルマガ: 件名");
 
       yield* setTrashed("b");
       yield* syncSource(binding);

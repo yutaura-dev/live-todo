@@ -40,6 +40,14 @@ describe("senderGroups（メルマガ・お知らせを送り主ごとにまと�
     assert.deepInclude(group, { senderKey: "news@shop.example", senderName: "Shop", kind: "newsletter", pending: ["a"] });
   });
 
+  it("受信トレイに残っているメールの件名を、新しい順に持つ", () => {
+    const [group] = senderGroups(
+      [mail({ messageId: "a", subject: "古い", receivedAt: NOW - 3 * DAY }), mail({ messageId: "b", subject: "新しい", receivedAt: NOW - DAY }), mail({ messageId: "c", subject: "片付けた", trashed: true })],
+      NOW,
+    );
+    assert.deepStrictEqual(group!.pendingSubjects, ["新しい", "古い"]);
+  });
+
   it("人からのメール・自分のメールはまとめない", () => {
     assert.deepStrictEqual(senderGroups([mail({ kind: "personal" }), mail({ kind: "mine" })], NOW), []);
   });

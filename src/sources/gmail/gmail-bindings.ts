@@ -1,7 +1,8 @@
 import { asc, eq } from "drizzle-orm";
 import { DateTime, Effect, Schema } from "effect";
 import { Database } from "../../core/db/database.js";
-import { gmailMessages } from "../../core/db/schema.js";
+import { gmailMessages, sourceItems, taskLinks, tasks } from "../../core/db/schema.js";
+import { TaskRepository } from "../../core/task/task-repository.js";
 import type { TodoJudgment } from "../../core/judge/todo-judge.js";
 import type { SourceAdapter } from "../../core/sync/source-adapter.js";
 import { diffSnapshot, type DuplicateExternalIdError } from "../../core/sync/snapshot-differ.js";
@@ -46,7 +47,49 @@ const snapshotAdapter = <TItem>(snapshot: Effect.Effect<ReadonlyArray<TItem>>, i
 
 export type SenderItem = SenderGroup & { title: string };
 
-const senderTitle = (group: SenderGroup) => `${group.senderName} の${group.kind === "newsletter" ? "メルマガ" : "お知らせ"}（未処理 ${group.pending.length} 通）`;
+const MAX_SUBJECT = 50;
+const MAX_BRIEF_SUBJECTS = 10;
+const shorten = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const subjectText = (subject: string) => (subject.trim() === "" ? "（件名なし）" : subject.trim());
+
+// 最新の件名を入れる理由: 送り主の名前と通数だけでは、何のお知らせか開くまで分からないため
+const senderTitle = (group: SenderGroup) => {
+  const label = `${group.senderName} の${group.kind === "newsletter" ? "メルマガ" : "お知らせ"}`;
+  const [latest] = group.pendingSubjects;
+  if (latest === undefined) return label;
+  const others = group.pendingSubjects.length - 1;
+  return `${label}: ${shorten(subjectText(latest), MAX_SUBJECT)}${others > 0 ? `（ほか ${others} 通）` : ""}`;
+};
+
+const senderBrief = (group: SenderGroup) => {
+  const shown = group.pendingSubjects.slice(0, MAX_BRIEF_SUBJECTS).map((subject) => `- ${subjectText(subject)}`);
+  const rest = group.pendingSubjects.length - shown.length;
+  return ["受信トレイに残っているメール（新しい順）:", ...shown, ...(rest > 0 ? [`- ほか ${rest} 通`] : [])].join("\n");
+};
+
+/**
+ * 送り主の Task の状況（brief）に、受信トレイに残っているメールの件名を並べ直す。
+ * Source Item には状況の欄がないので、まとめ直したあとに別に書く。変わるたびに書くので履歴には残さない
+ */
+export const refreshSenderBriefs = Effect.fnUntraced(function* (accountId: string) {
+  const db = yield* Database;
+  const groups = senderGroups(yield* loadMails(accountId), DateTime.toEpochMillis(yield* DateTime.now));
+  const linked = yield* db
+    .select({ taskId: tasks.id, brief: tasks.brief, externalId: sourceItems.externalId })
+    .from(taskLinks)
+    .innerJoin(tasks, eq(taskLinks.taskId, tasks.id))
+    .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+    .where(eq(sourceItems.source, gmailSendersSource(accountId)))
+    .pipe(Effect.orDie);
+  const bySender = new Map(groups.map((group) => [group.senderKey, group]));
+  const taskRepository = yield* TaskRepository;
+  for (const row of linked) {
+    const group = bySender.get(row.externalId);
+    if (group === undefined || group.pendingSubjects.length === 0) continue;
+    const brief = senderBrief(group);
+    if (brief !== row.brief) yield* taskRepository.updateTask(row.taskId, { brief });
+  }
+});
 const senderSearch = (senderKey: string) => (senderKey.includes("@") ? `from:${senderKey}` : `list:${senderKey}`);
 const senderFingerprint = (item: SenderItem) => JSON.stringify([item.title, item.pending, item.suggestUnsubscribe]);
 const RULE_JUDGMENT: TodoJudgment = { verdict: "todo", method: "rule" };

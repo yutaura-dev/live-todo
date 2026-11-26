@@ -3,7 +3,7 @@ import type { DateTime } from "effect";
 import { MailClassifier } from "../core/judge/mail-classifier.js";
 import type { SyncJob } from "../core/sync/scheduler.js";
 import { syncSource } from "../core/sync/sync-source.js";
-import { makeGmailSendersBinding, makeGmailThreadsBinding } from "../sources/gmail/gmail-bindings.js";
+import { makeGmailSendersBinding, makeGmailThreadsBinding, refreshSenderBriefs } from "../sources/gmail/gmail-bindings.js";
 import { GmailClient, type GmailClientError } from "../sources/gmail/gmail-client.js";
 import type { SqlClient } from "effect/sql";
 import type { Database } from "../core/db/database.js";
@@ -25,6 +25,7 @@ export type GmailJobRequirements = Database | SourceItemRepository | TaskReposit
 export const runGmailSync = Effect.fnUntraced(function* (accountId: string) {
   yield* ingestGmail({ accountId });
   yield* syncSource(yield* makeGmailSendersBinding({ accountId }));
+  yield* refreshSenderBriefs(accountId);
   yield* syncSource(yield* makeGmailThreadsBinding({ accountId }));
 });
 

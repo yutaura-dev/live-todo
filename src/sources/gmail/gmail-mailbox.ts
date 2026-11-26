@@ -44,6 +44,8 @@ export type SenderGroup = {
   kind: "newsletter" | "notification";
   /** 受信トレイに残っている（未処理の）メール */
   pending: ReadonlyArray<string>;
+  /** その件名（新しい順） */
+  pendingSubjects: ReadonlyArray<string>;
   /** 直近 60 日に届いた数 */
   received: number;
   /** そのうち、削除した（ゴミ箱）か、読まずにアーカイブした数 */
@@ -71,6 +73,7 @@ export function senderGroups(mails: ReadonlyArray<StoredMail>, now: number): Sen
       senderName: sorted.at(-1)!.senderName,
       kind: notifications * 2 > group.length ? "notification" : "newsletter",
       pending: sorted.filter(isPending).map((mail) => mail.messageId),
+      pendingSubjects: sorted.filter(isPending).map((mail) => mail.subject).toReversed(),
       received: recent.length,
       discarded,
       suggestUnsubscribe: recent.length >= MIN_RECEIVED_FOR_SUGGESTION && discarded >= recent.length * DISCARD_RATIO_FOR_SUGGESTION,
