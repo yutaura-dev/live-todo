@@ -9,6 +9,9 @@ import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
+import { gmailTrash, gmailTrashTarget, GmailWriteError } from "../app/gmail-write.js";
+import { GmailClient } from "../sources/gmail/gmail-client.js";
+import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
 import { releaseUntouchedInboxTasks, runSlackConversationTriage } from "../app/slack-conversations.js";
 import { captureSlackSession } from "./slack-connect.js";
@@ -478,6 +481,37 @@ const slackClientFor = (accountId: string) =>
     );
   });
 
+/** 保存した設定で、Gmail のクライアントを作る（承認した書き込みのため。認証は gws に任せる） */
+const gmailClientFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    if (!config.gmailAccounts.some((account) => account.id === accountId)) return yield* new GmailWriteError({ message: `設定に Gmail のアカウント「${accountId}」がない` });
+    return yield* Effect.gen(function* () {
+      return yield* GmailClient;
+    }).pipe(Effect.provide(GmailClientLive.pipe(Layer.provide(Gws.layer))));
+  });
+
+function registerGmailActions() {
+  const TaskIdInput = Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)) });
+  ipcMain.handle(IPC_CHANNELS.gmailTrashTarget, (_event, input: unknown) =>
+    runtime.runPromise(
+      Schema.decodeUnknownEffect(TaskIdInput)(input).pipe(
+        Effect.flatMap((request) => gmailTrashTarget(request.taskId)),
+        Effect.catch((error) => Effect.succeed({ error: errorMessage(error) })),
+      ),
+    ),
+  );
+  // 外部への書き込み。renderer で一覧を見せて確認を出し、ユーザーが承認したメールだけを渡す
+  ipcMain.handle(IPC_CHANNELS.gmailTrash, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), messageIds: Schema.Array(Schema.String) }))(input);
+        yield* gmailTrash(request.taskId, request.messageIds, gmailClientFor);
+      }),
+    ),
+  );
+}
+
 function registerSlackSettings() {
   // 外部への書き込み。renderer で確認を出し、ユーザーが承認したときだけ呼ばれる
   ipcMain.handle(IPC_CHANNELS.slackAction, (_event, input: unknown) =>
@@ -850,6 +884,7 @@ void app.whenReady().then(() => {
   registerReplan();
   registerTasksAndRecurring();
   registerSlackSettings();
+  registerGmailActions();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();
 });

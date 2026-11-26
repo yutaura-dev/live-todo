@@ -66,7 +66,13 @@ export function openLabel(url: string): string {
   const host = new URL(url).hostname;
   if (host === "github.com") return "GitHub で開く";
   if (host === "slack.com" || host.endsWith(".slack.com")) return "Slack で開く";
+  if (host === "mail.google.com") return "Gmail で開く";
   return "開く";
+}
+
+/** Gmail の送り主ごと・スレッドごとのまとまりを追う Task か（ゴミ箱に入れる操作を出す） */
+export function tracksGmail(items: ReadonlyArray<{ role: string; source: string }>): boolean {
+  return items.some((item) => item.role === "tracks" && /^gmail:[a-z0-9][a-z0-9-]*:(senders|threads)$/.test(item.source));
 }
 
 /** Slack の To-do・Saved（slack:<id>）を追う Task か。メンション・DM（slack:<id>:inbox）は To-do の操作ができない */

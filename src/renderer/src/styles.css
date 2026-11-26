@@ -1474,3 +1474,16 @@ button:disabled {
 .preview-status:empty {
   display: none;
 }
+
+.gmail-trash-list {
+  margin: 0.5rem 0;
+  padding-left: 1.2rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.gmail-trash-from {
+  margin-left: 0.5em;
+  opacity: 0.7;
+  font-size: 0.9em;
+}

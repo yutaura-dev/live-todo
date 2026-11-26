@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { conclusionLabel, describeChange, effortLabel, judgmentText, openLabel, statusLabel, taskNumber, tracksSlackSaved } from "./task-text.js";
+import { conclusionLabel, describeChange, effortLabel, judgmentText, openLabel, statusLabel, taskNumber, tracksGmail, tracksSlackSaved } from "./task-text.js";
 
 const change = (overrides: Partial<Parameters<typeof describeChange>[0]>) => ({
   kind: "field_changed",
@@ -89,6 +89,20 @@ describe("statusLabel", () => {
   it("削除した Task と、元の項目が消えた Task も名前で返す", () => {
     assert.strictEqual(statusLabel("dismissed"), "削除済み");
     assert.strictEqual(statusLabel("archived"), "元の項目が消えた");
+  });
+});
+
+describe("tracksGmail", () => {
+  it("Gmail の送り主ごと・スレッドごとのまとまりを追う Task なら、ゴミ箱に入れる操作を出せる", () => {
+    assert.isTrue(tracksGmail([{ role: "tracks", source: "gmail:mail:senders" }]));
+    assert.isTrue(tracksGmail([{ role: "tracks", source: "gmail:mail:threads" }]));
+    assert.isFalse(tracksGmail([{ role: "context", source: "gmail:mail:threads" }, { role: "tracks", source: "slack:home" }]));
+  });
+});
+
+describe("openLabel の Gmail", () => {
+  it("Gmail のリンクは「Gmail で開く」", () => {
+    assert.strictEqual(openLabel("https://mail.google.com/mail/u/0/#all/abc"), "Gmail で開く");
   });
 });
 

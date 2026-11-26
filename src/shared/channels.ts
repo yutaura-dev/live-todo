@@ -12,6 +12,8 @@ export const IPC_CHANNELS = {
   testSlack: "settings:test-slack",
   connectSlack: "settings:connect-slack",
   slackAction: "board:slack-action",
+  gmailTrashTarget: "board:gmail-trash-target",
+  gmailTrash: "board:gmail-trash",
   fixPullRequest: "board:fix-pull-request",
   pullRequestFix: "board:pull-request-fix",
   pushPullRequestFix: "board:push-pull-request-fix",

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { ConflictResolutionView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
+import type { ConflictResolutionView, GmailTrashTargetView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
-import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber , tracksSlackSaved } from "./task-text.js";
+import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber, tracksGmail, tracksSlackSaved } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
 
@@ -107,6 +107,7 @@ export function TaskDrawer(props: {
 
             <NextAction detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />
             <SlackActions detail={detail} onDone={props.onChanged} />
+            <GmailActions detail={detail} onDone={props.onChanged} />
             <MakeRecurring detail={detail} onCreated={props.onChanged} />
             {detail.agentRun && <AgentRunSection run={detail.agentRun} problem={detail.agentRunProblem} taskId={detail.id} onRequested={props.onChanged} />}
 
@@ -330,6 +331,74 @@ export function RecurrenceFields(props: {
         </label>
       )}
     </div>
+  );
+}
+
+const GMAIL_PREVIEW_LIMIT = 8;
+
+/** Gmail のメールを追う Task だけに出す。押すとゴミ箱に入れるメールを見せ、承認したものだけを Gmail に書き込む */
+export function GmailActions({ detail, onDone }: { detail: TaskDetail; onDone: () => Promise<void> }) {
+  const [target, setTarget] = useState<GmailTrashTargetView | null>(null);
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string }>({ kind: "idle" });
+  if (!tracksGmail(detail.items) || detail.status === "done" || detail.status === "dismissed") return null;
+  const open = async () => {
+    setState({ kind: "busy" });
+    const loaded = await api.gmailTrashTarget(detail.id);
+    if ("error" in loaded) setState({ kind: "failed", message: loaded.error });
+    else {
+      setTarget(loaded);
+      setState({ kind: "idle" });
+    }
+  };
+  const run = async (messageIds: ReadonlyArray<string>) => {
+    setState({ kind: "busy" });
+    const outcome = await api.gmailTrash(detail.id, messageIds);
+    if (outcome.ok) {
+      setTarget(null);
+      setState({ kind: "idle" });
+      await onDone();
+    } else setState({ kind: "failed", message: outcome.message });
+  };
+
+  return (
+    <section className="next-action" aria-labelledby="drawer-gmail">
+      <h3 id="drawer-gmail" className="drawer-section-title">
+        Gmail
+      </h3>
+      {target === null ? (
+        <div className="step-actions">
+          <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void open()}>
+            メールをゴミ箱に入れる
+          </button>
+        </div>
+      ) : target.messages.length === 0 ? (
+        <p className="problem">ゴミ箱に入れるメールは残っていません。</p>
+      ) : (
+        <div className="merge-confirm" role="alertdialog" aria-labelledby="gmail-confirm-title">
+          <p id="gmail-confirm-title" className="merge-confirm-title">
+            次の {target.messages.length} 通を Gmail のゴミ箱に入れます
+          </p>
+          <ul className="gmail-trash-list">
+            {target.messages.slice(0, GMAIL_PREVIEW_LIMIT).map((message) => (
+              <li key={message.messageId}>
+                {message.subject === "" ? "（件名なし）" : message.subject}
+                <span className="gmail-trash-from">{message.senderName}</span>
+              </li>
+            ))}
+            {target.messages.length > GMAIL_PREVIEW_LIMIT && <li>ほか {target.messages.length - GMAIL_PREVIEW_LIMIT} 通</li>}
+          </ul>
+          <div className="merge-confirm-actions">
+            <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void run(target.messages.map((message) => message.messageId))}>
+              ゴミ箱に入れる
+            </button>
+            <button type="button" className="quiet-button" onClick={() => setTarget(null)}>
+              やめる
+            </button>
+          </div>
+        </div>
+      )}
+      {state.kind === "failed" && <p className="problem">Gmail に書き込めませんでした: {state.message}</p>}
+    </section>
   );
 }
 
