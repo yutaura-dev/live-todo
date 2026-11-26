@@ -212,5 +212,7 @@ export const makeSlackInboxBinding = Effect.fnUntraced(function* (options: { acc
     }),
     judge,
     taskTitleFollowsItem: true,
+    // メッセージ 1 件では何をする Task か決まらないので、会話ごとに Claude Code が文脈を読んでから Task にする
+    deferTriage: true,
   } satisfies SourceBinding<SlackInboxItem, SlackInboxCursor, SlackClientError, unknown, unknown>;
 });

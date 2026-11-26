@@ -32,6 +32,11 @@ export type SourceBinding<TItem, TCursor, EA, EJ, RJ> = {
    * 既定ではしない（Task のタイトルは自分にとっての意味で持つ。ADR-0007）。タイトルを機械的に作る Source（Slack）だけが使う
    */
   taskTitleFollowsItem?: boolean;
+  /**
+   * 新しい項目を判定せず、Task も作らずに仕分けを保留のまま取り込む。会話ごとに前後の文脈を読んで Task にするかを
+   * あとで決める Source（Slack のメンション・DM）が使う。メッセージ 1 件は、それだけでは自分のやることにならないため
+   */
+  deferTriage?: boolean;
 };
 
 export type SyncSummary = {
@@ -72,7 +77,7 @@ export const syncSource = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, R
   // ネットワークの応答を待つ間 UI 側の書き込み（既読・カードの移動）まで止めてしまう。
   // 先に済ませても、失敗した時点ではまだ何も書いていないので原子性は保たれる。
   const { changes, nextCursor } = yield* binding.adapter.fetchChanges(Option.getOrNull(cursor));
-  const judgments = yield* judgeItemsNeedingTriage(binding, changes);
+  const judgments = binding.deferTriage === true ? new Map<string, TodoJudgment>() : yield* judgeItemsNeedingTriage(binding, changes);
 
   return yield* withTransaction(
     Effect.gen(function* () {
@@ -138,7 +143,7 @@ const applyChange = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
   }
 
   if (item.triage === "pending") {
-    yield* triage(item, judgments.get(externalId), summary);
+    if (binding.deferTriage !== true) yield* triage(item, judgments.get(externalId), summary);
   } else if (item.triage === "linked" && kinds.some((kind) => STATUS_AFFECTING_ACTIVITIES.has(kind))) {
     yield* reconcileStatus(item, summary);
   }

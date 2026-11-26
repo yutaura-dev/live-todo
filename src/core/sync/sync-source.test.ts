@@ -271,6 +271,21 @@ describe("元の項目のタイトルに Task のタイトルを合わせる Sou
     }).pipe(Effect.provide(TestDatabase)));
 });
 
+describe("仕分けを保留にする Source（Slack のメンション・DM など、会話ごとにあとで考える Source）", () => {
+  it.effect("新しい項目を判定せず、Task も作らずに、仕分けを保留のまま取り込む", () =>
+    Effect.gen(function* () {
+      const judge = judgeReturning("todo");
+      const binding = { ...bindingWith(batches([upserted(item())]), judge), deferTriage: true };
+
+      const summary = yield* syncSource(binding);
+
+      assert.strictEqual(summary.tasksCreated, 0);
+      expect(judge).not.toHaveBeenCalled();
+      const stored = yield* (yield* SourceItemRepository).findItem("test", "a");
+      assert.strictEqual(Option.getOrThrow(stored).triage, "pending");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
 describe("失敗時", () => {
   it.effect("判定に失敗したら、途中までの変更もカーソルも保存しない", () =>
     Effect.gen(function* () {
