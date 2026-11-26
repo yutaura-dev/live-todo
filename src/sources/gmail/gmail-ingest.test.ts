@@ -107,7 +107,7 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
         ["c", true, true, false],
       ]);
       assert.sameMembers(gmail.state.fetched, ["a", "b", "c"]);
-      assert.lengthOf(requests, 3);
+      assert.lengthOf(requests, 1);
     }).pipe(Effect.provide(layer));
   });
 
@@ -131,6 +131,51 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
       yield* run;
       assert.deepStrictEqual((yield* stored).map((row) => row.messageId), ["a", "b"]);
       assert.lengthOf(gmail.state.queries, 2);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("同じ送り主のメールは 1 回だけ仕分けて、その結果を使い回す（同じ回に届いた分も）", () => {
+    const { requests, layer } = setup([gmailMessage({ id: "a" }), gmailMessage({ id: "b" }), gmailMessage({ id: "c", headers: { from: "Bank <info@bank.example>", subject: "お知らせ" } })]);
+    return Effect.gen(function* () {
+      yield* run;
+      assert.lengthOf(requests, 2);
+      const rows = yield* stored;
+      assert.deepStrictEqual(rows.map((row) => [row.messageId, row.kind]), [["a", "newsletter"], ["b", "newsletter"], ["c", "newsletter"]]);
+      assert.sameMembers(rows.filter((row) => row.senderKey === "news@shop.example").map((row) => row.method), ["decisions", "sender"]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("前に確かな確率で仕分けた送り主から新しく届いたメールは、仕分けずに前の結果を使う", () => {
+    const { gmail, requests, layer } = setup([gmailMessage({ id: "a" })]);
+    return Effect.gen(function* () {
+      yield* run;
+      gmail.state.messages.set("b", gmailMessage({ id: "b" }));
+      gmail.state.history = { historyId: "200", added: ["b"], labelsChanged: [], deleted: [] };
+      yield* run;
+      assert.lengthOf(requests, 1);
+      assert.deepInclude((yield* stored)[1], { messageId: "b", kind: "newsletter", method: "sender", probability: 0.9 });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("前の判定の確率が低かった送り主は、仕分け直す", () => {
+    const { gmail, requests, layer } = setup([gmailMessage({ id: "a" })], () => ({ kind: "personal", probability: undefined, method: "fallback" }));
+    return Effect.gen(function* () {
+      yield* run;
+      gmail.state.messages.set("b", gmailMessage({ id: "b" }));
+      gmail.state.history = { historyId: "200", added: ["b"], labelsChanged: [], deleted: [] };
+      yield* run;
+      assert.lengthOf(requests, 2);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("同じ送り主でも、List-Unsubscribe の有無が前と違えば仕分け直す（代表アドレスから人のメールとお知らせが来るときなど）", () => {
+    const { gmail, requests, layer } = setup([gmailMessage({ id: "a", headers: { from: "Shop <news@shop.example>", subject: "x", "list-unsubscribe": "<u>" } })]);
+    return Effect.gen(function* () {
+      yield* run;
+      gmail.state.messages.set("b", gmailMessage({ id: "b", headers: { from: "Shop <news@shop.example>", subject: "ご注文について" } }));
+      gmail.state.history = { historyId: "200", added: ["b"], labelsChanged: [], deleted: [] };
+      yield* run;
+      assert.lengthOf(requests, 2);
     }).pipe(Effect.provide(layer));
   });
 });

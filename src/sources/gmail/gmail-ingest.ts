@@ -1,8 +1,11 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../../core/db/database.js";
 import { gmailMessages } from "../../core/db/schema.js";
-import { MailClassifier } from "../../core/judge/mail-classifier.js";
+import { type MailClassification, MailClassifier } from "../../core/judge/mail-classifier.js";
+
+/** 保存する仕分けの結果。sender は、同じ送り主の前の結果を使い回したもの */
+type StoredClassification = Omit<MailClassification, "method"> & { method: MailClassification["method"] | "sender" };
 import { SourceItemRepository } from "../../core/source/source-item-repository.js";
 import { GmailClient, type GmailMessage } from "./gmail-client.js";
 import { senderKeyOf, senderNameOf } from "./gmail-mailbox.js";
@@ -11,6 +14,8 @@ import { senderKeyOf, senderNameOf } from "./gmail-mailbox.js";
 const FIRST_QUERY = "newer_than:14d -in:drafts -in:chats";
 const MAX_PAGES = 5;
 const FETCH_CONCURRENCY = 4;
+// 前の判定をこの確率以上で決めていた送り主だけ、仕分けずに結果を使い回す
+const REUSE_MIN_PROBABILITY = 0.8;
 
 const CATEGORY_LABELS: Record<string, string> = {
   CATEGORY_PERSONAL: "メイン",
@@ -40,6 +45,25 @@ const classificationRequest = (message: GmailMessage) => {
     ].join("\n"),
   };
 };
+
+const labelsOf = (message: GmailMessage, now: string) => ({ inInbox: has(message, "INBOX"), unread: has(message, "UNREAD"), trashed: has(message, "TRASH"), updatedAt: now });
+
+/** 仕分けの結果を使い回せるまとまり。同じ送り主でも、配信の解除の案内の有無が違えば別に仕分ける */
+const signatureOf = (message: GmailMessage) => JSON.stringify([senderKeyOf(message.headers), message.headers["list-unsubscribe"] !== undefined]);
+
+const previousClassification = Effect.fnUntraced(function* (accountId: string, message: GmailMessage) {
+  const db = yield* Database;
+  const [row] = yield* db
+    .select({ kind: gmailMessages.kind, probability: gmailMessages.probability, listUnsubscribe: gmailMessages.listUnsubscribe })
+    .from(gmailMessages)
+    .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.senderKey, senderKeyOf(message.headers)), ne(gmailMessages.kind, "mine"), isNotNull(gmailMessages.probability)))
+    .orderBy(desc(gmailMessages.receivedAt))
+    .limit(1)
+    .pipe(Effect.orDie);
+  if (row === undefined || row.kind === "mine" || row.probability === null || row.probability < REUSE_MIN_PROBABILITY) return Option.none<StoredClassification>();
+  if ((row.listUnsubscribe !== null) !== (message.headers["list-unsubscribe"] !== undefined)) return Option.none<MailClassification>();
+  return Option.some<StoredClassification>({ kind: row.kind, probability: row.probability, method: "sender" });
+});
 
 /**
  * Gmail のメールを取り込み、新しいメールを仕分けて gmail_messages に保存する。2 回目からは履歴の差分だけを見る。
@@ -95,46 +119,69 @@ export const ingestGmail = Effect.fnUntraced(function* (options: { accountId: st
           .where(and(eq(gmailMessages.accountId, options.accountId), inArray(gmailMessages.messageId, [...messageIds])))
           .pipe(Effect.orDie, Effect.asVoid);
 
-  yield* Effect.forEach(
-    ids,
-    (id) =>
-      Effect.gen(function* () {
-        const found = yield* client.message(id);
-        if (Option.isNone(found)) return yield* markTrashed([id]);
-        const message = found.value;
-        const labels = { inInbox: has(message, "INBOX"), unread: has(message, "UNREAD"), trashed: has(message, "TRASH"), updatedAt: now };
-        if (known.has(id)) {
-          yield* db
-            .update(gmailMessages)
-            .set(labels)
-            .where(and(eq(gmailMessages.accountId, options.accountId), eq(gmailMessages.messageId, id)))
-            .pipe(Effect.orDie);
-          return;
-        }
-        if (has(message, "DRAFT")) return;
-        const classification = has(message, "SENT") ? undefined : yield* classifier.classify(classificationRequest(message));
-        yield* db
-          .insert(gmailMessages)
-          .values({
-            accountId: options.accountId,
-            messageId: id,
-            threadId: message.threadId,
-            senderKey: senderKeyOf(message.headers),
-            senderName: senderNameOf(message.headers),
-            subject: message.headers.subject ?? "",
-            receivedAt: message.receivedAt,
-            kind: classification?.kind ?? "mine",
-            probability: classification?.probability ?? null,
-            method: classification?.method ?? null,
-            listUnsubscribe: message.headers["list-unsubscribe"] ?? null,
-            listUnsubscribePost: message.headers["list-unsubscribe-post"] ?? null,
-            ...labels,
-          })
-          .onConflictDoNothing()
-          .pipe(Effect.orDie);
-      }),
-    { concurrency: FETCH_CONCURRENCY },
+  const fetched = yield* Effect.forEach(ids, (id) => client.message(id).pipe(Effect.map((found) => [id, found] as const)), { concurrency: FETCH_CONCURRENCY });
+  const fresh: GmailMessage[] = [];
+  for (const [id, found] of fetched) {
+    if (Option.isNone(found)) {
+      yield* markTrashed([id]);
+      continue;
+    }
+    const message = found.value;
+    if (known.has(id)) {
+      yield* db
+        .update(gmailMessages)
+        .set(labelsOf(message, now))
+        .where(and(eq(gmailMessages.accountId, options.accountId), eq(gmailMessages.messageId, id)))
+        .pipe(Effect.orDie);
+    } else if (!has(message, "DRAFT")) fresh.push(message);
+  }
+
+  // 送り主ごとに 1 回だけ仕分ける理由: メルマガかどうかはほとんど送り主で決まり、Decisions の呼び出しを送り主の数に抑えられるため。
+  // 複数のメールを 1 回の呼び出しにまとめないのは、あるメールに書かれた文で隣のメールの判定まで動かされないようにするため
+  const bySignature = new Map<string, GmailMessage[]>();
+  for (const message of fresh) {
+    if (has(message, "SENT")) continue;
+    const key = signatureOf(message);
+    bySignature.set(key, [...(bySignature.get(key) ?? []), message]);
+  }
+  const classified = new Map(
+    yield* Effect.forEach(
+      [...bySignature],
+      ([key, messages]) =>
+        Effect.gen(function* () {
+          const reused = yield* previousClassification(options.accountId, messages[0]!);
+          if (Option.isSome(reused)) return [key, { first: reused.value, rest: reused.value }] as const;
+          const first = yield* classifier.classify(classificationRequest(messages.at(-1)!));
+          const rest: StoredClassification = first.method === "decisions" ? { ...first, method: "sender" } : first;
+          return [key, { first: first as StoredClassification, rest }] as const;
+        }),
+      { concurrency: FETCH_CONCURRENCY },
+    ),
   );
+
+  for (const message of fresh) {
+    const group = has(message, "SENT") ? undefined : classified.get(signatureOf(message));
+    const classification = group === undefined ? undefined : bySignature.get(signatureOf(message))!.at(-1) === message ? group.first : group.rest;
+    yield* db
+      .insert(gmailMessages)
+      .values({
+        accountId: options.accountId,
+        messageId: message.id,
+        threadId: message.threadId,
+        senderKey: senderKeyOf(message.headers),
+        senderName: senderNameOf(message.headers),
+        subject: message.headers.subject ?? "",
+        receivedAt: message.receivedAt,
+        kind: classification?.kind ?? "mine",
+        probability: classification?.probability ?? null,
+        method: classification?.method ?? null,
+        listUnsubscribe: message.headers["list-unsubscribe"] ?? null,
+        listUnsubscribePost: message.headers["list-unsubscribe-post"] ?? null,
+        ...labelsOf(message, now),
+      })
+      .onConflictDoNothing()
+      .pipe(Effect.orDie);
+  }
   yield* markTrashed(changed.deleted);
   yield* items.saveCursor(source, { historyId: changed.historyId });
   return { fetched: ids.length };
