@@ -160,7 +160,9 @@ describe("ルール", () => {
     name: "請求書にレシートのラベル",
     createdAt: "2026-11-26T00:00:00.000Z",
     when: "請求書に関するメール",
-    then: { gmail: { labels: ["レシート"], markRead: true } },
+    then: "レシート ラベルをつけて既読にする",
+    actions: { gmail: { labels: ["レシート"], markRead: true } },
+    interpretedFrom: "レシート ラベルをつけて既読にする",
   };
 
   it.effect("利用者が決めたルールを、Source とは別に書ける。書かなければ空で、書いたルールは既定で有効", () =>
@@ -170,12 +172,13 @@ describe("ルール", () => {
       assert.deepInclude(config.rules[0], { id: "r1", enabled: true, when: "請求書に関するメール" });
     }));
 
-  it.effect("条件か操作が空のルールや、ゴミ箱に入れるなど決めていない操作は、エラーにする", () =>
+  it.effect("条件が空・操作を読み取れていない・読み取ったあとに書き換えたルールや、決めていない操作は、エラーにする", () =>
     Effect.gen(function* () {
-      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, when: " " }] }), "条件");
-      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: {} }] }), "操作");
-      yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: { gmail: { trash: true } } }] });
-      yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: { slack: { post: true } } }] });
+      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, when: " " }] }), "どういう時");
+      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, actions: {} }] }), "読み取れていません");
+      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: "アーカイブする" }] }), "読み取り直して");
+      yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, actions: { gmail: { trash: true } } }] });
+      yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, actions: { slack: { post: true } } }] });
     }));
 });
 

@@ -11,8 +11,10 @@ import { makeSlackJobs } from "../app/slack-jobs.js";
 import { and, eq, like } from "drizzle-orm";
 import { sourceItems, taskLinks } from "../core/db/schema.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
+import { makeMailClassifier } from "../app/llm.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
 import { answerQuestion, askQuestion, listQuestions, recoverInterruptedQuestions, TaskQuestionError } from "../app/task-questions.js";
+import { actionsFromInterpretation, labelCandidatesOf } from "../core/rules/interpret.js";
 import { gmailMailTarget, gmailProcess, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
@@ -563,7 +565,33 @@ const questionContextFor = (taskId: number) =>
     };
   });
 
+/** ルールの「何をする」を、Decisions でアプリの操作に読み取る（ADR-0014）。ラベルの名前は、文の中の名前と Gmail にあるラベルから選ばせる */
+const interpretRuleActions = (then: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const account = config.gmailAccounts[0];
+    if (account === undefined) return { ok: false as const, reason: "Gmail のアカウントを設定してから読み取ってください" };
+    const classifier = yield* makeMailClassifier(account.resolvedLlmProfile);
+    const existing = yield* gmailClientFor(account.id).pipe(
+      Effect.flatMap((client) => client.labels),
+      // システムのラベル（INBOX・CATEGORY_* など）は候補にしない
+      Effect.map((labels) => labels.filter((label) => label.id.startsWith("Label_")).map((label) => label.name)),
+      Effect.orElseSucceed(() => [] as string[]),
+    );
+    const candidates = [...new Set([...labelCandidatesOf(then), ...existing])].slice(0, MAX_LABEL_CANDIDATES);
+    return actionsFromInterpretation(yield* classifier.interpretActions({ instruction: then, labels: candidates }));
+  });
+const MAX_LABEL_CANDIDATES = 30;
+
 function registerTaskQuestions() {
+  ipcMain.handle(IPC_CHANNELS.interpretRule, (_event, input: unknown) =>
+    runtime.runPromise(
+      Schema.decodeUnknownEffect(Schema.Struct({ then: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(500)) }))(input).pipe(
+        Effect.flatMap((request) => interpretRuleActions(request.then)),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, reason: errorMessage(error) })),
+      ),
+    ),
+  );
   const TaskIdInput = Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)) });
   ipcMain.handle(IPC_CHANNELS.taskQuestions, (_event, input: unknown) =>
     runtime.runPromise(

@@ -14,7 +14,7 @@ const KIND_LABELS: Record<string, string> = { newsletter: "メルマガ", notifi
  * 届いたメールだけで、同じメールを同じルールで判定するのは一度だけ（当てはまらなくても、失敗してもやり直さない）
  */
 export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, rules: ReadonlyArray<Rule>) {
-  const active = rules.filter((rule) => rule.enabled && rule.then.gmail !== undefined);
+  const active = rules.filter((rule) => rule.enabled && rule.actions.gmail !== undefined);
   if (active.length === 0) return 0;
   const db = yield* Database;
   const client = yield* GmailClient;
@@ -47,7 +47,7 @@ export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, r
   for (const rule of active) {
     for (const mail of mails) {
       if (done.has(`${mail.messageId} ${rule.id}`) || !isRuleCandidate(mail, rule)) continue;
-      const actions = rule.then.gmail!;
+      const actions = rule.actions.gmail!;
       const judged = yield* classifier.matchesCondition({
         // 種類・用件はメールの中身から判定したもの（信頼できない）なので、アプリが書いた情報の側ではなく評価対象の側に入れる
         input: [

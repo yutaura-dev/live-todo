@@ -65,6 +65,7 @@ export const mockApi: LiveTodoApi = {
   slackAction: async () => ({ ok: true }),
   gmailMailTarget: async () => ({ kind: "senders", messages: [] }),
   taskQuestions: async () => [],
+  interpretRule: async () => ({ ok: true, actions: { gmail: { labels: ["レシート"], markRead: true } } }),
   askTask: async () => ({ ok: true }),
   gmailProcess: async () => ({ ok: true }),
   fixPullRequest: async () => ({ ok: true }),

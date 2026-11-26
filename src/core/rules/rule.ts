@@ -1,5 +1,5 @@
 /**
- * 利用者が決めたルール（ADR-0014）。条件は言葉で書き（「請求書に関するメール」など）、当てはまるかは Decisions で判定する。
+ * 利用者が決めたルール（ADR-0014）。「どういう時」と「何をする」を言葉で書き、どちらも Decisions でアプリの判定・操作に結びつける。
  * ルールの中身はアプリに組み込まず、設定に持つ。操作は Source ごとに決める（今は Gmail のラベル・既読・アーカイブだけ）
  */
 export type Rule = {
@@ -8,9 +8,14 @@ export type Rule = {
   enabled: boolean;
   /** これより前に届いたものには当てない（過去のものにまとめて書き込まない） */
   createdAt: string;
-  /** 条件（言葉で書く） */
+  /** どういう時（言葉で書く。届いたものごとに Decisions で当てはまるかを判定する） */
   when: string;
-  then: { gmail?: GmailRuleActions | undefined };
+  /** 何をする（言葉で書く。保存するときに Decisions でアプリの操作に結びつけ、actions に持つ） */
+  then: string;
+  /** then から読み取ったアプリの操作。当てるときはこれを使い、文を読み直さない */
+  actions: { gmail?: GmailRuleActions | undefined };
+  /** actions を読み取った then の文。then を書き換えたら読み取り直す */
+  interpretedFrom: string;
 };
 
 /** Gmail の操作はラベルの付け外しだけ。ゴミ箱に入れる・送るはルールではできない */
@@ -24,7 +29,7 @@ const hasGmailActions = (actions: GmailRuleActions | undefined) =>
 
 /** メールを、このルールの条件で判定する対象にするか */
 export const isRuleCandidate = (mail: { receivedAt: number; kind: string }, rule: Rule) =>
-  rule.enabled && mail.kind !== "mine" && hasGmailActions(rule.then.gmail) && mail.receivedAt >= Date.parse(rule.createdAt);
+  rule.enabled && mail.kind !== "mine" && rule.interpretedFrom === rule.then && hasGmailActions(rule.actions.gmail) && mail.receivedAt >= Date.parse(rule.createdAt);
 
 /** Gmail の操作を、ラベルの付け外しにする。labelIds はラベルの名前から id への対応 */
 export function gmailLabelChangesOf(actions: GmailRuleActions, labelIds: ReadonlyMap<string, string>) {

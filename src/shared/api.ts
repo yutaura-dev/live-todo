@@ -60,13 +60,21 @@ export type ConfigDocument = {
   rules?: Array<RuleDraft>;
 };
 
+export type RuleActions = { gmail?: { labels?: string[]; markRead?: boolean; archive?: boolean } };
+
 export type RuleDraft = {
   id: string;
   name: string;
   enabled?: boolean;
   createdAt: string;
+  /** どういう時（言葉で書く） */
   when: string;
-  then: { gmail?: { labels?: string[]; markRead?: boolean; archive?: boolean } };
+  /** 何をする（言葉で書く） */
+  then: string;
+  /** then から読み取った操作 */
+  actions: RuleActions;
+  /** actions を読み取った then の文 */
+  interpretedFrom: string;
 };
 
 /** saved: アプリに暗号化して保存済み / env: 環境変数から読んでいる / missing: ない */
@@ -172,6 +180,8 @@ export interface LiveTodoApi {
   recurringUpdate(input: { id: number; title?: string; note?: string; schedule?: RecurrenceScheduleView; active?: boolean }): Promise<Outcome>;
   /** Slack の To-do を完了にする・To-do から外す。外部への書き込み。確認で承認したあとにだけ呼ぶ */
   slackAction(taskId: number, action: "complete" | "remove"): Promise<Outcome>;
+  /** ルールの「何をする」を、Decisions でアプリの操作に読み取る */
+  interpretRule(then: string): Promise<{ ok: true; actions: RuleActions } | { ok: false; reason: string }>;
   /** Task についての質問と回答（古い順） */
   taskQuestions(taskId: number): Promise<TaskQuestionView[]>;
   /** Task について質問し、Claude Code に調べさせる（調べ終わると taskQuestions に回答が載る） */

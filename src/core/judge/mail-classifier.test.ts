@@ -119,4 +119,22 @@ describe("MailClassifier（Decisions API でメールを仕分ける）", () => 
     Effect.gen(function* () {
       assert.deepStrictEqual(yield* (yield* MailClassifier).matchesCondition({ input: "x", context: "", condition: "請求書" }), { probability: undefined });
     }).pipe(Effect.provide(fakeDecisionModel(() => Effect.succeed({ condition: { _tag: "Refusal" } })).layer)));
+
+  it.effect("「何をする」の文を、既読・アーカイブ・ラベル（候補から選ぶ）・できない操作の確率に分けて、1 回の呼び出しで聞く", () => {
+    const model = fakeDecisionModel(() =>
+      Effect.succeed({
+        markRead: { _tag: "Probability", probability: 0.95 },
+        archive: { _tag: "Probability", probability: 0.05 },
+        addLabel: { _tag: "Probability", probability: 0.9 },
+        label: { _tag: "Classify", label: "l0", probabilities: { l0: 0.9, l1: 0.05, none: 0.05 } },
+        unsupported: { _tag: "Probability", probability: 0.02 },
+      }),
+    );
+    return Effect.gen(function* () {
+      const answer = yield* (yield* MailClassifier).interpretActions({ instruction: "レシート ラベルをつけて既読にする", labels: ["レシート", "仕事"] });
+      assert.deepStrictEqual(answer, { markRead: 0.95, archive: 0.05, addLabel: 0.9, label: "レシート", unsupported: 0.02 });
+      assert.lengthOf(model.calls, 1);
+      assert.include(JSON.stringify(model.calls[0]!.state), "レシート ラベルをつけて既読にする");
+    }).pipe(Effect.provide(model.layer));
+  });
 });

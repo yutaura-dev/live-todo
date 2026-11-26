@@ -35,6 +35,7 @@ const api: LiveTodoApi = {
   slackAction: (taskId, action) => ipcRenderer.invoke(IPC_CHANNELS.slackAction, { taskId, action }),
   gmailMailTarget: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.gmailMailTarget, { taskId }),
   taskQuestions: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.taskQuestions, { taskId }),
+  interpretRule: (then) => ipcRenderer.invoke(IPC_CHANNELS.interpretRule, { then }),
   askTask: (taskId, question) => ipcRenderer.invoke(IPC_CHANNELS.askTask, { taskId, question }),
   gmailProcess: (taskId, action, messageIds) => ipcRenderer.invoke(IPC_CHANNELS.gmailProcess, { taskId, action, messageIds }),
   connectSlack: (accountId, workspace) => ipcRenderer.invoke(IPC_CHANNELS.connectSlack, { accountId, workspace }),

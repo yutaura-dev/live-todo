@@ -26,6 +26,7 @@ function setup(
       classify: (request) => Effect.sync(() => (requests.push(request), answer(request.input))),
       needsAction: (request) => Effect.sync(() => (actionRequests.push(request), action(request.input))),
       matchesCondition: () => Effect.succeed({ probability: 0 }),
+      interpretActions: () => Effect.die(new Error("使わない")),
     }),
   );
   const layer = Layer.mergeAll(TestDatabase, classifier, Layer.succeed(GmailClient, gmail.client));

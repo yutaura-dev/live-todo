@@ -10,7 +10,7 @@ import type {
 } from "../../shared/api.js";
 import { api } from "./api.js";
 import { RecurringSettings } from "./Recurring.js";
-import { describeRule, newRule } from "./gmail-rules.js";
+import { describeActions, isInterpreted, newRule } from "./gmail-rules.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
@@ -719,8 +719,16 @@ function GmailAccountEditor(props: { account: GmailAccountDraft; onChange: (next
 function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => void; onRemove: () => void }) {
   const { rule } = props;
   const id = useId();
-  const gmail = rule.then.gmail ?? {};
-  const setGmail = (patch: Partial<NonNullable<RuleDraft["then"]["gmail"]>>) => props.onChange({ ...rule, then: { ...rule.then, gmail: { ...gmail, ...patch } } });
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; reason: string }>({ kind: "idle" });
+  const interpret = async () => {
+    if (rule.then.trim() === "" || isInterpreted(rule)) return;
+    setState({ kind: "busy" });
+    const result = await api.interpretRule(rule.then);
+    if (result.ok) {
+      props.onChange({ ...rule, actions: result.actions, interpretedFrom: rule.then });
+      setState({ kind: "idle" });
+    } else setState({ kind: "failed", reason: result.reason });
+  };
   return (
     <fieldset className="gmail-rule">
       <legend className="gmail-rule-legend">
@@ -730,31 +738,31 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
           有効
         </label>
       </legend>
-      <p className="field-hint">{describeRule(rule)}</p>
       <label className="field" htmlFor={`${id}-when`}>
-        条件（言葉で書く）
-        <textarea id={`${id}-when`} rows={2} value={rule.when} placeholder="請求書や領収書に関するメール" onChange={(event) => props.onChange({ ...rule, when: event.target.value })} />
+        どういう時
+        <textarea id={`${id}-when`} rows={2} value={rule.when} placeholder="請求書や領収書に関するメールが届いた時" onChange={(event) => props.onChange({ ...rule, when: event.target.value })} />
       </label>
-      <div className="gmail-rule-group">
-        <span className="field-title">Gmail での操作</span>
-        <label className="field" htmlFor={`${id}-labels`}>
-          付けるラベル（, で区切る。なければ作ります）
-          <input
-            id={`${id}-labels`}
-            value={(gmail.labels ?? []).join(", ")}
-            placeholder="レシート"
-            onChange={(event) => setGmail({ labels: event.target.value.split(",").map((label) => label.trim()).filter((label) => label !== "") })}
-          />
-        </label>
-        <label className="checkbox-field">
-          <input type="checkbox" checked={gmail.markRead === true} onChange={(event) => setGmail({ markRead: event.target.checked })} />
-          既読にする
-        </label>
-        <label className="checkbox-field">
-          <input type="checkbox" checked={gmail.archive === true} onChange={(event) => setGmail({ archive: event.target.checked })} />
-          アーカイブする（受信トレイから外す）
-        </label>
+      <label className="field" htmlFor={`${id}-then`}>
+        何をする
+        <textarea
+          id={`${id}-then`}
+          rows={2}
+          value={rule.then}
+          placeholder="レシート ラベルをつけて既読にする"
+          onChange={(event) => props.onChange({ ...rule, then: event.target.value })}
+          onBlur={() => void interpret()}
+        />
+      </label>
+      <div className="step-actions">
+        {isInterpreted(rule) ? (
+          <p className="field-hint">読み取った操作: {describeActions(rule.actions)}</p>
+        ) : (
+          <button type="button" className="quiet-button" disabled={state.kind === "busy" || rule.then.trim() === ""} onClick={() => void interpret()}>
+            {state.kind === "busy" ? "読み取っています…" : "何をするかを読み取る"}
+          </button>
+        )}
       </div>
+      {state.kind === "failed" && <p className="problem">{state.reason}</p>}
       <button type="button" className="dismiss-button" onClick={props.onRemove}>
         このルールを消す
       </button>

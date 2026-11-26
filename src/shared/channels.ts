@@ -14,6 +14,7 @@ export const IPC_CHANNELS = {
   slackAction: "board:slack-action",
   gmailMailTarget: "board:gmail-mail-target",
   taskQuestions: "board:task-questions",
+  interpretRule: "settings:interpret-rule",
   askTask: "board:ask-task",
   gmailProcess: "board:gmail-process",
   fixPullRequest: "board:fix-pull-request",

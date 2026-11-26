@@ -61,8 +61,10 @@ const Rule = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
   createdAt: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T/)),
   when: Schema.String.check(Schema.isMaxLength(500)),
-  // 操作は決めたものだけ書ける（ゴミ箱に入れる・送るなどは書けない）
-  then: Schema.Struct({
+  then: Schema.String.check(Schema.isMaxLength(500)),
+  interpretedFrom: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
+  // then から読み取った操作。決めたものだけ書ける（ゴミ箱に入れる・送るなどは書けない）
+  actions: Schema.Struct({
     gmail: Schema.optional(
       Schema.Struct({
         labels: Schema.optional(Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(100)))),
@@ -173,10 +175,12 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
   });
 
   file.rules.forEach((rule, at) => {
-    if (rule.when.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 条件を書いてください`);
-    const gmail = rule.then.gmail;
-    if (gmail === undefined || ((gmail.labels ?? []).length === 0 && gmail.markRead !== true && gmail.archive !== true)) {
-      issues.push(`rules[${at}]（${rule.name}）: 操作を 1 つ以上決めてください`);
+    if (rule.when.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「どういう時」を書いてください`);
+    if (rule.then.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書いてください`);
+    else if (rule.interpretedFrom !== rule.then) issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書き換えたので、読み取り直してください`);
+    const gmail = rule.actions.gmail;
+    if (rule.then.trim() !== "" && (gmail === undefined || ((gmail.labels ?? []).length === 0 && gmail.markRead !== true && gmail.archive !== true))) {
+      issues.push(`rules[${at}]（${rule.name}）: 「何をする」から操作を読み取れていません`);
     }
   });
 

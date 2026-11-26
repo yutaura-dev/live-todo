@@ -18,7 +18,9 @@ const rule: Rule = {
   enabled: true,
   createdAt: "2026-11-26T00:00:00.000Z",
   when: "請求書に関するメール",
-  then: { gmail: { labels: ["レシート"], markRead: true } },
+  then: "レシート ラベルをつけて既読にする",
+  actions: { gmail: { labels: ["レシート"], markRead: true } },
+  interpretedFrom: "レシート ラベルをつけて既読にする",
 };
 
 const insertMail = (messageId: string, overrides: Partial<typeof gmailMessages.$inferInsert> = {}) =>
@@ -37,6 +39,7 @@ const setup = (probabilityOf: (input: string) => number | undefined = (input) =>
     classify: () => Effect.die(new Error("使わない")),
     needsAction: () => Effect.die(new Error("使わない")),
     matchesCondition: (request) => Effect.sync(() => (asked.push(request), { probability: probabilityOf(request.input) })),
+    interpretActions: () => Effect.die(new Error("使わない")),
   });
   const layer = Layer.mergeAll(TestDatabase, Layer.succeed(GmailClient, gmail.client), Layer.succeed(MailClassifier, classifier));
   return { gmail, asked, layer };
@@ -117,7 +120,7 @@ describe("applyGmailRules（利用者が決めたルールをメールに当て�
   it.effect("Gmail に書き込めなかったら失敗として記録し、ほかのメールは続ける（やり直さない）", () => {
     const { gmail, asked } = setup();
     const failing = { ...gmail.client, modifyLabels: (id: string, change: { add: ReadonlyArray<string>; remove: ReadonlyArray<string> }) => (id === "a" ? Effect.fail(new GmailRequestError({ message: "権限がない", status: 403 })) : gmail.client.modifyLabels(id, change)) };
-    const classifier = MailClassifier.of({ classify: () => Effect.die(new Error("x")), needsAction: () => Effect.die(new Error("x")), matchesCondition: (request) => Effect.sync(() => (asked.push(request), { probability: 0.95 })) });
+    const classifier = MailClassifier.of({ classify: () => Effect.die(new Error("x")), needsAction: () => Effect.die(new Error("x")), matchesCondition: (request) => Effect.sync(() => (asked.push(request), { probability: 0.95 })), interpretActions: () => Effect.die(new Error("x")) });
     return Effect.gen(function* () {
       yield* TestClock.setTime(NOW);
       yield* insertMail("a");
