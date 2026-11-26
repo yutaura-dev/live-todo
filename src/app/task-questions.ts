@@ -16,7 +16,10 @@ export class TaskQuestionError extends Schema.TaggedError<TaskQuestionError>()("
  */
 export const QUESTION_TOOLS = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"] as const;
 
-/** GitHub を読むだけの gh のコマンドと、リポジトリの履歴を読む git のコマンド。gh api は書き込みにも使えるので許さない */
+/**
+ * GitHub を読むだけの gh のコマンドと、リポジトリの履歴を読む git のコマンド。gh api は書き込みにも使えるので許さない。
+ * git diff を許さない理由: --no-index で任意のファイル（gh のために読める場所に残した認証の置き場所など）を表示できるため。差分は git show・git log -p で読める
+ */
 export const GITHUB_READ_TOOLS = [
   "Bash(gh pr view:*)",
   "Bash(gh pr diff:*)",
@@ -32,7 +35,6 @@ export const GITHUB_READ_TOOLS = [
   "Bash(gh release list:*)",
   "Bash(git log:*)",
   "Bash(git show:*)",
-  "Bash(git diff:*)",
   "Bash(git blame:*)",
 ] as const;
 const GITHUB_DOMAINS = ["api.github.com", "github.com"];
@@ -109,7 +111,7 @@ export function questionPrompt(subject: { question: string; contextDir: string; 
         ]
       : []),
     ...(subject.github === true
-      ? ["", "GitHub は gh（pr view / diff / checks、issue view、search、run view、repo view など読むだけのもの）で調べられる。リポジトリの履歴は git log / show / diff / blame で読める。"]
+      ? ["", "GitHub は gh（pr view / diff / checks、issue view、search、run view、repo view など読むだけのもの）で調べられる。リポジトリの履歴は git log（-p で差分）/ show / blame で読める。"]
       : []),
     "",
     "答え方:",

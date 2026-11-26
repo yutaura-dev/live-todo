@@ -114,7 +114,9 @@ describe("Task への質問", () => {
 
       const request = h.requests[0]!;
       assert.includeMembers([...request.allowedTools], ["Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh run view:*)", "Bash(git log:*)"]);
-      assert.isFalse(request.allowedTools.some((tool) => /gh api|gh pr (comment|merge|edit|review|close)|git push|gh issue (comment|edit|close)/.test(tool)));
+      assert.isFalse(request.allowedTools.some((tool) => /gh api|gh auth|gh pr (comment|merge|edit|review|close)|git push|gh issue (comment|edit|close)/.test(tool)));
+      // git diff --no-index は任意のファイルを表示できる（gh の認証の置き場所も読める）ので許さない
+      assert.notInclude(request.allowedTools, "Bash(git diff:*)");
       assert.includeMembers([...(request.sandbox?.allowedDomains ?? [])], ["api.github.com", "github.com"]);
       assert.isTrue(request.sandbox?.weakerNetworkIsolation);
     }).pipe(Effect.provide(TestDatabase));
