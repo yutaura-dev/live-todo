@@ -16,6 +16,9 @@ node_modules/
 /live-todo.db*
 /live-todo-*.db*
 /judge-dataset*.json
+/mail-eval-dataset*.json
+/mail-eval-results-*.json
+/.mail-eval-work/
 
 # env files
 .env

@@ -32,7 +32,7 @@ export const gmailHistorySource = (accountId: string) => `gmail:${accountId}:his
 
 const has = (message: GmailMessage, label: string) => message.labelIds.includes(label);
 
-const classificationRequest = (message: GmailMessage) => {
+export const classificationRequest = (message: GmailMessage) => {
   const { headers } = message;
   const categories = message.labelIds.flatMap((label) => (CATEGORY_LABELS[label] === undefined ? [] : [CATEGORY_LABELS[label]]));
   return {
