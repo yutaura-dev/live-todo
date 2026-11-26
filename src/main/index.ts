@@ -593,8 +593,29 @@ function registerTaskQuestions() {
           return yield* new TaskQuestionError({ message: "この Task の元の項目のアカウントでは Claude Code を使わない設定です。設定で Claude Code で考えるのを有効にしてから質問してください" });
         }
         const id = yield* askQuestion(request.taskId, request.question);
+        const config = yield* loadAppConfigFile(configPath);
+        // Gmail を探させるのは、Gmail のアカウントで Claude Code で考えるのを有効にしているときだけ
+        const gmail = config.gmailAccounts.some((account) => account.planNextActions)
+          ? {
+              denyRead: [
+                secretsPath,
+                tokenInfoPath,
+                ...[dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`],
+                configPath,
+                app.getAppPath(),
+                process.cwd(),
+                agentWorkspaceRoot,
+                ...[".ssh", ".aws", ".config/gh", ".npmrc", ".netrc", ".git-credentials", ".docker", ".kube", ".gnupg", ".claude", ".claude.json"].map((path) => join(app.getPath("home"), path)),
+              ],
+            }
+          : undefined;
         runtime.runFork(
-          answerQuestion(id, { model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD, extraContext: questionContextFor }),
+          answerQuestion(id, {
+            model: DEPENDENCY_REVIEW_MODEL,
+            maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD,
+            extraContext: questionContextFor,
+            ...(gmail === undefined ? {} : { gmail }),
+          }),
         );
       }),
     ),

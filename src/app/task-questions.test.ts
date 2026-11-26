@@ -80,6 +80,32 @@ describe("Task への質問", () => {
     }).pipe(Effect.provide(TestDatabase));
   });
 
+  it.effect("Gmail を探してよいときは、gws で Gmail を読むコマンドだけを許し、sandbox に閉じ込めて Google の API とだけ通信させる", () => {
+    const h = harness();
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("gmail:mail:threads", "https://mail.google.com/");
+      yield* h.provide(answerQuestion(yield* askQuestion(taskId, "前に何を買った？"), { gmail: { denyRead: ["/app/secrets.json"] } }));
+
+      const request = h.requests[0]!;
+      assert.includeMembers([...request.allowedTools], ["Bash(gws gmail users messages list:*)", "Bash(gws gmail users messages get:*)", "Bash(gws gmail users threads get:*)"]);
+      assert.isFalse(request.allowedTools.some((tool) => tool === "Bash" || /send|trash|modify|delete|insert|import/.test(tool)));
+      assert.includeMembers([...(request.sandbox?.allowedDomains ?? [])], ["gmail.googleapis.com", "oauth2.googleapis.com"]);
+      assert.includeMembers([...(request.sandbox?.denyRead ?? [])], ["/app/secrets.json"]);
+      assert.include(request.prompt, "gws gmail users messages list");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("Gmail を探してよくないときは、コマンドを許さない", () => {
+    const h = harness();
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("github:personal", "https://github.com/acme/app/issues/1");
+      yield* h.provide(answerQuestion(yield* askQuestion(taskId, "これは何？"), {}));
+      assert.isFalse(h.requests[0]!.allowedTools.some((tool) => tool.startsWith("Bash")));
+      assert.isUndefined(h.requests[0]!.sandbox);
+      assert.notInclude(h.requests[0]!.prompt, "gws");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
   it.effect("GitHub の PR を追う Task なら、そのリポジトリを読める場所で調べさせる", () => {
     const h = harness();
     return Effect.gen(function* () {
