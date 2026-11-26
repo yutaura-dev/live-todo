@@ -72,10 +72,9 @@ const previousClassification = Effect.fnUntraced(function* (accountId: string, m
 // 予定のファイルを読むのは受信トレイの招待のメールだけで、1 通につき 1 回（本文の全体を取るので数を絞る）
 const INVITE_QUERY = "in:inbox filename:ics";
 
-const checkInvites = Effect.fnUntraced(function* (accountId: string, now: string) {
+const checkInvites = Effect.fnUntraced(function* (accountId: string, ids: ReadonlyArray<string>, now: string) {
   const client = yield* GmailClient;
   const db = yield* Database;
-  const { ids } = yield* client.listMessages(INVITE_QUERY);
   if (ids.length === 0) return;
   const unchecked = yield* db
     .select({ messageId: gmailMessages.messageId })
@@ -86,7 +85,10 @@ const checkInvites = Effect.fnUntraced(function* (accountId: string, now: string
     unchecked,
     ({ messageId }) =>
       Effect.gen(function* () {
-        const calendar = yield* client.calendar(messageId);
+        const result = yield* client.calendar(messageId).pipe(Effect.result);
+        // 読めなかったら次の回にやり直す（予定のファイル 1 通のために、取り込み全体を止めない）
+        if (result._tag === "Failure") return yield* Effect.logWarning("招待の予定のファイルを読めなかった").pipe(Effect.annotateLogs({ reason: result.failure.message }));
+        const calendar = result.success;
         const end = Option.map(calendar, inviteEndOf);
         yield* db
           .update(gmailMessages)
@@ -137,7 +139,8 @@ export const ingestGmail = Effect.fnUntraced(function* (options: { accountId: st
       );
 
   const now = DateTime.formatIso(yield* DateTime.now);
-  const ids = [...new Set(changed.ids)];
+  const inviteIds = (yield* client.listMessages(INVITE_QUERY)).ids;
+  const ids = [...new Set([...changed.ids, ...inviteIds])];
   const known = new Set(
     ids.length === 0
       ? []
@@ -222,7 +225,7 @@ export const ingestGmail = Effect.fnUntraced(function* (options: { accountId: st
       .pipe(Effect.orDie);
   }
   yield* markTrashed(changed.deleted);
-  yield* checkInvites(options.accountId, now);
+  yield* checkInvites(options.accountId, inviteIds, now);
   yield* items.saveCursor(source, { historyId: changed.historyId });
   return { fetched: ids.length };
 });

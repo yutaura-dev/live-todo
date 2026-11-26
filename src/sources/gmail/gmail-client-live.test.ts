@@ -139,6 +139,15 @@ describe("GmailClientLive（gws でGmail を読む）", () => {
     }).pipe(Effect.provide(fake.layer));
   });
 
+  it.effect("認証のエラー（401）は一度だけやり直す（gws が認証を更新している途中にぶつかることがあるため）", () => {
+    let calls = 0;
+    const fake = fakeGws(() => (++calls === 1 ? fail(401) : ok({ historyId: "5" })));
+    return Effect.gen(function* () {
+      assert.strictEqual(yield* (yield* client).historyId, "5");
+      assert.strictEqual(calls, 2);
+    }).pipe(Effect.provide(fake.layer));
+  });
+
   it.effect("gws が失敗したら、Gmail のステータスつきの GmailRequestError（出力の本文はメッセージに入れない）", () =>
     Effect.gen(function* () {
       const error = yield* (yield* client).trash("m1").pipe(Effect.flip);

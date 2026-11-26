@@ -6,7 +6,7 @@ import { Database } from "../../core/db/database.js";
 import { gmailMessages } from "../../core/db/schema.js";
 import { TestDatabase } from "../../core/db/test-database.js";
 import { type MailClassification, MailClassifier } from "../../core/judge/mail-classifier.js";
-import { GmailClient } from "./gmail-client.js";
+import { GmailClient, GmailRequestError } from "./gmail-client.js";
 import { ingestGmail } from "./gmail-ingest.js";
 import { gmailMessage, makeTestGmail } from "./test-client.js";
 
@@ -214,6 +214,27 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
         ["plain", true, null, null],
       ]);
       assert.include(gmail.state.queries, "in:inbox filename:ics");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("招待の予定のファイルを読めなかったメールは、次の回にやり直し、ほかの取り込みは止めない", () => {
+    const { gmail, layer } = setup([gmailMessage({ id: "a" })]);
+    const failing = { ...gmail.client, calendar: () => Effect.fail(new GmailRequestError({ message: "x", status: 500 })) };
+    return Effect.gen(function* () {
+      yield* run.pipe(Effect.provideService(GmailClient, failing));
+      assert.deepInclude((yield* stored)[0], { messageId: "a", inviteChecked: false });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("最初の取り込みの範囲より前に届いた招待でも、受信トレイに残っていれば取り込む（日程が過ぎたら片付けを勧めるため）", () => {
+    const { gmail, layer } = setup([]);
+    return Effect.gen(function* () {
+      yield* run;
+      gmail.state.messages.set("old-invite", gmailMessage({ id: "old-invite" }));
+      const originalList = gmail.client.listMessages;
+      const listing = { ...gmail.client, listMessages: (query: string, pageToken?: string) => (query === "in:inbox filename:ics" ? originalList(query, pageToken) : Effect.succeed({ ids: [], nextPageToken: undefined })) };
+      yield* run.pipe(Effect.provideService(GmailClient, listing));
+      assert.deepStrictEqual((yield* stored).map((row) => row.messageId), ["old-invite"]);
     }).pipe(Effect.provide(layer));
   });
 });

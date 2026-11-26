@@ -118,7 +118,10 @@ export const GmailClientLive = Layer.effect(
   Effect.gen(function* () {
     const gws = yield* Gws;
     const call = Effect.fnUntraced(function* (path: ReadonlyArray<string>, params: Record<string, unknown>, body?: unknown) {
-      const result = yield* gws.run(["gmail", "users", ...path, "--params", JSON.stringify({ userId: "me", ...params }), ...(body === undefined ? [] : ["--json", JSON.stringify(body)])]);
+      const args = ["gmail", "users", ...path, "--params", JSON.stringify({ userId: "me", ...params }), ...(body === undefined ? [] : ["--json", JSON.stringify(body)])];
+      let result = yield* gws.run(args);
+      // 401 だけ一度やり直す理由: 並行して呼ぶと、gws が認証を更新している途中の呼び出しが 401 になることがあるため
+      if (result.exitCode !== 0 && statusOf(result.stdout) === 401) result = yield* gws.run(args);
       if (result.exitCode === 0) return result.stdout;
       const status = statusOf(result.stdout);
       return yield* new GmailRequestError({ message: `gws gmail ${path.join(" ")} が失敗した${status === undefined ? "" : `（${status}）`}`, ...(status === undefined ? {} : { status }) });
