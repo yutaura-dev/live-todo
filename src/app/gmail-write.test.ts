@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { eq } from "drizzle-orm";
 import { DateTime, Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { Database } from "../core/db/database.js";
 import { approvals, gmailMessages } from "../core/db/schema.js";
 import { TestDatabase } from "../core/db/test-database.js";
@@ -49,6 +50,18 @@ const trashedIds = Effect.gen(function* () {
 });
 
 describe("gmailMailTarget（ゴミ箱に入れるメールを、承認の前に見せる）", () => {
+  it.effect("日程が過ぎた招待には、その印を付ける", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.UTC(2026, 10, 26));
+      yield* insertMail("past", { inviteChecked: true, inviteState: "ends", inviteEndsAt: 1 });
+      yield* insertMail("future", { inviteChecked: true, inviteState: "ends", inviteEndsAt: Date.UTC(2099, 0, 1) });
+      const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
+
+      const target = yield* gmailMailTarget(taskId);
+
+      assert.sameDeepMembers(target.messages.map((message) => [message.messageId, message.pastInvite]), [["past", true], ["future", false]]);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("送り主の Task なら、受信トレイに残っているそのメールを返す", () =>
     Effect.gen(function* () {
       yield* insertMail("a", { subject: "セール 1" });

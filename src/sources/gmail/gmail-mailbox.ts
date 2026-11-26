@@ -13,6 +13,8 @@ export type StoredMail = {
   inInbox: boolean;
   unread: boolean;
   trashed: boolean;
+  /** 日程が過ぎた（または取り消された）予定の招待 */
+  pastInvite: boolean;
 };
 
 type Headers = Partial<Record<MailHeader, string>>;
@@ -46,6 +48,8 @@ export type SenderGroup = {
   pending: ReadonlyArray<string>;
   /** その件名（新しい順） */
   pendingSubjects: ReadonlyArray<string>;
+  /** 未処理のうち、日程が過ぎた招待 */
+  pastInvites: ReadonlyArray<string>;
   /** 直近 60 日に届いた数 */
   received: number;
   /** そのうち、削除した（ゴミ箱）か、読まずにアーカイブした数 */
@@ -74,6 +78,7 @@ export function senderGroups(mails: ReadonlyArray<StoredMail>, now: number): Sen
       kind: notifications * 2 > group.length ? "notification" : "newsletter",
       pending: sorted.filter(isPending).map((mail) => mail.messageId),
       pendingSubjects: sorted.filter(isPending).map((mail) => mail.subject).toReversed(),
+      pastInvites: sorted.filter((mail) => isPending(mail) && mail.pastInvite).map((mail) => mail.messageId),
       received: recent.length,
       discarded,
       suggestUnsubscribe: recent.length >= MIN_RECEIVED_FOR_SUGGESTION && discarded >= recent.length * DISCARD_RATIO_FOR_SUGGESTION,
@@ -87,6 +92,8 @@ export type PersonalThread = {
   messageIds: ReadonlyArray<string>;
   /** 受信トレイに残っていて、最後のメールが自分のものではない */
   open: boolean;
+  /** 受信トレイに残っている、日程が過ぎた招待 */
+  pastInvites: ReadonlyArray<string>;
 };
 
 export function personalThreads(mails: ReadonlyArray<StoredMail>): PersonalThread[] {
@@ -107,7 +114,12 @@ export function personalThreads(mails: ReadonlyArray<StoredMail>): PersonalThrea
         subject: personal.at(-1)!.subject,
         messageIds: sorted.map((mail) => mail.messageId),
         open: last !== undefined && last.kind !== "mine" && personal.some(isPending),
+        pastInvites: sorted.filter((mail) => isPending(mail) && mail.pastInvite).map((mail) => mail.messageId),
       },
     ];
   });
 }
+
+/** 日程が過ぎた（または取り消された）招待か。終わりが決まっていない予定は過ぎない */
+export const isPastInvite = (invite: { inviteState: "ends" | "open" | "cancelled" | null; inviteEndsAt: number | null }, now: number) =>
+  invite.inviteState === "cancelled" || (invite.inviteState === "ends" && invite.inviteEndsAt !== null && invite.inviteEndsAt < now);

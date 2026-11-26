@@ -1,11 +1,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect, Option } from "effect";
 import { Database } from "../core/db/database.js";
-import { gmailMessages, sourceItems, taskLinks, tasks } from "../core/db/schema.js";
+import { sourceItems, taskLinks, tasks } from "../core/db/schema.js";
 import { decodePlan, type NextActionPlan, senderPlan, type Step } from "../core/task/next-actions.js";
 import { TaskRepository } from "../core/task/task-repository.js";
-import { gmailSendersSource } from "../sources/gmail/gmail-bindings.js";
-import { senderGroups, type StoredMail } from "../sources/gmail/gmail-mailbox.js";
+import { gmailSendersSource, loadMails } from "../sources/gmail/gmail-bindings.js";
+import { senderGroups } from "../sources/gmail/gmail-mailbox.js";
 
 const OPEN = ["todo", "in_progress", "needs_review"] as const;
 
@@ -28,25 +28,21 @@ export const applyGmailSenderPlans = Effect.fnUntraced(function* (accountId: str
     .where(and(eq(sourceItems.source, gmailSendersSource(accountId)), inArray(tasks.status, [...OPEN])))
     .pipe(Effect.orDie);
   if (rows.length === 0) return 0;
-  const mails = yield* db
-    .select()
-    .from(gmailMessages)
-    .where(and(eq(gmailMessages.accountId, accountId), inArray(gmailMessages.senderKey, rows.map((row) => row.senderKey))))
-    .pipe(Effect.orDie);
-  const groups = new Map(senderGroups(mails as ReadonlyArray<StoredMail>, DateTime.toEpochMillis(yield* DateTime.now)).map((group) => [group.senderKey, group]));
+  const groups = new Map(senderGroups(yield* loadMails(accountId), DateTime.toEpochMillis(yield* DateTime.now)).map((group) => [group.senderKey, group]));
 
   let applied = 0;
   for (const row of rows) {
     const group = groups.get(row.senderKey);
     if (group === undefined || group.pending.length === 0) continue;
-    const desired = senderPlan({ senderName: group.senderName, pending: group.pending.length, suggestUnsubscribe: group.suggestUnsubscribe });
+    const desired = senderPlan({ senderName: group.senderName, pending: group.pending.length, pastInvites: group.pastInvites.length, suggestUnsubscribe: group.suggestUnsubscribe });
     const current = decodePlan(row.nextActions);
     let next: NextActionPlan | undefined;
     if (Option.isNone(current)) next = desired;
-    else if (current.value.steps[0]?.kind !== "process_mail") continue;
+    else if (!current.value.steps.some((step) => step.kind === "process_mail")) continue;
     else if (touched(current.value.steps)) {
-      const title = desired.steps[0]!.title;
-      if (current.value.steps[0].title !== title) next = { steps: current.value.steps.map((step, index) => (index === 0 ? { ...step, title } : step)) };
+      const title = desired.steps.find((step) => step.kind === "process_mail")!.title;
+      const changed = current.value.steps.map((step) => (step.kind === "process_mail" ? { ...step, title } : step));
+      if (JSON.stringify(changed) !== JSON.stringify(current.value.steps)) next = { steps: changed };
     } else if (JSON.stringify(current.value) !== JSON.stringify(desired)) next = desired;
     if (next === undefined) continue;
     yield* taskRepository.updateTask(row.taskId, { nextActions: next });

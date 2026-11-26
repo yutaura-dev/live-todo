@@ -9,7 +9,7 @@ export type { FilterReason } from "../sources/github/repository-filter.js";
 
 export type GmailMailTargetView = {
   kind: "senders" | "threads";
-  messages: ReadonlyArray<{ messageId: string; subject: string; senderName: string; receivedAt: number }>;
+  messages: ReadonlyArray<{ messageId: string; subject: string; senderName: string; receivedAt: number; pastInvite: boolean }>;
 };
 
 export type MovableStatus = "needs_review" | "todo" | "in_progress" | "done" | "dismissed";

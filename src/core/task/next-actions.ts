@@ -22,11 +22,12 @@ export type WaitCondition =
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
 /** resolve_conflicts: アプリが Claude Code にコンフリクトを直させる / push_conflict_resolution: 直した内容を確かめて push する */
 export type ActionStep = StepBase & {
-  kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" | "resolve_conflicts" | "push_conflict_resolution" | "process_mail";
+  kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" | "resolve_conflicts" | "push_conflict_resolution" | "process_mail" | "archive_past_invites";
   until?: WaitCondition;
 };
 /** process_mail: アプリがメールの一覧を見せ、承認したものを Gmail で確認済みにする（アーカイブ）かゴミ箱に入れる */
-export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push", "resolve_conflicts", "push_conflict_resolution", "process_mail"] as const;
+/** archive_past_invites: 日程が過ぎた招待のメールを見せ、承認したら Gmail で確認済みにする */
+export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push", "resolve_conflicts", "push_conflict_resolution", "process_mail", "archive_past_invites"] as const;
 export type DecisionStep = StepBase & {
   kind: "decision";
   options: ReadonlyArray<{ key: string; label: string; steps: ReadonlyArray<Step> }>;
@@ -320,12 +321,24 @@ export const decodePlan = (value: unknown): Option.Option<NextActionPlan> => Sch
  * メルマガ・お知らせの送り主の Task の次にやること。アプリで決める（AI に考えさせるほどの中身がないため）。
  * 片付ける手順は済みにしない: 新しいメールが届けば同じ手順でまた片付けるため
  */
-export function senderPlan(group: { senderName: string; pending: number; suggestUnsubscribe: boolean }): NextActionPlan {
-  const trash: Step = { id: "process", kind: "process_mail", title: `受信トレイの ${group.pending} 通を確かめて、確認済みにするかゴミ箱に入れる`, effort: "easy", mode: "serial", status: "todo" };
-  if (!group.suggestUnsubscribe) return { steps: [trash] };
+export function senderPlan(group: { senderName: string; pending: number; pastInvites: number; suggestUnsubscribe: boolean }): NextActionPlan {
+  const invites: Step[] =
+    group.pastInvites === 0
+      ? []
+      : [{ id: "past-invites", kind: "archive_past_invites", title: `日程が過ぎた招待 ${group.pastInvites} 通を確認済みにする`, effort: "easy", mode: "serial", status: "todo" }];
+  const trash: Step = {
+    id: "process",
+    kind: "process_mail",
+    title: `受信トレイの ${group.pending} 通を確かめて、確認済みにするかゴミ箱に入れる`,
+    effort: "easy",
+    mode: invites.length === 0 ? "serial" : "parallel",
+    status: "todo",
+  };
+  if (!group.suggestUnsubscribe) return { steps: [...invites, trash] };
   const manual = (id: string, title: string): Step => ({ id, kind: "manual", title, effort: "easy", mode: "serial", status: "todo" });
   return {
     steps: [
+      ...invites,
       trash,
       {
         id: "subscription",

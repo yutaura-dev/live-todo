@@ -7,7 +7,7 @@ import type { TodoJudgment } from "../../core/judge/todo-judge.js";
 import type { SourceAdapter } from "../../core/sync/source-adapter.js";
 import { diffSnapshot, type DuplicateExternalIdError } from "../../core/sync/snapshot-differ.js";
 import type { SourceBinding } from "../../core/sync/sync-source.js";
-import { type PersonalThread, personalThreads, type SenderGroup, senderGroups, type StoredMail } from "./gmail-mailbox.js";
+import { isPastInvite, type PersonalThread, personalThreads, type SenderGroup, senderGroups, type StoredMail } from "./gmail-mailbox.js";
 
 export const gmailSendersSource = (accountId: string) => `gmail:${accountId}:senders`;
 export const gmailThreadsSource = (accountId: string) => `gmail:${accountId}:threads`;
@@ -18,8 +18,9 @@ type SnapshotCursor = typeof SnapshotCursor.Type;
 // アカウントを URL に入れない理由: メールアドレスを URL に持たせず、ブラウザで開いているアカウントに任せるため
 const GMAIL_URL = "https://mail.google.com/mail/u/0/";
 
-const loadMails = Effect.fnUntraced(function* (accountId: string) {
+export const loadMails = Effect.fnUntraced(function* (accountId: string) {
   const db = yield* Database;
+  const now = DateTime.toEpochMillis(yield* DateTime.now);
   const rows = yield* db.select().from(gmailMessages).where(eq(gmailMessages.accountId, accountId)).orderBy(asc(gmailMessages.receivedAt)).pipe(Effect.orDie);
   return rows.map(
     (row): StoredMail => ({
@@ -33,6 +34,7 @@ const loadMails = Effect.fnUntraced(function* (accountId: string) {
       inInbox: row.inInbox,
       unread: row.unread,
       trashed: row.trashed,
+      pastInvite: isPastInvite(row, now),
     }),
   );
 });

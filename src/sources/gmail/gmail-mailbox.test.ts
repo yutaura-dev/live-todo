@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { personalThreads, senderGroups, senderKeyOf, senderNameOf, type StoredMail } from "./gmail-mailbox.js";
+import { isPastInvite, personalThreads, senderGroups, senderKeyOf, senderNameOf, type StoredMail } from "./gmail-mailbox.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 10, 26);
@@ -14,6 +14,7 @@ const mail = (overrides: Partial<StoredMail>): StoredMail => ({
   inInbox: true,
   unread: true,
   trashed: false,
+  pastInvite: false,
   ...overrides,
 });
 
@@ -106,5 +107,21 @@ describe("personalThreads（人からのメールをスレッドごとにまと�
     const archived = personalThreads([mail({ kind: "personal", inInbox: false })]);
     const trashed = personalThreads([mail({ kind: "personal", trashed: true })]);
     assert.deepStrictEqual([replied[0]!.open, archived[0]!.open, trashed[0]!.open], [false, false, false]);
+  });
+});
+
+describe("日程が過ぎた招待", () => {
+  it("終わりが今より前か、取り消された予定なら過ぎた招待。終わりの決まっていない予定や、招待でないメールは違う", () => {
+    assert.isTrue(isPastInvite({ inviteState: "ends", inviteEndsAt: NOW - 1 }, NOW));
+    assert.isFalse(isPastInvite({ inviteState: "ends", inviteEndsAt: NOW + 1 }, NOW));
+    assert.isTrue(isPastInvite({ inviteState: "cancelled", inviteEndsAt: null }, NOW));
+    assert.isFalse(isPastInvite({ inviteState: "open", inviteEndsAt: null }, NOW));
+    assert.isFalse(isPastInvite({ inviteState: null, inviteEndsAt: null }, NOW));
+  });
+
+  it("送り主ごと・スレッドごとに、受信トレイに残っている過ぎた招待を挙げる", () => {
+    const mails = [mail({ messageId: "a", pastInvite: true }), mail({ messageId: "b" }), mail({ messageId: "c", pastInvite: true, inInbox: false })];
+    assert.deepStrictEqual(senderGroups(mails, NOW)[0]!.pastInvites, ["a"]);
+    assert.deepStrictEqual(personalThreads(mails.map((entry) => ({ ...entry, kind: "personal" as const })))[0]!.pastInvites, ["a"]);
   });
 });

@@ -244,12 +244,20 @@ describe("currentSteps", () => {
 
 describe("senderPlan（メルマガ・お知らせの送り主の Task の次にやること）", () => {
   it("受信トレイのメールを確かめて、確認済みにするかゴミ箱に入れる手順にする（アプリで Gmail に反映する）", () => {
-    const plan = senderPlan({ senderName: "Shop", pending: 3, suggestUnsubscribe: false });
+    const plan = senderPlan({ senderName: "Shop", pending: 3, pastInvites: 0, suggestUnsubscribe: false });
     assert.deepStrictEqual(plan.steps.map((step) => [step.kind, step.title]), [["process_mail", "受信トレイの 3 通を確かめて、確認済みにするかゴミ箱に入れる"]]);
   });
 
+  it("日程が過ぎた招待があれば、それを確認済みにする手順を先に出し、ほかのメールの手順は並行してできるようにする", () => {
+    const plan = senderPlan({ senderName: "Google カレンダー", pending: 5, pastInvites: 2, suggestUnsubscribe: false });
+    assert.deepStrictEqual(plan.steps.map((step) => [step.kind, step.title, step.mode]), [
+      ["archive_past_invites", "日程が過ぎた招待 2 通を確認済みにする", "serial"],
+      ["process_mail", "受信トレイの 5 通を確かめて、確認済みにするかゴミ箱に入れる", "parallel"],
+    ]);
+  });
+
   it("配信の解除を勧める送り主には、配信を続けるかの分かれ道を並行して並べる", () => {
-    const plan = senderPlan({ senderName: "Shop", pending: 1, suggestUnsubscribe: true });
+    const plan = senderPlan({ senderName: "Shop", pending: 1, pastInvites: 0, suggestUnsubscribe: true });
     const decision = plan.steps[1]!;
     assert.strictEqual(decision.kind, "decision");
     assert.strictEqual(decision.mode, "parallel");

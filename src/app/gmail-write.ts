@@ -4,6 +4,7 @@ import { Database } from "../core/db/database.js";
 import { approvals, gmailMessages, sourceItems, taskLinks } from "../core/db/schema.js";
 import { applyItemState } from "../core/sync/sync-source.js";
 import type { GmailClient } from "../sources/gmail/gmail-client.js";
+import { isPastInvite } from "../sources/gmail/gmail-mailbox.js";
 
 export class GmailWriteError extends Schema.TaggedError<GmailWriteError>()("GmailWriteError", { message: Schema.String }) {}
 
@@ -29,7 +30,15 @@ const trackedGroup = Effect.fnUntraced(function* (taskId: number) {
 const candidates = Effect.fnUntraced(function* (group: { accountId: string; kind: "senders" | "threads"; externalId: string }) {
   const db = yield* Database;
   const rows = yield* db
-    .select({ messageId: gmailMessages.messageId, subject: gmailMessages.subject, senderName: gmailMessages.senderName, receivedAt: gmailMessages.receivedAt, inInbox: gmailMessages.inInbox })
+    .select({
+      messageId: gmailMessages.messageId,
+      subject: gmailMessages.subject,
+      senderName: gmailMessages.senderName,
+      receivedAt: gmailMessages.receivedAt,
+      inInbox: gmailMessages.inInbox,
+      inviteState: gmailMessages.inviteState,
+      inviteEndsAt: gmailMessages.inviteEndsAt,
+    })
     .from(gmailMessages)
     .where(
       and(
@@ -47,7 +56,11 @@ const candidates = Effect.fnUntraced(function* (group: { accountId: string; kind
 export const gmailMailTarget = Effect.fnUntraced(function* (taskId: number) {
   const group = yield* trackedGroup(taskId);
   const messages = yield* candidates(group);
-  return { kind: group.kind, messages: messages.map(({ messageId, subject, senderName, receivedAt }) => ({ messageId, subject, senderName, receivedAt })) };
+  const now = DateTime.toEpochMillis(yield* DateTime.now);
+  return {
+    kind: group.kind,
+    messages: messages.map((row) => ({ messageId: row.messageId, subject: row.subject, senderName: row.senderName, receivedAt: row.receivedAt, pastInvite: isPastInvite(row, now) })),
+  };
 });
 
 /** archive: 確認済みにする（アーカイブして既読にする） / trash: ゴミ箱に入れる */
