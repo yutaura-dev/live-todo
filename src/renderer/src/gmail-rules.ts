@@ -16,3 +16,11 @@ export function describeActions(actions: RuleActions): string {
 
 /** 「何をする」を読み取ってあるか（書き換えたあとに読み取り直していなければ false） */
 export const isInterpreted = (rule: RuleDraft) => rule.then.trim() !== "" && rule.interpretedFrom === rule.then;
+
+/**
+ * 今あるものにも当てるとき、判定する対象。読み取った操作の Source から決める（操作のない Source のものには当てようがないため）。
+ * Source の操作を足したら、ここにその Source の今ある項目を足す
+ */
+export function existingTargetsOf(actions: RuleActions): string[] {
+  return [...(actions.gmail === undefined ? [] : ["Gmail の受信トレイに残っているメール"])];
+}

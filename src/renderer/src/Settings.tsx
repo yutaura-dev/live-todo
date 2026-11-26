@@ -10,7 +10,7 @@ import type {
 } from "../../shared/api.js";
 import { api } from "./api.js";
 import { RecurringSettings } from "./Recurring.js";
-import { describeActions, isInterpreted, newRule } from "./gmail-rules.js";
+import { describeActions, existingTargetsOf, isInterpreted, newRule } from "./gmail-rules.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
@@ -771,10 +771,11 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
   );
 }
 
-/** ルールを作る前に届いた、受信トレイに今あるメールにも当てる。外部への書き込みなので、確かめてから実行する */
+/** ルールを作る前に届いた、今あるものにも当てる。外部への書き込みなので、確かめてから実行する */
 function ApplyToExisting({ rule }: { rule: RuleDraft }) {
   const [state, setState] = useState<{ kind: "idle" } | { kind: "confirm" } | { kind: "busy" } | { kind: "done"; applied: number } | { kind: "failed"; reason: string }>({ kind: "idle" });
-  if (!isInterpreted(rule)) return null;
+  const targets = existingTargetsOf(rule.actions);
+  if (!isInterpreted(rule) || targets.length === 0) return null;
   const run = async () => {
     setState({ kind: "busy" });
     const result = await api.applyRuleToExisting(rule.id);
@@ -784,7 +785,9 @@ function ApplyToExisting({ rule }: { rule: RuleDraft }) {
     <div className="step-actions">
       {state.kind === "confirm" ? (
         <>
-          <span className="field-hint">受信トレイに今あるメールを判定し、当てはまるものに {describeActions(rule.actions)}。保存したルールで行います</span>
+          <span className="field-hint">
+            {targets.join("・")}を「{rule.when.trim()}」で判定し、当てはまるものに {describeActions(rule.actions)}。保存したルールで行います
+          </span>
           <button type="button" className="primary-button" onClick={() => void run()}>
             当てる
           </button>
@@ -794,10 +797,10 @@ function ApplyToExisting({ rule }: { rule: RuleDraft }) {
         </>
       ) : (
         <button type="button" className="quiet-button" disabled={state.kind === "busy"} onClick={() => setState({ kind: "confirm" })}>
-          {state.kind === "busy" ? "当てています…" : "受信トレイにある今のメールにも当てる"}
+          {state.kind === "busy" ? "当てています…" : "今あるものにも当てる"}
         </button>
       )}
-      {state.kind === "done" && <span className="field-hint">{state.applied} 通に当てました</span>}
+      {state.kind === "done" && <span className="field-hint">{state.applied} 件に当てました</span>}
       {state.kind === "failed" && <span className="problem">{state.reason}</span>}
     </div>
   );
