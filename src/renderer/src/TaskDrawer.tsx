@@ -230,7 +230,31 @@ function NextAction({ detail, onMerged, onStarted }: { detail: TaskDetail; onMer
         次にやること
       </h3>
       <StepList steps={plan.steps} current={current} detail={detail} onChanged={onMerged} onStarted={onStarted} />
+      {detail.agentRun?.kind !== "dependency_review" && <ReplanButton taskId={detail.id} onStarted={onStarted} />}
     </section>
+  );
+}
+
+/** 依存更新の PR は「もう一度調べる」で次にやることも作り直すので、それ以外の Task にだけ出す */
+function ReplanButton({ taskId, onStarted }: { taskId: number; onStarted: () => Promise<void> }) {
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <div className="request-review">
+      <button
+        type="button"
+        className="quiet-button"
+        onClick={() =>
+          void api.replanNextActions(taskId).then(async (outcome) => {
+            if (outcome.ok) await onStarted();
+            else setProblem(outcome.message);
+          })
+        }
+      >
+        次にやることを考え直す
+      </button>
+      <span className="field-hint">済んだ手順は残して、残りを AI が考え直します</span>
+      {problem && <p className="problem">{problem}</p>}
+    </div>
   );
 }
 

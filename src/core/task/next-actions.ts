@@ -77,6 +77,18 @@ export function isWaitingOnly(plan: NextActionPlan): boolean {
   return current.length > 0 && current.every((step) => step.kind === "wait");
 }
 
+/** 考え直す前に済んだ手順。選んだ分かれ道は「決めたこと: 選んだもの」の済んだ手順にして残す */
+export function doneHistory(plan: NextActionPlan): ActionStep[] {
+  return expand(plan.steps)
+    .filter((step) => step.status === "done")
+    .map((step, index): ActionStep => {
+      const base = { id: `h${index + 1}`, effort: step.effort, mode: "serial" as const, status: "done" as const };
+      if (step.kind !== "decision") return { ...base, kind: step.kind, title: step.title };
+      const chosen = step.options.find((option) => option.key === step.chosen)?.label;
+      return { ...base, kind: "manual", title: chosen === undefined ? step.title : `${step.title}: ${chosen}` };
+    });
+}
+
 export const completeStep = (plan: NextActionPlan, id: string): NextActionPlan => ({
   steps: mapSteps(plan.steps, (step) => (step.id === id ? { ...step, status: "done" } : step)),
 });

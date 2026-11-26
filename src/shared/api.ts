@@ -94,6 +94,8 @@ export interface LiveTodoApi {
   chooseOption(taskId: number, stepId: string, optionKey: string): Promise<Outcome>;
   /** 済んだにした手順・選んだ分かれ道を戻す */
   reopenStep(taskId: number, stepId: string): Promise<Outcome>;
+  /** 次にやることを考え直させる。済んだ手順は残し、残りだけを AI が考える */
+  replanNextActions(taskId: number): Promise<Outcome>;
   /** Claude Code にコンフリクトを直させる。裏で進み、Task は処理中のレーンに移る */
   resolveConflicts(taskId: number): Promise<Outcome>;
   conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;

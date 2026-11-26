@@ -17,6 +17,7 @@ export const IPC_CHANNELS = {
   chooseOption: "board:choose-option",
   reopenStep: "board:reopen-step",
   resolveConflicts: "board:resolve-conflicts",
+  replanNextActions: "board:replan-next-actions",
   conflictResolution: "board:conflict-resolution",
   pushConflictResolution: "board:push-conflict-resolution",
 } as const;

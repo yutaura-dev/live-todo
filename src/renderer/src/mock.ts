@@ -58,6 +58,7 @@ export const mockApi: LiveTodoApi = {
   completeStep: async () => ({ ok: true }),
   chooseOption: async () => ({ ok: true }),
   reopenStep: async () => ({ ok: true }),
+  replanNextActions: async () => ({ ok: true }),
   resolveConflicts: async () => ({ ok: true }),
   conflictResolution: async () => ({ error: "見本の画面では使えない" }),
   pushConflictResolution: async () => ({ ok: true }),

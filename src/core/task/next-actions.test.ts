@@ -6,6 +6,7 @@ import {
   conflictPlan,
   currentSteps,
   decodePlan,
+  doneHistory,
   type NextActionPlan,
   planFromDependencyReview,
   planFromProposedSteps,
@@ -148,6 +149,38 @@ describe("待つ手順", () => {
   it("並列で着手できる手順があれば、待つ手順は難易度に数えない", () => {
     const easy = { ...wait, id: "e", kind: "manual" as const, effort: "normal" as const, mode: "parallel" as const };
     assert.strictEqual(taskEffort({ steps: [wait, easy] }), "normal");
+  });
+});
+
+describe("doneHistory", () => {
+  it("考え直す前に済んだ手順を、選んだ分かれ道も含めて、済んだ手順の並びとして残す（まだの手順は残さない）", () => {
+    const plan: NextActionPlan = {
+      steps: [
+        { id: "s1", kind: "wait", title: "CI を待つ", effort: "easy", mode: "serial", status: "done", until: { kind: "item_changed" } },
+        {
+          id: "s2",
+          kind: "decision",
+          title: "レビューを頼むか決める",
+          effort: "easy",
+          mode: "serial",
+          status: "done",
+          chosen: "o2",
+          options: [
+            { key: "o1", label: "頼む", steps: [] },
+            { key: "o2", label: "頼まない", steps: [{ id: "s2.o2.s1", kind: "merge_pull_request", title: "merge する", effort: "easy", mode: "serial", status: "todo" }] },
+          ],
+        },
+        { id: "s3", kind: "manual", title: "連絡する", effort: "normal", mode: "serial", status: "todo" },
+      ],
+    };
+
+    assert.deepStrictEqual(
+      doneHistory(plan).map((step) => [step.id, step.kind, step.title, step.status]),
+      [
+        ["h1", "wait", "CI を待つ", "done"],
+        ["h2", "manual", "レビューを頼むか決める: 頼まない", "done"],
+      ],
+    );
   });
 });
 

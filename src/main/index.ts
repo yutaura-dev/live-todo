@@ -25,7 +25,7 @@ import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from 
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { backfillNextActions, recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
-import { runNextActionPlanning } from "../core/agent/next-action-runner.js";
+import { requestReplan, runNextActionPlanning } from "../core/agent/next-action-runner.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
@@ -378,6 +378,23 @@ const claudeAllowedFor = (accountId: string) =>
     return account !== undefined && (account.reviewDependencyPrs || account.planNextActions);
   });
 
+function registerReplan() {
+  ipcMain.handle(IPC_CHANNELS.replanNextActions, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const taskId = yield* decodeTaskId(input);
+        const detail = yield* (yield* BoardService).taskDetail(taskId);
+        // 次にやることを考える処理は、AI に考えさせる設定のアカウントでしか動かない（会社の情報を許可していない LLM に送らないため）
+        const config = yield* loadAppConfigFile(configPath);
+        const accountIds = detail.items.filter((item) => item.role === "tracks").map((item) => /^github:([^:]+)/.exec(item.source)?.[1]);
+        const allowed = accountIds.length > 0 && accountIds.every((id) => config.accounts.some((account) => account.id === id && account.planNextActions));
+        if (!allowed) return yield* new GitHubRequestError({ message: "このアカウントでは、次にやることを AI に考えさせない設定です" });
+        yield* requestReplan(taskId);
+      }),
+    ),
+  );
+}
+
 function registerConflictResolution() {
   ipcMain.handle(IPC_CHANNELS.resolveConflicts, (_event, input: unknown) =>
     outcomeOf(
@@ -538,6 +555,7 @@ void app.whenReady().then(() => {
   registerIpc();
   registerMerge();
   registerConflictResolution();
+  registerReplan();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();
 });

@@ -13,6 +13,7 @@ const api: LiveTodoApi = {
   completeStep: (taskId, stepId) => ipcRenderer.invoke(IPC_CHANNELS.completeStep, { taskId, stepId }),
   chooseOption: (taskId, stepId, optionKey) => ipcRenderer.invoke(IPC_CHANNELS.chooseOption, { taskId, stepId, optionKey }),
   reopenStep: (taskId, stepId) => ipcRenderer.invoke(IPC_CHANNELS.reopenStep, { taskId, stepId }),
+  replanNextActions: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.replanNextActions, taskId),
   resolveConflicts: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.resolveConflicts, taskId),
   conflictResolution: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.conflictResolution, taskId),
   pushConflictResolution: (taskId, commitSha) => ipcRenderer.invoke(IPC_CHANNELS.pushConflictResolution, { taskId, commitSha }),

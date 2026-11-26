@@ -9,7 +9,7 @@ import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
-import { runNextActionPlanning } from "./next-action-runner.js";
+import { requestReplan, runNextActionPlanning } from "./next-action-runner.js";
 
 const NONE = { kind: "none" as const, repository: "", query: "", pullUrl: "" };
 
@@ -107,6 +107,46 @@ describe("runNextActionPlanning（PR の Task）", () => {
       assert.match(agent.requests[0]?.cwd ?? "", /\/repo\/acme\/app$/);
       assert.include([...(agent.requests[0]?.addDirs ?? [])], agent.requests[0]?.cwd.replace(/\/repo\/acme\/app$/, "/context"));
       assert.include(agent.requests[0]?.prompt ?? "", ".github/workflows");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("requestReplan（次にやることを考え直す）", () => {
+  it.effect("済んだ手順を残して、残りだけを考え直させる（済んだ手順を AI に伝える）", () =>
+    Effect.gen(function* () {
+      const taskId = yield* task({
+        nextActions: {
+          steps: [
+            { id: "s1", kind: "manual", title: "見た目を見直す", effort: "hard", mode: "serial", status: "done" },
+            { id: "s2", kind: "manual", title: "古い手順", effort: "easy", mode: "serial", status: "todo" },
+          ],
+        },
+      });
+      const agent = withAgent();
+
+      yield* requestReplan(taskId);
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "agent_running");
+      yield* agent.provide(run);
+
+      assert.deepInclude(JSON.parse(agent.contexts[0]!["task.json"]!), { doneSteps: ["見た目を見直す"] });
+      assert.include(agent.requests[0]?.prompt ?? "", "済んだ手順");
+      const steps = (yield* nextActionsOf(taskId))?.steps as Array<{ title: string; status: string }>;
+      assert.deepStrictEqual(
+        steps.map((step) => [step.title, step.status]),
+        [
+          ["見た目を見直す", "done"],
+          ["Slack で状況を聞く", "todo"],
+        ],
+      );
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("処理中の Task は考え直さない", () =>
+    Effect.gen(function* () {
+      const taskId = yield* task({ status: "agent_running", nextActions: { steps: [] } });
+
+      const error = yield* requestReplan(taskId).pipe(Effect.flip);
+
+      assert.include(error.message, "処理中");
     }).pipe(Effect.provide(TestDatabase)));
 });
 

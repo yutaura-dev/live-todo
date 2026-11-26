@@ -80,6 +80,11 @@ describe("nextActionPrompt", () => {
     assert.notInclude(prompt, ".github/workflows");
   });
 
+  it("考え直すときは、済んだ手順を繰り返さず残りだけを考えるよう伝える", () => {
+    assert.include(nextActionPrompt({ title: "x", contextDir: "/c", replanning: true }), "済んだ手順");
+    assert.notInclude(prompt, "済んだ手順");
+  });
+
   it("Task が追う PR を merge する手順は、アプリから merge できる手順にさせる", () => {
     assert.include(prompt, "merge_pull_request");
   });

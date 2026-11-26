@@ -3,6 +3,7 @@ import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks, tasks } from "../db/schema.js";
 import { TaskRepository } from "../task/task-repository.js";
+import { decodePlan, doneHistory } from "../task/next-actions.js";
 import type { TaskStatus } from "../task/task.js";
 import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode } from "./claude-code.js";
@@ -11,6 +12,37 @@ import { moveTask, RETRY_FAILED_AFTER_MILLIS } from "./dependency-triage.js";
 import { NEXT_ACTION_PLAN_JSON_SCHEMA, decodeProposedPlan, nextActionPrompt, planFromProposal } from "./next-action-planning.js";
 
 const KIND = "next_actions";
+
+export class ReplanError extends Schema.TaggedError<ReplanError>()("ReplanError", { message: Schema.String }) {}
+
+/** 次にやることを考え直す。済んだ手順は残し、残りだけを AI に考えさせる（調査待ちに入れ、次の定期の処理で考える） */
+export const requestReplan = Effect.fnUntraced(function* (taskId: number) {
+  const db = yield* Database;
+  const taskRepository = yield* TaskRepository;
+  const task = yield* taskRepository.findTask(taskId);
+  if (Option.isNone(task)) return yield* new ReplanError({ message: "Task が見つからない" });
+  if (task.value.status === "agent_running") return yield* new ReplanError({ message: "処理中の Task は考え直せない。終わってからにしてください" });
+  yield* db
+    .insert(agentRuns)
+    .values({
+      taskId,
+      kind: KIND,
+      status: "queued",
+      subjectFingerprint: "",
+      previousStatus: task.value.status,
+      result: { replanFrom: task.value.nextActions },
+      startedAt: yield* nowIso,
+    })
+    .pipe(Effect.orDie);
+  yield* moveTask(taskId, task.value.status, "agent_running");
+});
+
+const ReplanRequest = Schema.Struct({ replanFrom: Schema.Unknown });
+const historyOf = (result: unknown) =>
+  Option.match(
+    Option.flatMap(Schema.decodeUnknownOption(ReplanRequest)(result), (request) => decodePlan(request.replanFrom)),
+    { onNone: () => undefined, onSome: doneHistory },
+  );
 // 進行中も含める理由: すべての Task に次にやることを入れるため
 const ELIGIBLE_STATUSES: ReadonlyArray<TaskStatus> = ["needs_review", "todo", "in_progress"];
 // 集めた情報だけを読ませる。リポジトリは渡さないので、Bash や WebFetch は要らない
@@ -96,7 +128,10 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
       .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
       .where(eq(taskLinks.taskId, run.taskId))
       .pipe(Effect.orDie);
+    // 考え直しなら、済んだ手順を残して AI に伝える
+    const history = historyOf(run.result);
     const context = {
+      ...(history === undefined ? {} : { doneSteps: history.map((step) => step.title) }),
       title: task.value.title,
       brief: task.value.brief,
       items: items.map((item) => ({
@@ -124,7 +159,7 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
         ...(prState === undefined ? {} : { "pr-state.json": prState }),
       });
       const result = yield* claude.run({
-        prompt: nextActionPrompt({ title: task.value.title, contextDir, repository: prepared?.cwd }),
+        prompt: nextActionPrompt({ title: task.value.title, contextDir, repository: prepared?.cwd, replanning: history !== undefined }),
         cwd: prepared?.cwd ?? contextDir,
         ...(prepared === undefined ? {} : { addDirs: [contextDir] }),
         jsonSchema: NEXT_ACTION_PLAN_JSON_SCHEMA,
@@ -135,7 +170,8 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
       const proposal = yield* decodeProposedPlan(result.structured).pipe(
         Effect.mapError((error) => ({ message: `claude の回答の形が想定と違う: ${error.message}` })),
       );
-      return { result, plan: planFromProposal(proposal, yield* nowIso) };
+      const proposed = planFromProposal(proposal, yield* nowIso);
+      return { result, plan: { steps: [...(history ?? []), ...proposed.steps] } };
     }).pipe(Effect.result);
 
     const finishedAt = yield* nowIso;
