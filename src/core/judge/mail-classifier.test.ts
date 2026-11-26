@@ -63,7 +63,7 @@ describe("MailClassifier（Decisions API でメールを仕分ける）", () => 
     const model = fakeDecisionModel(() => Effect.succeed({ action: { _tag: "Probability", probability: 0.7 } }));
     return Effect.gen(function* () {
       const answer = yield* (yield* MailClassifier).needsAction({ input: "件名: ご住所確認のお願い", context: "List-Unsubscribe: あり" });
-      assert.deepStrictEqual(answer, { probability: 0.7, method: "decisions" });
+      assert.deepInclude(answer, { probability: 0.7, method: "decisions" });
       assert.include(JSON.stringify(model.calls[0]?.state), "ご住所確認");
       assert.notInclude(JSON.stringify(model.calls[0]?.state), "List-Unsubscribe");
     }).pipe(Effect.provide(model.layer));
@@ -71,6 +71,36 @@ describe("MailClassifier（Decisions API でメールを仕分ける）", () => 
 
   it.effect("対応を求めているかの判定が返らなければ、求めているものとして扱う（読む側に倒す）", () =>
     Effect.gen(function* () {
-      assert.deepStrictEqual(yield* (yield* MailClassifier).needsAction({ input: "x", context: "" }), { probability: undefined, method: "fallback" });
+      assert.deepInclude(yield* (yield* MailClassifier).needsAction({ input: "x", context: "" }), { probability: undefined, method: "fallback" });
     }).pipe(Effect.provide(fakeDecisionModel(() => Effect.succeed({ action: { _tag: "Refusal" } })).layer)));
+
+  it.effect("対応が要るかと同じ呼び出しで、メールの用件（請求・配送・宣伝など）も確率の高いものを返す", () => {
+    const model = fakeDecisionModel(() =>
+      Effect.succeed({
+        action: { _tag: "Probability", probability: 0.1 },
+        topic: { _tag: "Classify", label: "billing", probabilities: { billing: 0.8, account: 0.05, product: 0.05, contract: 0.02, shipping: 0.02, promotion: 0.02, news: 0.02, other: 0.02 } },
+      }),
+    );
+    return Effect.gen(function* () {
+      const answer = yield* (yield* MailClassifier).needsAction({ input: "件名: 請求書", context: "" });
+      assert.strictEqual(answer.topic, "billing");
+      assert.lengthOf(model.calls, 1);
+      assert.containsAllKeys(model.calls[0]!.decisions, ["action", "topic"]);
+    }).pipe(Effect.provide(model.layer));
+  });
+
+  it.effect("用件の確率が低いか答えが返らなければ「その他」にする", () =>
+    Effect.gen(function* () {
+      const answer = yield* (yield* MailClassifier).needsAction({ input: "x", context: "" });
+      assert.strictEqual(answer.topic, "other");
+    }).pipe(
+      Effect.provide(
+        fakeDecisionModel(() =>
+          Effect.succeed({
+            action: { _tag: "Probability", probability: 0.1 },
+            topic: { _tag: "Classify", label: "billing", probabilities: { billing: 0.3, account: 0.1, product: 0.1, contract: 0.1, shipping: 0.1, promotion: 0.1, news: 0.1, other: 0.1 } },
+          }),
+        ).layer,
+      ),
+    ));
 });

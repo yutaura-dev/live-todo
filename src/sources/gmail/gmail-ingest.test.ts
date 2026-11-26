@@ -15,7 +15,7 @@ const NOW = Date.UTC(2026, 10, 26);
 function setup(
   messages: Parameters<typeof makeTestGmail>[0],
   answer: (input: string) => MailClassification = () => ({ kind: "newsletter", probability: 0.9, method: "decisions" }),
-  action: (input: string) => ActionJudgment = () => ({ probability: 0.1, method: "decisions" }),
+  action: (input: string) => ActionJudgment = () => ({ probability: 0.1, method: "decisions", topic: "other" }),
 ) {
   const gmail = makeTestGmail(messages);
   const requests: Array<{ input: string; context: string }> = [];
@@ -253,7 +253,7 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
     const { actionRequests, layer } = setup(
       [gmailMessage({ id: "news", headers: { from: "Shop <news@shop.example>", subject: "ご住所確認のお願い", "list-unsubscribe": "<u>" } }), gmailMessage({ id: "news2", headers: { from: "Shop <news@shop.example>", subject: "セール", "list-unsubscribe": "<u>" } }), gmailMessage({ id: "person", headers: { from: "Sato <sato@example.com>", subject: "相談" } }), gmailMessage({ id: "sent", labelIds: ["SENT"] })],
       (input) => (input.includes("sato@") ? { kind: "personal", probability: 0.9, method: "decisions" } : { kind: "newsletter", probability: 0.9, method: "decisions" }),
-      (input) => ({ probability: input.includes("住所") ? 0.8 : 0.1, method: "decisions" }),
+      (input) => ({ probability: input.includes("住所") ? 0.8 : 0.1, method: "decisions", topic: "other" }),
     );
     return Effect.gen(function* () {
       yield* run;

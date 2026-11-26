@@ -17,7 +17,7 @@ describe("runGmailSync", () => {
     ]);
     const classifier = MailClassifier.of({
       classify: (request) => Effect.succeed(request.input.includes("sato@") ? { kind: "personal", probability: 0.9, method: "decisions" } : { kind: "newsletter", probability: 0.9, method: "decisions" }),
-      needsAction: () => Effect.succeed({ probability: 0.1, method: "decisions" }),
+      needsAction: () => Effect.succeed({ probability: 0.1, method: "decisions", topic: "other" }),
     });
     return Effect.gen(function* () {
       yield* TestClock.setTime(Date.UTC(2026, 10, 26));
