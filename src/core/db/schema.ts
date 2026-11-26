@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { ACTIVITY_KINDS, ITEM_STATES, ITEM_TRIAGES } from "../source/source-item.js";
 import { CHANGE_ACTORS, LINK_ROLES, TASK_CHANGE_KINDS, TASK_STATUSES } from "../task/task.js";
 
@@ -176,4 +176,40 @@ export const approvals = sqliteTable(
     executedAt: text("executed_at"),
   },
   (table) => [index("approvals_task_id").on(table.taskId)],
+);
+
+export const GMAIL_MAIL_KINDS = ["personal", "notification", "newsletter", "mine"] as const;
+
+/**
+ * 取り込んだ Gmail のメール 1 通（ヘッダーとラベルと仕分けの結果。本文は持たない）。
+ * 送り主ごと・スレッドごとにまとめた Source Item と、送り主ごとの集計（削除した割合）はここから作る
+ */
+export const gmailMessages = sqliteTable(
+  "gmail_messages",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    accountId: text("account_id").notNull(),
+    messageId: text("message_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    senderKey: text("sender_key").notNull(),
+    senderName: text("sender_name").notNull(),
+    subject: text().notNull(),
+    receivedAt: integer("received_at").notNull(),
+    kind: text({ enum: GMAIL_MAIL_KINDS }).notNull(),
+    /** 仕分けの確率と方法（decisions / fallback）。mine は仕分けないので null */
+    probability: real(),
+    method: text(),
+    inInbox: integer("in_inbox", { mode: "boolean" }).notNull(),
+    unread: integer({ mode: "boolean" }).notNull(),
+    trashed: integer({ mode: "boolean" }).notNull(),
+    /** 配信の解除に使う（List-Unsubscribe・List-Unsubscribe-Post） */
+    listUnsubscribe: text("list_unsubscribe"),
+    listUnsubscribePost: text("list_unsubscribe_post"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("gmail_messages_account_message").on(table.accountId, table.messageId),
+    index("gmail_messages_account_thread").on(table.accountId, table.threadId),
+    index("gmail_messages_account_sender").on(table.accountId, table.senderKey),
+  ],
 );
