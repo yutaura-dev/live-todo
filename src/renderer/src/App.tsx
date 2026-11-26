@@ -230,6 +230,7 @@ const AGENT_LABELS: Record<string, string> = {
   next_actions: "次にやることを考えています",
   resolve_conflicts: "Claude Code がコンフリクトを直しています",
   fix_pull_request: "Claude Code が修正しています",
+  question: "質問について調べています",
 };
 
 function agentLabel(agent: BoardCard["agent"]) {

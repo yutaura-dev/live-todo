@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import { Database } from "../core/db/database.js";
+import { agentRuns } from "../core/db/schema.js";
 import { TestClock } from "effect/testing";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode, type ClaudeRequest } from "../core/agent/claude-code.js";
@@ -123,4 +125,36 @@ describe("Task への質問", () => {
       assert.deepInclude(question, { status: "failed" });
       assert.include(question!.error ?? "", "もう一度");
     }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("質問を調べている間は Task を処理中のレーンに移し、答え終わったら元のレーンに戻す（失敗しても戻す）", () => {
+    const h = harness();
+    const failing = harness({ nope: true });
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("gmail:mail:threads", "https://mail.google.com/");
+      const tasks = yield* TaskRepository;
+      const statusOf = tasks.findTask(taskId).pipe(Effect.map((task) => Option.getOrThrow(task).status));
+
+      const id = yield* askQuestion(taskId, "何時から？");
+      assert.strictEqual(yield* statusOf, "agent_running");
+      yield* h.provide(answerQuestion(id, {}));
+      assert.strictEqual(yield* statusOf, "todo");
+
+      yield* failing.provide(answerQuestion(yield* askQuestion(taskId, "場所は？"), {}));
+      assert.strictEqual(yield* statusOf, "todo");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("ほかの調べものが動いている Task は、それが終わるまで処理中のままにする", () => {
+    const h = harness();
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("gmail:mail:threads", "https://mail.google.com/");
+      const db = yield* Database;
+      yield* db.insert(agentRuns).values({ taskId, kind: "next_actions", status: "running", subjectFingerprint: "", previousStatus: "todo", startedAt: "2026-11-26T00:00:00.000Z" }).pipe(Effect.orDie);
+      yield* (yield* TaskRepository).updateTask(taskId, { status: "agent_running" });
+
+      yield* h.provide(answerQuestion(yield* askQuestion(taskId, "何時から？"), {}));
+
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "agent_running");
+    }).pipe(Effect.provide(TestDatabase));
+  });
 });

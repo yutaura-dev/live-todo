@@ -1,9 +1,11 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { Database } from "../core/db/database.js";
-import { sourceItems, taskChanges, taskLinks, taskQuestions } from "../core/db/schema.js";
+import { agentRuns, sourceItems, taskChanges, taskLinks, taskQuestions } from "../core/db/schema.js";
+import { moveTask } from "../core/agent/dependency-triage.js";
+import type { TaskStatus } from "../core/task/task.js";
 import { currentSteps, decodePlan, doneHistory } from "../core/task/next-actions.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 
@@ -57,12 +59,16 @@ export const askQuestion = Effect.fnUntraced(function* (taskId: number, question
   const text = question.trim();
   if (text === "") return yield* new TaskQuestionError({ message: "質問を書いてください" });
   if (text.length > MAX_QUESTION) return yield* new TaskQuestionError({ message: `質問は ${MAX_QUESTION} 文字までにしてください` });
-  if (Option.isNone(yield* tasks.findTask(taskId))) return yield* new TaskQuestionError({ message: "Task が見つからない" });
-  const [row] = yield* db
-    .insert(taskQuestions)
-    .values({ taskId, question: text, status: "running", askedAt: DateTime.formatIso(yield* DateTime.now) })
-    .returning({ id: taskQuestions.id })
+  const task = yield* tasks.findTask(taskId);
+  if (Option.isNone(task)) return yield* new TaskQuestionError({ message: "Task が見つからない" });
+  const askedAt = DateTime.formatIso(yield* DateTime.now);
+  const [row] = yield* db.insert(taskQuestions).values({ taskId, question: text, status: "running", askedAt }).returning({ id: taskQuestions.id }).pipe(Effect.orDie);
+  // ほかの Claude Code の調べものと同じく、調べている間は処理中のレーンに出す（agent_runs に載せると、起動時に途中で止まった分も戻る）
+  yield* db
+    .insert(agentRuns)
+    .values({ taskId, kind: QUESTION_KIND, status: "running", subjectFingerprint: "", previousStatus: task.value.status, result: { questionId: row!.id }, startedAt: askedAt })
     .pipe(Effect.orDie);
+  yield* moveTask(taskId, task.value.status, "agent_running");
   return row!.id;
 });
 
@@ -143,6 +149,7 @@ export const answerQuestion = Effect.fnUntraced(function* <R = never>(questionId
   }).pipe(Effect.result);
 
   const answeredAt = DateTime.formatIso(yield* DateTime.now);
+  yield* finishRun(row.taskId, questionId, outcome._tag === "Failure" ? "failed" : "succeeded", answeredAt);
   if (outcome._tag === "Failure") {
     yield* db.update(taskQuestions).set({ status: "failed", error: outcome.failure.message, answeredAt }).where(eq(taskQuestions.id, questionId)).pipe(Effect.orDie);
     return;
@@ -153,6 +160,20 @@ export const answerQuestion = Effect.fnUntraced(function* <R = never>(questionId
     .set({ status: "answered", answer: answer.answer, sources: answer.sources, sessionId: result.sessionId, workspace: cwd, costUsd: result.costUsd?.toString() ?? null, answeredAt })
     .where(eq(taskQuestions.id, questionId))
     .pipe(Effect.orDie);
+});
+
+const QUESTION_KIND = "question";
+const QuestionRun = Schema.Struct({ questionId: Schema.Number });
+
+/** 質問の調べものを終わりにし、ほかの調べものが動いていなければ、Task を質問する前のレーンに戻す */
+const finishRun = Effect.fnUntraced(function* (taskId: number, questionId: number, status: "succeeded" | "failed", finishedAt: string) {
+  const db = yield* Database;
+  const runs = yield* db.select().from(agentRuns).where(and(eq(agentRuns.taskId, taskId), inArray(agentRuns.status, ["queued", "running"]))).pipe(Effect.orDie);
+  const mine = runs.find((run) => run.kind === QUESTION_KIND && Option.exists(Schema.decodeUnknownOption(QuestionRun)(run.result), (result) => result.questionId === questionId));
+  if (mine === undefined) return;
+  yield* db.update(agentRuns).set({ status, finishedAt }).where(eq(agentRuns.id, mine.id)).pipe(Effect.orDie);
+  if (runs.some((run) => run.id !== mine.id)) return;
+  yield* moveTask(taskId, "agent_running", mine.previousStatus as TaskStatus);
 });
 
 const StoredJudgment = Schema.Struct({ request: Schema.Struct({ input: Schema.String }) });
