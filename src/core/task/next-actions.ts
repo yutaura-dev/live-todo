@@ -21,9 +21,12 @@ export type WaitCondition =
   | { kind: "item_changed"; since?: string };
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
 /** resolve_conflicts: アプリが Claude Code にコンフリクトを直させる / push_conflict_resolution: 直した内容を確かめて push する */
+/** Web でやる手順の開く先（公式のサイトなど）。画面に「〇〇を開く」ボタンを出す */
+export type StepLink = { url: string; label: string };
 export type ActionStep = StepBase & {
   kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" | "resolve_conflicts" | "push_conflict_resolution" | "process_mail" | "archive_past_invites";
   until?: WaitCondition;
+  link?: StepLink;
 };
 /** process_mail: アプリがメールの一覧を見せ、承認したものを Gmail で確認済みにする（アーカイブ）かゴミ箱に入れる */
 /** archive_past_invites: 日程が過ぎた招待のメールを見せ、承認したら Gmail で確認済みにする */
@@ -145,6 +148,7 @@ export type ProposedStep = {
   mode: "serial" | "parallel";
   type?: ActionStep["kind"] | undefined;
   until?: ProposedWaitCondition | undefined;
+  link?: { url: string; label: string } | undefined;
   options?: ReadonlyArray<{ label: string; steps: ReadonlyArray<Omit<ProposedStep, "options">> }> | undefined;
 };
 
@@ -185,14 +189,38 @@ function checkedWaitCondition(proposed: ProposedWaitCondition, now: string | und
   }
 }
 
+// https だけを開く先にする（javascript: や file: を開かせない）
+const linkOf = (link: { url: string; label: string } | undefined): StepLink | undefined => {
+  if (link === undefined || link.label.trim() === "" || !URL.canParse(link.url)) return undefined;
+  return new URL(link.url).protocol === "https:" ? { url: link.url, label: link.label.trim() } : undefined;
+};
+
 function actionStepOf(
   base: StepBase,
-  step: { type?: ActionStep["kind"] | undefined; until?: ProposedWaitCondition | undefined },
+  step: { type?: ActionStep["kind"] | undefined; until?: ProposedWaitCondition | undefined; link?: { url: string; label: string } | undefined },
   now: string | undefined,
 ): ActionStep {
   const kind = step.type ?? "manual";
   const until = kind === "wait" ? waitConditionOf(step.until, now) : undefined;
-  return until === undefined ? { ...base, kind } : { ...base, kind, until };
+  const link = linkOf(step.link);
+  return { ...base, kind, ...(until === undefined ? {} : { until }), ...(link === undefined ? {} : { link }) };
+}
+
+/** 手順の id から、その手順の開く先を探す（分かれ道の中も含める） */
+export function stepLinkOf(plan: NextActionPlan, stepId: string): StepLink | undefined {
+  const find = (steps: ReadonlyArray<Step>): StepLink | undefined => {
+    for (const step of steps) {
+      if (step.id === stepId) return step.kind === "decision" ? undefined : step.link;
+      if (step.kind === "decision") {
+        for (const option of step.options) {
+          const found = find(option.steps);
+          if (found !== undefined) return found;
+        }
+      }
+    }
+    return undefined;
+  };
+  return find(plan.steps);
 }
 
 /** AI が考えた手順の並びを、手順の並びに変える。id は位置から決める。now はレビューを待ち始めた時刻 */
@@ -296,7 +324,12 @@ const WaitConditionSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("included_in_pull_request"), repository: Schema.String, query: Schema.String, pullUrl: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("workflow_succeeded"), repository: Schema.String, workflow: Schema.String, pullUrl: Schema.String }),
 ]);
-const ActionStepSchema = Schema.Struct({ ...StepBaseSchema, kind: Schema.Literals(ACTION_KINDS), until: Schema.optionalKey(WaitConditionSchema) });
+const ActionStepSchema = Schema.Struct({
+  ...StepBaseSchema,
+  kind: Schema.Literals(ACTION_KINDS),
+  until: Schema.optionalKey(WaitConditionSchema),
+  link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
+});
 interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchema> {
   readonly kind: "decision";
   readonly options: ReadonlyArray<{ readonly key: string; readonly label: string; readonly steps: ReadonlyArray<StepEncoded> }>;

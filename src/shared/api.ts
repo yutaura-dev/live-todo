@@ -180,6 +180,8 @@ export interface LiveTodoApi {
   recurringUpdate(input: { id: number; title?: string; note?: string; schedule?: RecurrenceScheduleView; active?: boolean }): Promise<Outcome>;
   /** Slack の To-do を完了にする・To-do から外す。外部への書き込み。確認で承認したあとにだけ呼ぶ */
   slackAction(taskId: number, action: "complete" | "remove"): Promise<Outcome>;
+  /** 手順の開く先（公式のサイトなど）を外部のブラウザで開く。開く先は main が Task の手順から取り出す */
+  openStepLink(taskId: number, stepId: string): Promise<void>;
   /** ルールの「何をする」を、Decisions でアプリの操作に読み取る */
   interpretRule(then: string): Promise<{ ok: true; actions: RuleActions } | { ok: false; reason: string }>;
   /** Task についての質問と回答（古い順） */

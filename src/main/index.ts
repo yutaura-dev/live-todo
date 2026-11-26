@@ -15,6 +15,7 @@ import { makeMailClassifier } from "../app/llm.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
 import { answerQuestion, askQuestion, listQuestions, recoverInterruptedQuestions, TaskQuestionError } from "../app/task-questions.js";
 import { actionsFromInterpretation, labelCandidatesOf } from "../core/rules/interpret.js";
+import { decodePlan, stepLinkOf } from "../core/task/next-actions.js";
 import { gmailMailTarget, gmailProcess, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
@@ -584,6 +585,18 @@ const interpretRuleActions = (then: string) =>
 const MAX_LABEL_CANDIDATES = 30;
 
 function registerTaskQuestions() {
+  // 開く先を renderer から受け取らない理由: 乗っ取られた renderer に任意の URL を開かせないため。Task の手順に保存した https の開く先だけを開く
+  ipcMain.handle(IPC_CHANNELS.openStepLink, async (_event, input: unknown) => {
+    const link = await runtime.runPromise(
+      Effect.gen(function* () {
+        const request = yield* decodeStepRequest(input);
+        const task = yield* (yield* TaskRepository).findTask(request.taskId);
+        if (Option.isNone(task)) return undefined;
+        return Option.match(decodePlan(task.value.nextActions), { onNone: () => undefined, onSome: (plan) => stepLinkOf(plan, request.stepId) });
+      }).pipe(Effect.orElseSucceed(() => undefined)),
+    );
+    if (link !== undefined && URL.canParse(link.url) && new URL(link.url).protocol === "https:") await shell.openExternal(link.url);
+  });
   ipcMain.handle(IPC_CHANNELS.interpretRule, (_event, input: unknown) =>
     runtime.runPromise(
       Schema.decodeUnknownEffect(Schema.Struct({ then: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(500)) }))(input).pipe(

@@ -45,8 +45,8 @@ const historyOf = (result: unknown) =>
   );
 // 進行中も含める理由: すべての Task に次にやることを入れるため
 const ELIGIBLE_STATUSES: ReadonlyArray<TaskStatus> = ["needs_review", "todo", "in_progress"];
-// 集めた情報だけを読ませる。リポジトリは渡さないので、Bash や WebFetch は要らない
-const PLANNING_TOOLS: ReadonlyArray<string> = ["Read", "Grep", "Glob"];
+// 集めた情報とリポジトリを読ませる。手順の開く先（公式のサイト）を確かめるために Web の検索も許す（ADR-0013）
+const PLANNING_TOOLS: ReadonlyArray<string> = ["Read", "Grep", "Glob", "WebSearch"];
 
 export type NextActionPlanningOptions = { sources: ReadonlyArray<string>; model?: string; maxBudgetUsd?: number; concurrency: number };
 

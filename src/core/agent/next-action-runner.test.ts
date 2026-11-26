@@ -202,7 +202,7 @@ describe("runNextActionPlanning", () => {
       assert.isTrue(changes.some((change) => change.field === "next_actions" && change.seenAt === null && change.actor === "agent"));
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("claude には集めた情報のフォルダだけを読ませる（リポジトリは渡さない）", () =>
+  it.effect("claude には集めた情報のフォルダを読ませ、手順の開く先を確かめるための Web の検索だけを足す（リポジトリは渡さない）", () =>
     Effect.gen(function* () {
       yield* task();
       const agent = withAgent();
@@ -211,7 +211,7 @@ describe("runNextActionPlanning", () => {
 
       const request = agent.requests[0]!;
       assert.match(request.cwd, /\/context$/);
-      assert.deepStrictEqual([...request.allowedTools], ["Read", "Grep", "Glob"]);
+      assert.deepStrictEqual([...request.allowedTools], ["Read", "Grep", "Glob", "WebSearch"]);
       assert.isUndefined(agent.contexts[0]!["pr-state.json"], "PR でない項目には PR の状態を集めない");
       const context = JSON.parse(agent.contexts[0]!["task.json"]!);
       assert.strictEqual(context.title, "障害の調査依頼（acme/app）");

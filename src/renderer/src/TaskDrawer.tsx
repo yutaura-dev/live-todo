@@ -6,6 +6,9 @@ import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle,
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
 
+// 開く先のドメインを見せる（ボタンの名前だけでは、どこが開くか分からないため）
+const hostOf = (url: string) => (URL.canParse(url) ? new URL(url).hostname : "");
+
 const dateTimeOf = (iso: string) =>
   new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -701,6 +704,14 @@ function StepItem(props: {
       {isCurrent && step.kind === "wait" && (
         <div className="step-actions">
           <span className="field-hint">{waitHint(step.until ?? { kind: "item_changed" })}</span>
+        </div>
+      )}
+      {isCurrent && step.kind !== "decision" && step.link !== undefined && (
+        <div className="step-actions">
+          <button type="button" className="primary-button" onClick={() => void api.openStepLink(detail.id, step.id)}>
+            {step.link.label}を開く
+          </button>
+          <span className="field-hint">{hostOf(step.link.url)}</span>
         </div>
       )}
       {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push") && (

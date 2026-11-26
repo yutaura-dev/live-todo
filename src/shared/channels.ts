@@ -15,6 +15,7 @@ export const IPC_CHANNELS = {
   gmailMailTarget: "board:gmail-mail-target",
   taskQuestions: "board:task-questions",
   interpretRule: "settings:interpret-rule",
+  openStepLink: "board:open-step-link",
   askTask: "board:ask-task",
   gmailProcess: "board:gmail-process",
   fixPullRequest: "board:fix-pull-request",

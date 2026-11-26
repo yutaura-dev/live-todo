@@ -12,6 +12,7 @@ import {
   planFromProposedSteps,
   reopenStep,
   senderPlan,
+  stepLinkOf,
   taskEffort,
 } from "./next-actions.js";
 
@@ -264,5 +265,32 @@ describe("senderPlan（メルマガ・お知らせの送り主の Task の次に
     assert.include(decision.title, "Shop");
     assert.deepStrictEqual(decision.kind === "decision" ? decision.options.map((option) => option.key) : [], ["unsubscribe", "filter", "keep"]);
     assert.lengthOf(currentSteps(plan), 2);
+  });
+});
+
+describe("手順のリンク（Web でやる手順を開くボタン）", () => {
+  it("https のリンクと名前があれば、手順に持たせる", () => {
+    const plan = planFromProposedSteps([{ title: "公式サイトから VCTRADE にログインする", effort: "easy", mode: "serial", type: "manual", link: { url: "https://trade.sbivc.co.jp/", label: "VCTRADE" } }]);
+    assert.deepInclude(plan.steps[0], { link: { url: "https://trade.sbivc.co.jp/", label: "VCTRADE" } });
+  });
+
+  it("https でない・名前がない・空のリンクは持たせない", () => {
+    for (const link of [{ url: "http://example.com", label: "x" }, { url: "javascript:alert(1)", label: "x" }, { url: "https://example.com", label: " " }, { url: "", label: "" }]) {
+      const plan = planFromProposedSteps([{ title: "x", effort: "easy", mode: "serial", type: "manual", link }]);
+      assert.notProperty(plan.steps[0]!, "link");
+    }
+  });
+
+  it("保存した手順のリンクを読める", () => {
+    const plan = { steps: [{ id: "s1", kind: "manual", title: "x", effort: "easy", mode: "serial", status: "todo", link: { url: "https://example.com", label: "例" } }] };
+    assert.deepInclude(Option.getOrThrow(decodePlan(plan)).steps[0], { link: { url: "https://example.com", label: "例" } });
+  });
+
+  it("手順の id から、分かれ道の中も含めてリンクを探す", () => {
+    const plan = planFromProposedSteps([
+      { title: "決める", effort: "easy", mode: "serial", options: [{ label: "続ける", steps: [{ title: "ログインする", effort: "easy", mode: "serial", type: "manual", link: { url: "https://example.com/login", label: "例" } }] }] },
+    ]);
+    assert.deepStrictEqual(stepLinkOf(plan, "s1.o1.s1"), { url: "https://example.com/login", label: "例" });
+    assert.isUndefined(stepLinkOf(plan, "s1"));
   });
 });

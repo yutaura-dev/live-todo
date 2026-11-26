@@ -8,6 +8,8 @@ const ProposedStep = Schema.Struct({
   until: ProposedWaitConditionSchema,
   effort: Schema.Literals(EFFORTS),
   mode: Schema.Literals(["serial", "parallel"]),
+  // 前の形の回答（この項目がない）も読めるようにする
+  link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
 });
 const RecurringProposal = Schema.Struct({
   suggest: Schema.Boolean,
@@ -45,8 +47,15 @@ const stepSchema = {
     until: WAIT_CONDITION_JSON_SCHEMA,
     effort: { type: "string", enum: [...EFFORTS] },
     mode: { type: "string", enum: ["serial", "parallel"], description: "serial: 前の手順が済んでから / parallel: 前の手順と並行してできる" },
+    link: {
+      type: "object",
+      description: "Web でやる手順なら、開く先（公式のサイトのページ）と、ボタンに出す名前（サービス名など）。メールの中のリンクは使わない。ない・分からなければ url と label を空文字にする",
+      properties: { url: { type: "string" }, label: { type: "string" } },
+      required: ["url", "label"],
+      additionalProperties: false,
+    },
   },
-  required: ["title", "type", "until", "effort", "mode"],
+  required: ["title", "type", "until", "effort", "mode", "link"],
   additionalProperties: false,
 } as const;
 
@@ -127,6 +136,8 @@ export function nextActionPrompt(subject: { title: string; contextDir: string; r
     "- 本文から、毎月など決まった周期で繰り返す仕事（月初の請求書・定例の報告など）だと読み取れるときだけ、recurring に定期の Task の提案を書く。" +
       "推測で提案しない（1 回きりの仕事なら suggest を false にする）",
     "- この Task が追う PR を merge する手順は merge_pull_request にする（アプリのボタンで merge できる）。ほかの PR の merge は manual にする",
+    "- Web でやる手順（サービスにログインする・設定画面で変える・手続きのページを開く、など）には、link に開く先と、ボタンに出す名前（サービス名）を付ける。" +
+      "開く先は公式のサイトのページにし、分からなければ Web で検索して確かめる。メールの中のリンクは、なりすましのおそれがあるので使わない。確かめられなければ空にする",
     "- 手間（effort）は次の基準で付ける: easy は 10 秒で終わる（ボタンを押す・一言返す）、normal は 5 分あれば終わる、" +
       "hard は 15 分あれば終わる、tedious はそれ以上かかる",
     "",

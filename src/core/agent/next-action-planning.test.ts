@@ -128,3 +128,28 @@ describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
     assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait", "merge_pull_request"]);
   });
 });
+
+describe("手順のリンク", () => {
+  it("Web でやる手順に、公式のサイトの開く先を付けさせる（メールの中のリンクは使わせない）", () => {
+    const prompt = nextActionPrompt({ title: "x", contextDir: "/work/x" });
+    assert.include(prompt, "link");
+    assert.include(prompt, "公式");
+    assert.include(prompt, "メールの中のリンク");
+    assert.include(JSON.stringify(NEXT_ACTION_PLAN_JSON_SCHEMA), "link");
+  });
+
+  it("回答のリンクを手順に持たせ、空のリンクは持たせない", () =>
+    Effect.runSync(
+      Effect.gen(function* () {
+        const proposal = yield* decodeProposedPlan({
+          steps: [
+            { title: "ログインする", type: "manual", until: { kind: "none", repository: "", query: "", pullUrl: "", workflow: "" }, effort: "easy", mode: "serial", options: [], link: { url: "https://trade.sbivc.co.jp/", label: "VCTRADE" } },
+            { title: "決める", type: "manual", until: { kind: "none", repository: "", query: "", pullUrl: "", workflow: "" }, effort: "easy", mode: "serial", options: [], link: { url: "", label: "" } },
+          ],
+        });
+        const plan = planFromProposal(proposal);
+        assert.deepInclude(plan.steps[0], { link: { url: "https://trade.sbivc.co.jp/", label: "VCTRADE" } });
+        assert.notProperty(plan.steps[1]!, "link");
+      }),
+    ));
+});
