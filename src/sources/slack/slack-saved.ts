@@ -4,6 +4,7 @@ import { diffSnapshot } from "../../core/sync/snapshot-differ.js";
 import type { SourceAdapter } from "../../core/sync/source-adapter.js";
 import type { SourceBinding } from "../../core/sync/sync-source.js";
 import { SlackClient, type SlackClientError } from "./slack-client.js";
+import { mentionedIds, slackTitleLine } from "./slack-text.js";
 
 export type SlackSavedItem = {
   externalId: string;
@@ -19,7 +20,10 @@ export type SlackSavedItem = {
 export const SlackSavedCursorSchema = Schema.Struct({
   fingerprints: Schema.Record(Schema.String, Schema.String),
   titles: Schema.Record(Schema.String, Schema.String),
+  /** タイトルの作り方の版。変えたら、覚えているタイトルを作り直す */
+  titleVersion: Schema.optionalKey(Schema.Number),
 });
+const TITLE_VERSION = 2;
 export type SlackSavedCursor = typeof SlackSavedCursorSchema.Type;
 
 const SavedItem = Schema.Struct({
@@ -33,8 +37,8 @@ const decodeSavedItem = Schema.decodeUnknownOption(SavedItem);
 
 // 1 回の取得でたどるページ数の上限（1 ページ 50 件）。想定外に多いときに、レート制限を使い切らないため
 const MAX_PAGES = 20;
-const TITLE_LENGTH = 80;
 const FALLBACK_TITLE = "Slack のメッセージ";
+const INVISIBLE_TITLE = "見られないチャンネルのメッセージ";
 // 自分で To-do・Saved にしたものは、それ自体が自分の todo なので LLM に問わない（ADR-0010）
 const SAVED_JUDGMENT: TodoJudgment = { verdict: "todo", method: "rule" };
 
@@ -42,13 +46,8 @@ export const slackSourceName = (accountId: string) => `slack:${accountId}`;
 
 const permalink = (workspace: string, channel: string, ts: string) => `https://${workspace}/archives/${channel}/p${ts.replace(".", "")}`;
 
-const titleOf = (text: string) => {
-  const firstLine = text.split("\n").find((line) => line.trim() !== "")?.trim() ?? "";
-  if (firstLine === "") return FALLBACK_TITLE;
-  return firstLine.length > TITLE_LENGTH ? `${firstLine.slice(0, TITLE_LENGTH)}…` : firstLine;
-};
-
-const fingerprintOf = (item: SlackSavedItem) => JSON.stringify([item.todoState, item.dueAt ?? 0]);
+// タイトルも含める理由: タイトルの作り方を直したときに、変化として Task まで伝えるため
+const fingerprintOf = (item: SlackSavedItem) => JSON.stringify([item.todoState, item.dueAt ?? 0, item.title]);
 
 /** Slack の To-do・Saved（saved.list）を、全件を取って前回と比べる Source にする（ADR-0010） */
 export const makeSlackSavedBinding = Effect.fnUntraced(function* (options: { accountId: string; workspace: string }) {
@@ -71,6 +70,41 @@ export const makeSlackSavedBinding = Effect.fnUntraced(function* (options: { acc
     fetchChanges: (cursor) =>
       Effect.gen(function* () {
         const previous = cursor ?? { fingerprints: {}, titles: {} };
+        const knownTitles = previous.titleVersion === TITLE_VERSION ? previous.titles : {};
+        const channels = new Map<string, Option.Option<{ name: string; isDirect: boolean }>>();
+        const users = new Map<string, string>();
+        const channelOf = (id: string) =>
+          Effect.gen(function* () {
+            const cached = channels.get(id);
+            if (cached !== undefined) return cached;
+            const found = yield* client.channel(id);
+            channels.set(id, found);
+            return found;
+          });
+        const titleFor = (saved: typeof SavedItem.Type, externalId: string) =>
+          Effect.gen(function* () {
+            const channel = yield* channelOf(saved.item_id);
+            if (Option.isNone(channel)) return INVISIBLE_TITLE;
+            const prefix = channel.value.isDirect ? "DM" : `#${channel.value.name}`;
+            // 本文は未完了のものだけ取る。完了済みは Task にならないので、取らない
+            if (saved.todo_state === "completed") return `${prefix}: ${FALLBACK_TITLE}`;
+            const message = yield* client.message(saved.item_id, saved.ts).pipe(
+              Effect.catchTag("SlackRequestError", (error) =>
+                Effect.logWarning("Slack のメッセージの本文を取れない").pipe(
+                  Effect.annotateLogs({ externalId, reason: error.error ?? "unknown" }),
+                  Effect.as(Option.none<{ text: string; user: string | undefined }>()),
+                ),
+              ),
+            );
+            if (Option.isNone(message)) return `${prefix}: ${FALLBACK_TITLE}`;
+            for (const id of mentionedIds(message.value.text)) {
+              if (users.has(id)) continue;
+              const name = yield* client.userName(id);
+              if (Option.isSome(name)) users.set(id, name.value);
+            }
+            const line = slackTitleLine(message.value.text, { users });
+            return `${prefix}: ${line === "" ? FALLBACK_TITLE : line}`;
+          });
         // 取得の途中で完了されたものは両方に出るので、あとに取る完了済みの方を使う（仕様書）
         const raw = [...(yield* listAll(undefined)), ...(yield* listAll("completed"))];
         const byKey = new Map<string, typeof SavedItem.Type>();
@@ -84,20 +118,7 @@ export const makeSlackSavedBinding = Effect.fnUntraced(function* (options: { acc
         const titles: Record<string, string> = {};
         const items: SlackSavedItem[] = [];
         for (const [externalId, saved] of byKey) {
-          let title = previous.titles[externalId];
-          // 本文は初めて見た未完了のものだけ取る。完了済みは Task にならないので、取らない
-          if (title === undefined && saved.todo_state !== "completed") {
-            const message = yield* client.message(saved.item_id, saved.ts).pipe(
-              Effect.catchTag("SlackRequestError", (error) =>
-                Effect.logWarning("Slack のメッセージの本文を取れない").pipe(
-                  Effect.annotateLogs({ externalId, reason: error.error ?? "unknown" }),
-                  Effect.as(Option.none<{ text: string; user: string | undefined }>()),
-                ),
-              ),
-            );
-            title = Option.match(message, { onNone: () => FALLBACK_TITLE, onSome: (found) => titleOf(found.text) });
-          }
-          titles[externalId] = title ?? FALLBACK_TITLE;
+          titles[externalId] = knownTitles[externalId] ?? (yield* titleFor(saved, externalId));
           items.push({
             externalId,
             channel: saved.item_id,
@@ -113,7 +134,7 @@ export const makeSlackSavedBinding = Effect.fnUntraced(function* (options: { acc
           externalId: item.externalId,
           fingerprint: fingerprintOf(item),
         })).pipe(Effect.orDie);
-        return { changes: diff.changes, nextCursor: { fingerprints: Object.fromEntries(diff.nextFingerprints), titles } };
+        return { changes: diff.changes, nextCursor: { fingerprints: Object.fromEntries(diff.nextFingerprints), titles, titleVersion: TITLE_VERSION } };
       }),
   };
 
@@ -129,5 +150,7 @@ export const makeSlackSavedBinding = Effect.fnUntraced(function* (options: { acc
       fingerprint: fingerprintOf(item),
     }),
     judge: () => Effect.succeed(SAVED_JUDGMENT),
+    // タイトルはメッセージから機械的に作るので、作り方を直したら Task にも反映する（自分で書き換えたタイトルは変えない）
+    taskTitleFollowsItem: true,
   } satisfies SourceBinding<SlackSavedItem, SlackSavedCursor, SlackClientError, never, never>;
 });

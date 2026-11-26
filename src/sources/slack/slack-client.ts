@@ -20,6 +20,10 @@ export class SlackClient extends Context.Service<SlackClient, {
   savedList(params: { filter?: "completed"; cursor?: string }): Effect.Effect<SavedListPage, SlackClientError>;
   /** メッセージ 1 件の本文。見られない・消えたなら none */
   message(channel: string, ts: string): Effect.Effect<Option.Option<{ text: string; user: string | undefined }>, SlackClientError>;
+  /** ユーザーの表示名。分からなければ none */
+  userName(userId: string): Effect.Effect<Option.Option<string>, SlackClientError>;
+  /** チャンネルの名前と DM かどうか。見られないチャンネル（退出・アーカイブ・共有など）なら none */
+  channel(channelId: string): Effect.Effect<Option.Option<{ name: string; isDirect: boolean }>, SlackClientError>;
   /** セッションの持ち主（自分）とワークスペース */
   readonly authTest: Effect.Effect<{ userId: string; user: string; team: string }, SlackClientError>;
 }>()("live-todo/sources/slack/SlackClient") {}

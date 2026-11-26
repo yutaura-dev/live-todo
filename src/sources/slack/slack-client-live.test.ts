@@ -117,6 +117,23 @@ describe("SlackClientLive", () => {
       );
     }));
 
+  it.effect("ユーザーの表示名を users.info で取る（表示名がなければ本名、それもなければユーザー名）", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeSlack(() => ({ body: { ok: true, user: { name: "yutaura", real_name: "Yuta Ura", profile: { display_name: "" } } } }));
+
+      assert.deepStrictEqual(yield* withClient(layer, (client) => client.userName("U1")), Option.some("Yuta Ura"));
+      assert.strictEqual(requests[0]?.form.get("user"), "U1");
+    }));
+
+  it.effect("チャンネルの名前と、DM かどうかを conversations.info で取る。見られないチャンネルなら none", () =>
+    Effect.gen(function* () {
+      const found = fakeSlack(() => ({ body: { ok: true, channel: { id: "C1", name: "general", is_im: false } } }));
+      const missing = fakeSlack(() => ({ body: { ok: false, error: "channel_not_found" } }));
+
+      assert.deepStrictEqual(yield* withClient(found.layer, (client) => client.channel("C1")), Option.some({ name: "general", isDirect: false }));
+      assert.deepStrictEqual(yield* withClient(missing.layer, (client) => client.channel("C1")), Option.none());
+    }));
+
   it.effect("セッションの持ち主（自分）とワークスペースを auth.test で確かめる", () =>
     Effect.gen(function* () {
       const { layer } = fakeSlack(() => ({ body: { ok: true, user_id: "U1", user: "me", team: "Acme", url: "https://acme.slack.com/" } }));

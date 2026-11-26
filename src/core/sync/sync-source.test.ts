@@ -246,6 +246,31 @@ describe("Item の変化と Task の更新", () => {
     }).pipe(Effect.provide(TestDatabase)));
 });
 
+const followingTitles = (binding: SourceBinding<Item, Cursor, never, JudgeRequestError, never>) => ({ ...binding, taskTitleFollowsItem: true });
+
+describe("元の項目のタイトルに Task のタイトルを合わせる Source（Slack など、タイトルを機械的に作る Source）", () => {
+  it.effect("Task のタイトルを書き換えていなければ、新しいタイトルに合わせる（更新マークは付けない）", () =>
+    Effect.gen(function* () {
+      yield* syncTimes(followingTitles(bindingWith(batches([upserted(item({ title: "<@U1>" }))], [upserted(item({ title: "#general: 請求書を直す", version: 2 }))]))), 2);
+
+      const task = yield* taskOfItem("a");
+      assert.strictEqual(task?.title, "#general: 請求書を直す");
+      assert.strictEqual(task?.unreadChanges, 0);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("自分で書き換えた Task のタイトルは、そのままにする", () =>
+    Effect.gen(function* () {
+      const binding = followingTitles(bindingWith(batches([upserted(item({ title: "元のタイトル" }))], [upserted(item({ title: "新しいタイトル", version: 2 }))])));
+      yield* syncSource(binding);
+      const created = (yield* taskOfItem("a"))!;
+      yield* (yield* TaskRepository).updateTask(created.id, { title: "自分で書いたタイトル" });
+
+      yield* syncSource(binding);
+
+      assert.strictEqual((yield* taskOfItem("a"))?.title, "自分で書いたタイトル");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
 describe("失敗時", () => {
   it.effect("判定に失敗したら、途中までの変更もカーソルも保存しない", () =>
     Effect.gen(function* () {

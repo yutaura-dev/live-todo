@@ -26,6 +26,9 @@ const stub = (options: { open?: unknown; completed?: unknown; texts?: Record<str
         return text === undefined ? Option.none() : Option.some({ text, user: "U1" });
       }),
     authTest: Effect.succeed({ userId: "U1", user: "me", team: "Acme" }),
+    userName: (id) => Effect.succeed(id === "U037XCSBSUS" ? Option.some("yutaura") : Option.none()),
+    channel: (id) =>
+      Effect.succeed(id === "C0123ABCD" ? Option.some({ name: "general", isDirect: false }) : id.startsWith("D") ? Option.some({ name: "", isDirect: true }) : Option.none()),
   });
   return { calls, client };
 };
@@ -37,6 +40,36 @@ const fetch = (client: SlackClient["Service"], cursor: SlackSavedCursor | null) 
   });
 
 describe("Slack の To-do・Saved", () => {
+  it.effect("メンションは名前に直し、見られないチャンネルのメッセージはそうと分かるタイトルにする", () =>
+    Effect.gen(function* () {
+      const { binding, result } = yield* fetch(
+        stub({
+          open: { ...open, saved_items: [open.saved_items[0], { ...open.saved_items[0], item_id: "C0GONE", ts: "1.0" }] },
+          completed: { ...completed, saved_items: [] },
+          texts: { "C0123ABCD:1764000000.123456": "<@U037XCSBSUS>\n請求書を直す" },
+        }).client,
+        null,
+      );
+
+      assert.deepStrictEqual(
+        result.changes.map((change) => (change.kind === "upserted" ? binding.toItemDraft(change.item).title : "")),
+        ["#general: 請求書を直す", "見られないチャンネルのメッセージ"],
+      );
+      assert.isTrue(binding.taskTitleFollowsItem);
+    }));
+
+  it.effect("タイトルの作り方を変える前の取得結果は、タイトルを作り直して変化として返す", () =>
+    Effect.gen(function* () {
+      const { binding, result } = yield* fetch(stub().client, {
+        fingerprints: { "C0123ABCD:1764000000.123456": JSON.stringify(["to_do", 1764064800]) },
+        titles: { "C0123ABCD:1764000000.123456": "<@U037XCSBSUS>" },
+      });
+
+      const first = result.changes.find((change) => change.kind === "upserted" && binding.externalIdOf(change.item) === "C0123ABCD:1764000000.123456");
+      assert.strictEqual(first?.kind === "upserted" ? binding.toItemDraft(first.item).title : "", "#general: リリース前に API の互換を確認してほしい");
+      assert.strictEqual(result.nextCursor.titleVersion, 2);
+    }));
+
   it.effect("未完了と完了済みの一覧をすべて取り、メッセージだけを、本文の 1 行目をタイトル・メッセージへのリンクを URL にした項目にする", () =>
     Effect.gen(function* () {
       const { calls, client } = stub();
@@ -47,9 +80,9 @@ describe("Slack の To-do・Saved", () => {
       assert.deepStrictEqual(
         drafts.map((draft) => [draft.title, draft.url, draft.state]),
         [
-          ["リリース前に API の互換を確認してほしい", "https://acme.slack.com/archives/C0123ABCD/p1764000000123456", "open"],
-          ["週次の振り返りのメモ", "https://acme.slack.com/archives/D0456EFGH/p1764000500000100", "open"],
-          ["Slack のメッセージ", "https://acme.slack.com/archives/C0123ABCD/p1763900000000001", "resolved"],
+          ["#general: リリース前に API の互換を確認してほしい", "https://acme.slack.com/archives/C0123ABCD/p1764000000123456", "open"],
+          ["DM: 週次の振り返りのメモ", "https://acme.slack.com/archives/D0456EFGH/p1764000500000100", "open"],
+          ["#general: Slack のメッセージ", "https://acme.slack.com/archives/C0123ABCD/p1763900000000001", "resolved"],
         ],
       );
       assert.deepStrictEqual(calls.slice(0, 2), ["saved.list:-:-", "saved.list:completed:-"]);
@@ -89,6 +122,6 @@ describe("Slack の To-do・Saved", () => {
 
       assert.strictEqual(result.changes.length, 3);
       const first = result.changes[0]!;
-      assert.strictEqual(first.kind === "upserted" ? binding.toItemDraft(first.item).title : "", "Slack のメッセージ");
+      assert.strictEqual(first.kind === "upserted" ? binding.toItemDraft(first.item).title : "", "#general: Slack のメッセージ");
     }));
 });

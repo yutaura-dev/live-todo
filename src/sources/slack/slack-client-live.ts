@@ -30,6 +30,18 @@ const SavedListBody = Schema.Struct({
 const MessagesBody = Schema.Struct({
   messages: Schema.optional(Schema.Array(Schema.Struct({ ts: Schema.String, text: Schema.optional(Schema.String), user: Schema.optional(Schema.String) }))),
 });
+const UserBody = Schema.Struct({
+  user: Schema.Struct({
+    name: Schema.String,
+    real_name: Schema.optional(Schema.String),
+    profile: Schema.optional(Schema.Struct({ display_name: Schema.optional(Schema.String) })),
+  }),
+});
+const ChannelBody = Schema.Struct({
+  channel: Schema.Struct({ name: Schema.optional(Schema.String), is_im: Schema.optional(Schema.Boolean), is_mpim: Schema.optional(Schema.Boolean) }),
+});
+// 見られないものは失敗ではなく「なし」として扱う
+const NOT_VISIBLE = new Set(["channel_not_found", "user_not_found", "not_in_channel", "missing_scope"]);
 const AuthTestBody = Schema.Struct({ user_id: Schema.String, user: Schema.String, team: Schema.String });
 
 export const isSlackWorkspace = (domain: string) => /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(domain);
@@ -102,7 +114,21 @@ export const SlackClientLive = (options: SlackClientLiveOptions) =>
         return reply === undefined ? Option.none() : Option.some({ text: reply.text ?? "", user: reply.user });
       });
 
+      const orNone = <A>(effect: Effect.Effect<A, SlackClientError>) =>
+        effect.pipe(
+          Effect.map(Option.some),
+          Effect.catchTag("SlackRequestError", (error) => (error.error !== undefined && NOT_VISIBLE.has(error.error) ? Effect.succeed(Option.none<A>()) : Effect.fail(error))),
+        );
+
       return SlackClient.of({
+        userName: (userId) =>
+          orNone(call("users.info", { user: userId }, UserBody)).pipe(
+            Effect.map(Option.map((body) => body.user.profile?.display_name || body.user.real_name || body.user.name)),
+          ),
+        channel: (channelId) =>
+          orNone(call("conversations.info", { channel: channelId }, ChannelBody)).pipe(
+            Effect.map(Option.map((body) => ({ name: body.channel.name ?? "", isDirect: body.channel.is_im === true || body.channel.is_mpim === true }))),
+          ),
         savedList: ({ filter, cursor }) =>
           call(
             "saved.list",

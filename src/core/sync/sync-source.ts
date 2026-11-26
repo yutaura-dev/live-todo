@@ -27,6 +27,11 @@ export type SourceBinding<TItem, TCursor, EA, EJ, RJ> = {
   externalIdOf: (item: TItem) => string;
   toItemDraft: (item: TItem) => ItemDraft;
   judge: (item: TItem) => Effect.Effect<TodoJudgment, EJ, RJ>;
+  /**
+   * 元の項目のタイトルが変わったら、Task のタイトルも合わせる（ユーザーが書き換えていなければ）。
+   * 既定ではしない（Task のタイトルは自分にとっての意味で持つ。ADR-0007）。タイトルを機械的に作る Source（Slack）だけが使う
+   */
+  taskTitleFollowsItem?: boolean;
 };
 
 export type SyncSummary = {
@@ -128,6 +133,10 @@ const applyChange = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
   }
   summary.activities += kinds.length;
 
+  if (binding.taskTitleFollowsItem === true && Option.isSome(previous) && previous.value.title !== item.title && item.triage === "linked") {
+    yield* followItemTitle(item, previous.value.title);
+  }
+
   if (item.triage === "pending") {
     yield* triage(item, judgments.get(externalId), summary);
   } else if (item.triage === "linked" && kinds.some((kind) => STATUS_AFFECTING_ACTIVITIES.has(kind))) {
@@ -155,6 +164,15 @@ export const applyItemState = Effect.fnUntraced(function* (source: string, exter
       return true;
     }),
   );
+});
+
+/** Task のタイトルが元の項目の前のタイトルのまま（ユーザーが書き換えていない）なら、新しいタイトルに合わせる */
+const followItemTitle = Effect.fnUntraced(function* (item: SourceItem, previousTitle: string) {
+  const tasks = yield* TaskRepository;
+  const task = yield* tasks.findTaskByItem(item.id);
+  if (Option.isNone(task) || task.value.title !== previousTitle) return;
+  yield* tasks.updateTask(task.value.id, { title: item.title });
+  yield* tasks.recordChange(task.value.id, { kind: "field_changed", field: "title", before: previousTitle, after: item.title, unread: false });
 });
 
 const triage = Effect.fnUntraced(function* (item: SourceItem, judgment: TodoJudgment | undefined, summary: SyncSummary) {
