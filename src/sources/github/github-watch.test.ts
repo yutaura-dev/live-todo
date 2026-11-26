@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { TestDatabase } from "../../core/db/test-database.js";
 import { SourceItemRepository } from "../../core/source/source-item-repository.js";
 import { syncSource } from "../../core/sync/sync-source.js";
@@ -203,6 +204,28 @@ describe("makeGitHubPullRequestWatchProvider", () => {
 
       assert.deepStrictEqual(subjects.map((subject) => subject.apiUrl), [PULL_URL]);
       assert.deepStrictEqual(requested, [PULL_URL]);
+    }));
+
+  it.effect("30 日より長く動きのない PR は見張らない（放ってある古い PR の conflict で Task を作らない）", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-11-25T00:00:00Z"));
+      const client = gitHubClientStub({
+        searchMyOpenPullRequests: Effect.succeed<unknown>({
+          items: [
+            { repository_url: "https://api.github.com/repos/acme/app", html_url: "recent", updated_at: "2026-10-27T00:00:00Z", pull_request: { url: PULL_URL } },
+            { repository_url: "https://api.github.com/repos/acme/app", html_url: "stale", updated_at: "2026-10-25T00:00:00Z", pull_request: { url: `${PULL_URL}0` } },
+          ],
+        }),
+        getPullRequest: () => Effect.succeed(Option.some<unknown>(conflictedPull)),
+        listCheckRuns: () => Effect.succeed<unknown>(checkRunsFailed),
+        listReviews: () => Effect.succeed<unknown>(reviewsChangesRequested),
+      });
+
+      const refs = yield* Effect.gen(function* () {
+        return yield* (yield* makeGitHubPullRequestWatchProvider("work")).listSubjects;
+      }).pipe(Effect.provideService(GitHubClient, client));
+
+      assert.deepStrictEqual(refs.map((ref) => ref.url), ["recent"]);
     }));
 
   it.effect("PR の詳細が取れない（削除・権限喪失）ものは見張る対象から外す", () =>

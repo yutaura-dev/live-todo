@@ -61,6 +61,17 @@ const decodeReviews = decodeResponse(ReviewsResponse);
 
 export type GitHubWatchOptions = { repositoryFilter?: RepositoryFilterConfig };
 
+/**
+ * これより長く動きのない PR は見張らない。実際に Task を消した（dismissed）conflict の PR は、どれも 53 日以上動きがなく、
+ * 片付けた（done）ものはどれも当日に動きがあった（mail:eval と同じく、実データで決めた）
+ */
+const STALE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+// 日時が読めないものは古いとみなさない（見張りから黙って外さない）
+const isStale = (updatedAt: string, now: number) => {
+  const updated = Date.parse(updatedAt);
+  return Number.isFinite(updated) && now - updated > STALE_AFTER_MS;
+};
+
 export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (accountId: string, options: GitHubWatchOptions = {}) {
   const client = yield* GitHubClient;
   const isTargetRepository = yield* makeRepositoryFilter(options.repositoryFilter ?? {});
@@ -91,11 +102,14 @@ export const makeGitHubPullRequestWatchProvider = Effect.fnUntraced(function* (a
     });
   });
 
-  const listSubjects = client.searchMyOpenPullRequests.pipe(
-    Effect.flatMap(decodeSearchResult),
+  const listSubjects = Effect.gen(function* () {
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    const search = yield* client.searchMyOpenPullRequests.pipe(Effect.flatMap(decodeSearchResult));
+    return search.items.filter((item) => !isStale(item.updated_at, now));
+  }).pipe(
     // 一覧の段階で外す理由: 見張りは PR ごとに 3 回 API を呼ぶので、対象外の PR を先に除けば呼び出しが減る。
-    Effect.map((search) =>
-      search.items
+    Effect.map((items) =>
+      items
         .filter((item) => isTargetRepository(repositoryOf(item.repository_url)))
         .map((item) => ({ id: item.pull_request.url, url: item.html_url, revision: item.updated_at })),
     ),
