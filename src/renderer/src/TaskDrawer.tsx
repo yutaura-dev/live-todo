@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ConflictResolutionView, GmailMailTargetView, TaskQuestionView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
+import { useDrawerFocus } from "./use-drawer-focus.js";
 import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber, tracksGmail, tracksSlackSaved } from "./task-text.js";
 
 const MOVABLE: MovableStatus[] = ["needs_review", "todo", "in_progress", "done"];
@@ -26,7 +27,7 @@ export function TaskDrawer(props: {
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const closeButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useDrawerFocus(props.taskId, props.onClose);
 
   useEffect(() => {
     let current = true;
@@ -48,13 +49,6 @@ export function TaskDrawer(props: {
       current = false;
     };
   }, [props.taskId, props.revision]);
-
-  useEffect(() => {
-    closeButton.current?.focus();
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && props.onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [props.onClose]);
 
   const title = detail ? splitTitle(detail.title) : null;
 
