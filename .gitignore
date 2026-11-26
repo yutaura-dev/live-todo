@@ -18,6 +18,7 @@ node_modules/
 /judge-dataset*.json
 /mail-eval-dataset*.json
 /mail-eval-results-*.json
+/plan-eval-results-*.json
 /.mail-eval-work/
 
 # env files

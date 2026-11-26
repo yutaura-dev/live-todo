@@ -3,7 +3,7 @@ import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks, tasks } from "../db/schema.js";
 import { TaskRepository } from "../task/task-repository.js";
-import { currentSteps, decodePlan, doneHistory } from "../task/next-actions.js";
+import { currentSteps, decodePlan, doneHistory, type Step } from "../task/next-actions.js";
 import type { TaskStatus } from "../task/task.js";
 import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode } from "./claude-code.js";
@@ -129,8 +129,6 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
   Effect.gen(function* () {
     const db = yield* Database;
     const taskRepository = yield* TaskRepository;
-    const claude = yield* ClaudeCode;
-    const workspace = yield* AgentWorkspace;
 
     const [run] = yield* db.select().from(agentRuns).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
     if (run === undefined || run.status !== "queued") return Option.none<{ taskId: number; succeeded: boolean }>();
@@ -142,63 +140,10 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
     const previousStatus = run.previousStatus as TaskStatus;
     yield* db.update(agentRuns).set({ status: "running", startedAt: yield* nowIso }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
 
-    const items = yield* db
-      .select({ role: taskLinks.role, source: sourceItems.source, title: sourceItems.title, url: sourceItems.url, state: sourceItems.state, judgment: sourceItems.judgment })
-      .from(taskLinks)
-      .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
-      .where(eq(taskLinks.taskId, run.taskId))
-      .pipe(Effect.orDie);
-    // 考え直しなら、済んだ手順を残して AI に伝える
-    const history = historyOf(run.result);
-    const userRequest = userRequestOf(run.result);
-    const remaining = remainingOf(run.result);
-    const context = {
-      ...(history === undefined ? {} : { doneSteps: history.map((step) => step.title) }),
-      ...(userRequest === undefined ? {} : { request: userRequest, ...(remaining === undefined ? {} : { remainingSteps: remaining }) }),
-      title: task.value.title,
-      brief: task.value.brief,
-      items: items.map((item) => ({
-        role: item.role,
-        source: item.source,
-        title: item.title,
-        url: item.url,
-        state: item.state,
-        collected: collectedOf(item.judgment),
-      })),
-    };
+    const outcome = yield* proposePlan(run.taskId, { history: historyOf(run.result), request: userRequestOf(run.result), remaining: remainingOf(run.result) }, options).pipe(
+      Effect.result,
+    );
 
-    const outcome = yield* Effect.gen(function* () {
-      const pull = items.find((item) => item.role === "tracks" && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(item.url));
-      const prState =
-        pull === undefined ? undefined : yield* workspace.pullRequestState(pull.url).pipe(Effect.orElseSucceed(() => "（取得できなかった）"));
-      // リポジトリの手順（deploy など）を読ませるため。用意できなくても、集めた情報だけで考えさせる
-      const repository = pull === undefined ? undefined : /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pull.url)?.[1];
-      const prepared =
-        pull === undefined || repository === undefined
-          ? undefined
-          : Option.getOrUndefined(yield* workspace.prepare(repository, run.taskId, pull.url).pipe(Effect.option));
-      const extra = options.extraContext === undefined ? {} : yield* options.extraContext(run.taskId).pipe(Effect.orElseSucceed(() => ({})));
-      const contextDir = yield* workspace.writeContext(run.taskId, {
-        "task.json": JSON.stringify(context, null, 2),
-        ...(prState === undefined ? {} : { "pr-state.json": prState }),
-        ...extra,
-      });
-      const result = yield* claude.run({
-        prompt: nextActionPrompt({ title: task.value.title, contextDir, repository: prepared?.cwd, replanning: history !== undefined, request: userRequest }),
-        cwd: prepared?.cwd ?? contextDir,
-        ...(prepared === undefined ? {} : { addDirs: [contextDir] }),
-        jsonSchema: NEXT_ACTION_PLAN_JSON_SCHEMA,
-        allowedTools: PLANNING_TOOLS,
-        model: options.model,
-        maxBudgetUsd: options.maxBudgetUsd,
-      });
-      const proposal = yield* decodeProposedPlan(result.structured).pipe(
-        Effect.mapError((error) => ({ message: `claude の回答の形が想定と違う: ${error.message}` })),
-      );
-      const proposed = planFromProposal(proposal, yield* nowIso);
-      const { suggest, ...suggestion } = proposal.recurring;
-      return { result, plan: { steps: [...(history ?? []), ...proposed.steps] }, recurringSuggestion: suggest ? suggestion : null };
-    }).pipe(Effect.result);
 
     const finishedAt = yield* nowIso;
     if (outcome._tag === "Failure") {
@@ -225,4 +170,72 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
     });
     yield* moveTask(run.taskId, "agent_running", previousStatus);
     return Option.some({ taskId: run.taskId, succeeded: true });
+  });
+
+/**
+ * Task の次にやることを claude に考えさせる（保存はしない）。考え直しなら、済んだ手順（history）・ユーザーの希望（request）・
+ * 今の残りの手順（remaining）を渡す。mail:eval などの評価からも、本番と同じ入力で呼べるようにする
+ */
+export const proposePlan = (
+  taskId: number,
+  replan: { history: ReadonlyArray<Step> | undefined; request: string | undefined; remaining: ReadonlyArray<string> | undefined },
+  options: Omit<NextActionPlanningOptions, "sources" | "concurrency"> & { contextOwner?: (taskId: number) => string },
+) =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const claude = yield* ClaudeCode;
+    const workspace = yield* AgentWorkspace;
+    const task = Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId));
+    const items = yield* db
+    .select({ role: taskLinks.role, source: sourceItems.source, title: sourceItems.title, url: sourceItems.url, state: sourceItems.state, judgment: sourceItems.judgment })
+    .from(taskLinks)
+    .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+    .where(eq(taskLinks.taskId, taskId))
+    .pipe(Effect.orDie);
+    const { history, request: userRequest, remaining } = replan;
+    const context = {
+    ...(history === undefined ? {} : { doneSteps: history.map((step) => step.title) }),
+    ...(userRequest === undefined ? {} : { request: userRequest, ...(remaining === undefined ? {} : { remainingSteps: remaining }) }),
+    title: task.title,
+    brief: task.brief,
+    items: items.map((item) => ({
+      role: item.role,
+      source: item.source,
+      title: item.title,
+      url: item.url,
+      state: item.state,
+      collected: collectedOf(item.judgment),
+    })),
+    };
+
+    const pull = items.find((item) => item.role === "tracks" && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(item.url));
+    const prState =
+      pull === undefined ? undefined : yield* workspace.pullRequestState(pull.url).pipe(Effect.orElseSucceed(() => "（取得できなかった）"));
+    // リポジトリの手順（deploy など）を読ませるため。用意できなくても、集めた情報だけで考えさせる
+    const repository = pull === undefined ? undefined : /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pull.url)?.[1];
+    const prepared =
+      pull === undefined || repository === undefined
+        ? undefined
+        : Option.getOrUndefined(yield* workspace.prepare(repository, taskId, pull.url).pipe(Effect.option));
+    const extra = options.extraContext === undefined ? {} : yield* options.extraContext(taskId).pipe(Effect.orElseSucceed(() => ({})));
+    const contextDir = yield* workspace.writeContext(options.contextOwner?.(taskId) ?? taskId, {
+      "task.json": JSON.stringify(context, null, 2),
+      ...(prState === undefined ? {} : { "pr-state.json": prState }),
+      ...extra,
+    });
+    const result = yield* claude.run({
+      prompt: nextActionPrompt({ title: task.title, contextDir, repository: prepared?.cwd, replanning: history !== undefined, request: userRequest }),
+      cwd: prepared?.cwd ?? contextDir,
+      ...(prepared === undefined ? {} : { addDirs: [contextDir] }),
+      jsonSchema: NEXT_ACTION_PLAN_JSON_SCHEMA,
+      allowedTools: PLANNING_TOOLS,
+      model: options.model,
+      maxBudgetUsd: options.maxBudgetUsd,
+    });
+    const proposal = yield* decodeProposedPlan(result.structured).pipe(
+      Effect.mapError((error) => ({ message: `claude の回答の形が想定と違う: ${error.message}` })),
+    );
+    const proposed = planFromProposal(proposal, yield* nowIso);
+    const { suggest, ...suggestion } = proposal.recurring;
+    return { result, plan: { steps: [...(history ?? []), ...proposed.steps] }, recurringSuggestion: suggest ? suggestion : null };
   });

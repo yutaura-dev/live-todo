@@ -299,8 +299,35 @@ export function stepLinkOf(plan: NextActionPlan, stepId: string): StepLink | und
 }
 
 /** AI が考えた手順の並びを、手順の並びに変える。id は位置から決める。now はレビューを待ち始めた時刻 */
+/**
+ * 開く先がなく、手順の文に https の URL が書いてあれば、それを開く先にして文から外す。
+ * プロンプトで「URL は link に入れる」と伝えても文に書くことが多く（plan:eval）、そのままではボタンにならないため
+ */
+function withLinkFromTitle<T extends { title: string; link?: { url: string; label: string } | undefined }>(step: T): T {
+  if (linkOf(step.link) !== undefined) return step;
+  const found = URL_IN_TEXT.exec(step.title)?.[0];
+  if (found === undefined || linkOf({ url: found, label: "x" }) === undefined) return step;
+  const at = step.title.indexOf(found);
+  let before = step.title.slice(0, at);
+  let after = step.title.slice(at + found.length);
+  // 「（PR の一覧: URL ）」のように括弧の中が URL とその前置きだけなら、括弧ごと外す
+  const open = Math.max(before.lastIndexOf("（"), before.lastIndexOf("("));
+  const close = after.search(/[）)]/);
+  const prefix = open === -1 ? "" : before.slice(open + 1);
+  if (open !== -1 && close !== -1 && !/[（()）]/.test(prefix) && /^[^、。]*$/.test(prefix) && /^\s*$/.test(after.slice(0, close))) {
+    before = before.slice(0, open);
+    after = after.slice(close + 1);
+  } else {
+    after = after.replace(/^\s*[、,]\s*/, "");
+  }
+  const title = (before.trimEnd() + (before.endsWith("（") || before.endsWith("(") ? "" : "") + after.trimStart()).replace(/（\s+/g, "（").trim();
+  const host = new URL(found).hostname;
+  return { ...step, title: title === "" ? step.title : title, link: { url: found, label: host === "github.com" ? "GitHub" : host } };
+}
+
 export function planFromProposedSteps(proposed: ReadonlyArray<ProposedStep>, now?: string): NextActionPlan {
-  const steps = proposed.map((step, index): Step => {
+  const steps = proposed.map((original, index): Step => {
+    const step = withLinkFromTitle(original);
     const id = `s${index + 1}`;
     const base = { id, title: step.title, effort: step.effort, mode: step.mode, status: "todo" as const };
     if (step.options === undefined || step.options.length === 0) return actionStepOf(base, step, now);

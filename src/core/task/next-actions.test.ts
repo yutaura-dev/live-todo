@@ -368,3 +368,21 @@ describe("手順の担当（人 / Claude Code が自動で / Claude Code に頼�
     assert.deepStrictEqual(Option.getOrThrow(decodePlan(JSON.parse(JSON.stringify(plan)))), plan);
   });
 });
+
+describe("手順の文に書かれた URL を開く先にする", () => {
+  it("開く先がなく、文に https の URL があれば、それを開く先にして文から外す", () => {
+    const plan = planFromProposedSteps([
+      { title: "prod へ出すときに Promote prod を手動で起動する（https://github.com/acme/app/actions/workflows/promote-prod.yml 、develop のまま実行）", effort: "easy", mode: "serial", type: "manual" },
+      { title: "料金ページ https://docs.example.com/pricing/ を稲葉さんに送る", effort: "easy", mode: "serial", type: "manual" },
+    ]);
+    assert.deepInclude(plan.steps[0], { title: "prod へ出すときに Promote prod を手動で起動する（develop のまま実行）", link: { url: "https://github.com/acme/app/actions/workflows/promote-prod.yml", label: "GitHub" } });
+    assert.deepInclude(plan.steps[1], { title: "料金ページを稲葉さんに送る", link: { url: "https://docs.example.com/pricing/", label: "docs.example.com" } });
+  });
+
+  it("開く先があるときは、文はそのままにする", () => {
+    const plan = planFromProposedSteps([
+      { title: "https://a.example.com を見る", effort: "easy", mode: "serial", type: "manual", link: { url: "https://b.example.com", label: "B" } },
+    ]);
+    assert.deepInclude(plan.steps[0], { title: "https://a.example.com を見る", link: { url: "https://b.example.com", label: "B" } });
+  });
+});

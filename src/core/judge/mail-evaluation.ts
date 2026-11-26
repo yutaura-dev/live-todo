@@ -24,13 +24,24 @@ export function scoreTriage(cases: ReadonlyArray<{ id: string; expected: TriageE
   };
 }
 
-export type PlanIssue = "empty" | "url_in_title" | "manual_mail_operation" | "web_step_without_link" | "no_actor";
+export type PlanIssue =
+  | "empty"
+  | "url_in_title"
+  | "manual_mail_operation"
+  | "web_step_without_link"
+  | "no_actor"
+  | "claude_cannot_write"
+  | "human_could_research";
 
 const URL_IN_TITLE = /https?:\/\//;
 // アプリのボタンでできるメールの操作（gmail_action・process_mail にすべきもの）
 const MAIL_OPERATION = /(ラベル|既読|アーカイブ|ゴミ箱|確認済み)/;
 // Web のページを開かないとできない手順
 const WEB_STEP = /(開き|開く|ログイン|ページ|画面|ダッシュボード|Search Console|サイト)/;
+// 外に書き込む・本人がする操作（Claude Code の手順では読むことと報告しかできない）
+const WRITE_STEP = /(返信|送る|送信|投稿|push|merge|マージ|承認|申し込|支払|登録する|変更する|設定する|ログイン|押す|返答|連絡する|コメントする|閉じる|close|作る|直す|修正する|更新する|削除)/i;
+// 調べて報告するだけでできる手順
+const RESEARCH_STEP = /(調べ|まとめ|洗い出|読み比べ|比較|要約|書き出)/;
 
 const flatten = (steps: ReadonlyArray<Step>): Step[] =>
   steps.flatMap((step) => (step.kind === "decision" ? [step, ...step.options.flatMap((option) => flatten(option.steps))] : [step]));
@@ -47,6 +58,8 @@ export function planIssues(plan: NextActionPlan): PlanIssue[] {
     if (step.kind === "manual" && MAIL_OPERATION.test(step.title)) issues.add("manual_mail_operation");
     if ((step.kind === "manual" || step.kind === "decision") && WEB_STEP.test(step.title) && !hasLink(step)) issues.add("web_step_without_link");
     if (step.kind === "manual" && step.actor === undefined) issues.add("no_actor");
+    if (step.kind === "manual" && step.actor !== undefined && step.actor !== "human" && WRITE_STEP.test(step.title)) issues.add("claude_cannot_write");
+    if (step.kind === "manual" && step.actor === "human" && RESEARCH_STEP.test(step.title) && !WRITE_STEP.test(step.title)) issues.add("human_could_research");
   }
   return [...issues];
 }

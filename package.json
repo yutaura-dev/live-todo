@@ -37,6 +37,7 @@
     "judge:export": "tsx src/app/judge-eval.ts export",
     "judge:eval": "tsx src/app/judge-eval.ts run",
     "mail:eval": "tsx src/app/mail-eval.ts",
+    "plan:eval": "tsx src/app/plan-eval.ts",
     "app:dev": "electron-vite dev",
     "app:build": "electron-vite build",
     "app:start": "electron-vite preview"

@@ -21,6 +21,24 @@ describe("scoreTriage（メールを Task にするかの採点）", () => {
   });
 });
 
+describe("planIssues（手順の担当）", () => {
+  it("Claude Code には外に書き込む手順を持たせない・調べるだけの手順を人に残さない", () => {
+    const plan = planFromProposedSteps([
+      { title: "レビューのコメントに返信する", effort: "easy", mode: "serial", type: "manual", actor: "claude_on_request" },
+      { title: "失敗した CI のログを調べて原因をまとめる", effort: "normal", mode: "serial", type: "manual", actor: "human" },
+    ]);
+    assert.deepStrictEqual(planIssues(plan), ["claude_cannot_write", "human_could_research"]);
+  });
+
+  it("調べる手順を Claude Code に、書き込む・決める手順を人にした手順は問題なし", () => {
+    const plan = planFromProposedSteps([
+      { title: "失敗した CI のログを調べて原因をまとめる", effort: "normal", mode: "serial", type: "manual", actor: "claude_auto" },
+      { title: "直した内容を push する", effort: "normal", mode: "serial", type: "manual", actor: "human" },
+    ]);
+    assert.deepStrictEqual(planIssues(plan), []);
+  });
+});
+
 describe("planIssues（手順の質の決まりごと）", () => {
   it("手順がないのは問題", () => {
     assert.deepStrictEqual(planIssues({ steps: [] }), ["empty"]);
@@ -28,7 +46,8 @@ describe("planIssues（手順の質の決まりごと）", () => {
 
   it("手順の文に URL を書く・メールの操作を手作業にする・Web の手順に開く先がない・担当がない、を見つける", () => {
     const plan = planFromProposedSteps([
-      { title: "https://example.com/settings を開いて確かめる", effort: "easy", mode: "serial", type: "manual", actor: "human" },
+      // 開く先があると、文の URL は開く先に移らずに残る（採点で見つけたいもの）
+      { title: "https://example.com/settings を開いて確かめる", effort: "easy", mode: "serial", type: "manual", actor: "human", link: { url: "https://example.com", label: "Example" } },
       { title: "請求メールにレシートラベルを付けてアーカイブする", effort: "easy", mode: "serial", type: "manual", actor: "human" },
       { title: "Search Console のレポートを開いて対象の URL を確認する", effort: "easy", mode: "serial", type: "manual", actor: "human" },
       { title: "返信する", effort: "easy", mode: "serial", type: "manual" },
