@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
   taskQuestions: "board:task-questions",
   interpretRule: "settings:interpret-rule",
   openStepLink: "board:open-step-link",
+  applyRuleToExisting: "settings:apply-rule-to-existing",
   askTask: "board:ask-task",
   gmailProcess: "board:gmail-process",
   fixPullRequest: "board:fix-pull-request",

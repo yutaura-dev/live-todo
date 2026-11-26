@@ -13,18 +13,27 @@ const KIND_LABELS: Record<string, string> = { newsletter: "メルマガ", notifi
  * 条件は言葉で書かれているので、当てはまるかを Decisions で判定し、確率が高いときだけ当てる。判定するのはルールを作ったあとに
  * 届いたメールだけで、同じメールを同じルールで判定するのは一度だけ（当てはまらなくても、失敗してもやり直さない）
  */
-export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, rules: ReadonlyArray<Rule>) {
+export const applyGmailRules = Effect.fnUntraced(function* (
+  accountId: string,
+  rules: ReadonlyArray<Rule>,
+  /** includeExisting: このルールだけは、作る前に届いたメールでも受信トレイに残っているものに当てる（利用者が押したときだけ） */
+  options: { includeExisting?: string } = {},
+) {
   const active = rules.filter((rule) => rule.enabled && rule.actions.gmail !== undefined);
   if (active.length === 0) return 0;
   const db = yield* Database;
   const client = yield* GmailClient;
   const classifier = yield* MailClassifier;
-  const since = Math.min(...active.map((rule) => Date.parse(rule.createdAt)));
+  const since = options.includeExisting === undefined ? Math.min(...active.map((rule) => Date.parse(rule.createdAt))) : 0;
   const mails = yield* db
     .select()
     .from(gmailMessages)
     .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.trashed, false), gte(gmailMessages.receivedAt, since)))
     .pipe(Effect.orDie);
+  const isTarget = (mail: (typeof mails)[number], rule: Rule) =>
+    options.includeExisting === rule.id
+      ? mail.inInbox && isRuleCandidate({ ...mail, receivedAt: Date.parse(rule.createdAt) }, rule)
+      : isRuleCandidate(mail, rule);
   const done = new Set(
     (yield* db.select({ messageId: gmailRuleRuns.messageId, ruleId: gmailRuleRuns.ruleId }).from(gmailRuleRuns).where(eq(gmailRuleRuns.accountId, accountId)).pipe(Effect.orDie)).map(
       (run) => `${run.messageId} ${run.ruleId}`,
@@ -46,7 +55,7 @@ export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, r
   let applied = 0;
   for (const rule of active) {
     for (const mail of mails) {
-      if (done.has(`${mail.messageId} ${rule.id}`) || !isRuleCandidate(mail, rule)) continue;
+      if (done.has(`${mail.messageId} ${rule.id}`) || !isTarget(mail, rule)) continue;
       const actions = rule.actions.gmail!;
       const judged = yield* classifier.matchesCondition({
         // 種類・用件はメールの中身から判定したもの（信頼できない）なので、アプリが書いた情報の側ではなく評価対象の側に入れる

@@ -11,6 +11,8 @@ import { makeSlackJobs } from "../app/slack-jobs.js";
 import { and, eq, like } from "drizzle-orm";
 import { sourceItems, taskLinks } from "../core/db/schema.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
+import { applyGmailRules } from "../sources/gmail/gmail-rule-runner.js";
+import { MailClassifier } from "../core/judge/mail-classifier.js";
 import { makeMailClassifier } from "../app/llm.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
 import { answerQuestion, askQuestion, listQuestions, recoverInterruptedQuestions, TaskQuestionError } from "../app/task-questions.js";
@@ -585,6 +587,27 @@ const interpretRuleActions = (then: string) =>
 const MAX_LABEL_CANDIDATES = 30;
 
 function registerTaskQuestions() {
+  // 外部への書き込み。設定画面で確かめてから押したときだけ呼ばれる（ルールの範囲の書き込みで、ADR-0014）
+  ipcMain.handle(IPC_CHANNELS.applyRuleToExisting, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(Schema.Struct({ ruleId: Schema.String.check(Schema.isNonEmpty()) }))(input);
+        const config = yield* loadAppConfigFile(configPath);
+        const rule = config.rules.find((candidate) => candidate.id === request.ruleId);
+        if (rule === undefined) return { ok: false as const, reason: "保存したルールが見つかりません。設定を保存してから押してください" };
+        let applied = 0;
+        for (const account of config.gmailAccounts) {
+          const client = yield* gmailClientFor(account.id);
+          const classifier = yield* makeMailClassifier(account.resolvedLlmProfile);
+          applied += yield* applyGmailRules(account.id, [rule], { includeExisting: rule.id }).pipe(
+            Effect.provideService(GmailClient, client),
+            Effect.provideService(MailClassifier, classifier),
+          );
+        }
+        return { ok: true as const, applied };
+      }).pipe(Effect.catch((error) => Effect.succeed({ ok: false as const, reason: errorMessage(error) }))),
+    ),
+  );
   // 開く先を renderer から受け取らない理由: 乗っ取られた renderer に任意の URL を開かせないため。Task の手順に保存した https の開く先だけを開く
   ipcMain.handle(IPC_CHANNELS.openStepLink, async (_event, input: unknown) => {
     const link = await runtime.runPromise(

@@ -107,6 +107,21 @@ describe("applyGmailRules（利用者が決めたルールをメールに当て�
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("今あるメールにも当てると決めたときは、ルールを作る前に届いたメールでも、受信トレイに残っているものだけ判定する", () => {
+    const { gmail, asked, layer } = setup();
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      yield* insertMail("a", { receivedAt: Date.UTC(2026, 10, 22) });
+      yield* insertMail("b", { receivedAt: Date.UTC(2026, 10, 22), inInbox: false });
+
+      const applied = yield* applyGmailRules("me", [rule], { includeExisting: rule.id });
+
+      assert.strictEqual(applied, 1);
+      assert.lengthOf(asked, 1);
+      assert.deepStrictEqual(gmail.state.modified.map((entry) => entry.id), ["a"]);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("ルールを作る前に届いたメールは判定しない", () => {
     const { asked, layer } = setup();
     return Effect.gen(function* () {

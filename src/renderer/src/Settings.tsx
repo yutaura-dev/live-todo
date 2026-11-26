@@ -763,9 +763,42 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
         )}
       </div>
       {state.kind === "failed" && <p className="problem">{state.reason}</p>}
+      <ApplyToExisting rule={rule} />
       <button type="button" className="dismiss-button" onClick={props.onRemove}>
         このルールを消す
       </button>
     </fieldset>
+  );
+}
+
+/** ルールを作る前に届いた、受信トレイに今あるメールにも当てる。外部への書き込みなので、確かめてから実行する */
+function ApplyToExisting({ rule }: { rule: RuleDraft }) {
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "confirm" } | { kind: "busy" } | { kind: "done"; applied: number } | { kind: "failed"; reason: string }>({ kind: "idle" });
+  if (!isInterpreted(rule)) return null;
+  const run = async () => {
+    setState({ kind: "busy" });
+    const result = await api.applyRuleToExisting(rule.id);
+    setState(result.ok ? { kind: "done", applied: result.applied } : { kind: "failed", reason: result.reason });
+  };
+  return (
+    <div className="step-actions">
+      {state.kind === "confirm" ? (
+        <>
+          <span className="field-hint">受信トレイに今あるメールを判定し、当てはまるものに {describeActions(rule.actions)}。保存したルールで行います</span>
+          <button type="button" className="primary-button" onClick={() => void run()}>
+            当てる
+          </button>
+          <button type="button" className="quiet-button" onClick={() => setState({ kind: "idle" })}>
+            やめる
+          </button>
+        </>
+      ) : (
+        <button type="button" className="quiet-button" disabled={state.kind === "busy"} onClick={() => setState({ kind: "confirm" })}>
+          {state.kind === "busy" ? "当てています…" : "受信トレイにある今のメールにも当てる"}
+        </button>
+      )}
+      {state.kind === "done" && <span className="field-hint">{state.applied} 通に当てました</span>}
+      {state.kind === "failed" && <span className="problem">{state.reason}</span>}
+    </div>
   );
 }

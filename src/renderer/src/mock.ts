@@ -66,6 +66,7 @@ export const mockApi: LiveTodoApi = {
   gmailMailTarget: async () => ({ kind: "senders", messages: [] }),
   taskQuestions: async () => [],
   openStepLink: async () => {},
+  applyRuleToExisting: async () => ({ ok: true, applied: 0 }),
   interpretRule: async () => ({ ok: true, actions: { gmail: { labels: ["レシート"], markRead: true } } }),
   askTask: async () => ({ ok: true }),
   gmailProcess: async () => ({ ok: true }),
