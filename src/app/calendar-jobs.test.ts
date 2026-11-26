@@ -13,12 +13,12 @@ import { makeCalendarJobs, runCalendarSync } from "./calendar-jobs.js";
 
 const account = Effect.gen(function* () {
   const config = yield* decodeAppConfig({
-    llmProfiles: { work: { provider: "none", model: "-" } },
+    llmProfiles: { work: { provider: "none", model: "-", decisions: { provider: "openai" } } },
     defaultLlmProfile: "work",
     accounts: [],
-    calendarAccounts: [{ kind: "calendar", id: "cal" }],
+    gmailAccounts: [{ kind: "gmail", id: "mail", calendar: true }],
   });
-  return config.calendarAccounts[0]!;
+  return config.gmailAccounts[0]!;
 });
 
 const invite = (id: string) => ({
@@ -63,15 +63,15 @@ describe("runCalendarSync", () => {
 });
 
 describe("makeCalendarJobs", () => {
-  it.effect("アカウントごとに、5 分おきの同期のジョブを 1 つ作る", () =>
+  it.effect("Calendar も見る Gmail のアカウントごとに、5 分おきの同期のジョブを 1 つ作る（Source 名は Gmail のアカウントの id）", () =>
     Effect.gen(function* () {
       const jobs = yield* makeCalendarJobs(yield* account);
 
-      assert.deepStrictEqual(jobs.map((job) => [job.name, Duration.toMillis(job.interval)]), [["calendar:cal", Duration.toMillis("5 minutes")]]);
+      assert.deepStrictEqual(jobs.map((job) => [job.name, Duration.toMillis(job.interval)]), [["calendar:mail", Duration.toMillis("5 minutes")]]);
     }).pipe(
       Effect.provide(NodeServices.layer),
       Effect.provide(Layer.succeed(HttpClient.HttpClient, HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}")))))),
       Effect.provide(EnvSecretStore),
-      Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} })),
+      Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: { LIVE_TODO_SECRET_LLM_OPENAI_API_KEY: "sk-test" } })),
     ));
 });

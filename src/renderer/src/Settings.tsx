@@ -44,7 +44,6 @@ function toDocument(config: unknown): ConfigDocument {
     // 画面で扱わない項目も落とさない（ここで落とすと、保存したときに設定ファイルから消える）
     gmailAccounts: Array.isArray(draft.gmailAccounts) ? draft.gmailAccounts : [],
     notionAccounts: Array.isArray(draft.notionAccounts) ? draft.notionAccounts : [],
-    calendarAccounts: Array.isArray(draft.calendarAccounts) ? draft.calendarAccounts : [],
     rules: Array.isArray(draft.rules) ? draft.rules : [],
   };
 }
@@ -148,41 +147,6 @@ export function Settings() {
                 slackAccounts: [...(current.slackAccounts ?? []), { kind: "slack", id, workspace: "", userAgent: "" }],
               }))
             }
-          />
-        </section>
-
-        <section className="settings-section" aria-labelledby="calendar-heading">
-          <h3 id="calendar-heading" className="section-title">
-            Google Calendar
-          </h3>
-          <p className="field-hint">
-            書き込めるカレンダーの予定から、出欠が未回答の招待・準備が要る予定（3 日以内）・自分で入れた todo の予定を Task にします。認証は gws に任せます。追加すると、日程がまだ先の招待メールは Gmail の側で Task にしません
-          </p>
-          {(draft.calendarAccounts ?? []).map((account, index) => (
-            <div key={account.id || index} className="account">
-              <div className="account-header">
-                <h4 className="account-name">{account.id}</h4>
-                <button
-                  type="button"
-                  className="dismiss-button account-remove"
-                  onClick={() => setDraft((current) => ({ ...current, calendarAccounts: (current.calendarAccounts ?? []).filter((_, at) => at !== index) }))}
-                >
-                  このアカウントを外す
-                </button>
-              </div>
-            </div>
-          ))}
-          <AddAccount
-            label="Calendar のアカウントを追加"
-            placeholder="calendar"
-            existing={[
-              ...draft.accounts.map((account) => account.id),
-              ...(draft.slackAccounts ?? []).map((account) => account.id),
-              ...(draft.gmailAccounts ?? []).map((account) => account.id),
-              ...(draft.notionAccounts ?? []).map((account) => account.id),
-              ...(draft.calendarAccounts ?? []).map((account) => account.id),
-            ]}
-            onAdd={(id) => setDraft((current) => ({ ...current, calendarAccounts: [...(current.calendarAccounts ?? []), { kind: "calendar", id }] }))}
           />
         </section>
 
@@ -854,6 +818,10 @@ function GmailAccountEditor(props: { account: GmailAccountDraft; onChange: (next
       <label className="checkbox-field">
         <input type="checkbox" checked={account.planNextActions === true} onChange={(event) => props.onChange({ ...account, planNextActions: event.target.checked })} />
         人からのメールを Claude Code に読ませて Task にする（本文が Claude に送られます）
+      </label>
+      <label className="checkbox-field">
+        <input type="checkbox" checked={account.calendar === true} onChange={(event) => props.onChange({ ...account, calendar: event.target.checked })} />
+        同じ Google アカウントの Calendar も見る（出欠が未回答の招待・準備が要る予定・自分で入れた todo の予定を Task にします。招待のメールは Calendar の側で扱います。準備が要るかの判定で、予定の名前と説明がこのアカウントの LLM に送られます）
       </label>
       <div className="step-actions">
         <button type="button" className="dismiss-button" onClick={props.onRemove}>

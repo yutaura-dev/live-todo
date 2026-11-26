@@ -10,7 +10,7 @@ import { CalendarClient, type CalendarRequestError } from "../sources/calendar/c
 import { CalendarClientLive } from "../sources/calendar/calendar-client-live.js";
 import { type CalendarEvent, eventFrom } from "../sources/calendar/calendar-events.js";
 import { Gws } from "../sources/gmail/gmail-client-live.js";
-import type { ResolvedCalendarAccount } from "./config/app-config.js";
+import type { ResolvedGmailAccount } from "./config/app-config.js";
 import { judgeThresholdsFor, makeDecisionsProvider, makeStructuredClassifier } from "./llm.js";
 
 // 1 回の同期で、カレンダーの一覧と書き込めるカレンダーの数だけ gws を動かす。予定は分単位でしか変わらないので 5 分で足りる
@@ -48,7 +48,8 @@ export const runCalendarSync = Effect.fnUntraced(function* (options: { accountId
   yield* syncSource(bindings.todos);
 });
 
-export const makeCalendarJobs = Effect.fnUntraced(function* (account: ResolvedCalendarAccount) {
+/** Calendar も見る Gmail のアカウントの、Calendar の同期のジョブ。LLM Profile も Gmail と同じものを使う（同じ Google アカウントのデータなので） */
+export const makeCalendarJobs = Effect.fnUntraced(function* (account: ResolvedGmailAccount) {
   const client = yield* Effect.gen(function* () {
     return yield* CalendarClient;
   }).pipe(Effect.provide(CalendarClientLive.pipe(Layer.provide(Gws.layer))));

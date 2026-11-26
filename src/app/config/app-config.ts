@@ -55,14 +55,6 @@ const SlackAccount = Schema.Struct({
 });
 export type SlackAccount = typeof SlackAccount.Type;
 
-// 認証は gws に任せる（Gmail と同じ Google アカウントになる）
-const CalendarAccount = Schema.Struct({
-  kind: Schema.Literal("calendar"),
-  id: AccountId,
-  llmProfile: Schema.optional(Schema.String),
-});
-export type CalendarAccount = typeof CalendarAccount.Type;
-
 const NotionAccount = Schema.Struct({
   kind: Schema.Literal("notion"),
   id: AccountId,
@@ -103,6 +95,8 @@ const GmailAccount = Schema.Struct({
   llmProfile: Schema.optional(Schema.String),
   // 人からのメールを Claude Code に読ませて Task にするか。本文を Claude に送るので、ほかの Source と同じく既定はオフ
   planNextActions: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  // 同じ Google アカウントの Calendar も見るか（ADR-0016）。gws の認証は 1 つなので、別のアカウントにはしない
+  calendar: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type GmailAccount = typeof GmailAccount.Type;
 
@@ -114,7 +108,6 @@ const AppConfigFile = Schema.Struct({
   slackAccounts: Schema.Array(SlackAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   gmailAccounts: Schema.Array(GmailAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   notionAccounts: Schema.Array(NotionAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
-  calendarAccounts: Schema.Array(CalendarAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   // 利用者が決めたルール。決めたルールの範囲の書き込みは、決めたことを承認とみなして自動で行う（ADR-0014）
   rules: Schema.Array(Rule).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 });
@@ -126,15 +119,11 @@ export type ResolvedSlackAccount = SlackAccount & { resolvedLlmProfile: LlmProfi
 export type ResolvedGmailAccount = GmailAccount & { resolvedLlmProfile: LlmProfile };
 
 export type ResolvedNotionAccount = NotionAccount & { resolvedLlmProfile: LlmProfile };
-
-export type ResolvedCalendarAccount = CalendarAccount & { resolvedLlmProfile: LlmProfile };
-
-export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts" | "gmailAccounts" | "notionAccounts" | "calendarAccounts"> & {
+export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts" | "gmailAccounts" | "notionAccounts"> & {
   accounts: ReadonlyArray<ResolvedAccount>;
   slackAccounts: ReadonlyArray<ResolvedSlackAccount>;
   gmailAccounts: ReadonlyArray<ResolvedGmailAccount>;
   notionAccounts: ReadonlyArray<ResolvedNotionAccount>;
-  calendarAccounts: ReadonlyArray<ResolvedCalendarAccount>;
 };
 
 const decodeFile = Schema.decodeUnknownEffect(AppConfigFile);
@@ -216,18 +205,6 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
     notionAccounts.push({ ...account, resolvedLlmProfile });
   });
 
-  const calendarAccounts: ResolvedCalendarAccount[] = [];
-  file.calendarAccounts.forEach((account, index) => {
-    if (seenIds.has(account.id)) issues.push(`calendarAccounts[${index}].id: "${account.id}" が重複している`);
-    seenIds.add(account.id);
-    const resolvedLlmProfile = profileOf(account.llmProfile ?? file.defaultLlmProfile);
-    if (resolvedLlmProfile === undefined) {
-      if (account.llmProfile !== undefined) issues.push(`calendarAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
-      return;
-    }
-    calendarAccounts.push({ ...account, resolvedLlmProfile });
-  });
-
   file.rules.forEach((rule, at) => {
     if (rule.when.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「どういう時」を書いてください`);
     if (rule.then.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書いてください`);
@@ -241,7 +218,7 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
   if (issues.length > 0) {
     return yield* new InvalidAppConfigError({ message: issues.join("\n") });
   }
-  return { ...file, accounts, slackAccounts, gmailAccounts, notionAccounts, calendarAccounts };
+  return { ...file, accounts, slackAccounts, gmailAccounts, notionAccounts };
 });
 
 /** 設定画面に出すための、検証前の設定。ファイルがなければ none */

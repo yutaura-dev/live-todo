@@ -199,7 +199,9 @@ const startSync = Effect.gen(function* () {
     )
   ).flat();
   const calendarJobs = (
-    yield* Effect.forEach(config.calendarAccounts, (account) =>
+    yield* Effect.forEach(
+      config.gmailAccounts.filter((account) => account.calendar),
+      (account) =>
       makeCalendarJobs(account).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
@@ -212,7 +214,7 @@ const startSync = Effect.gen(function* () {
   ).flat();
   const gmailJobs = (
     yield* Effect.forEach(config.gmailAccounts, (account) =>
-      makeGmailJobs(account, config.rules, { invitesHandledByCalendar: config.calendarAccounts.length > 0 }).pipe(
+      makeGmailJobs(account, config.rules, { invitesHandledByCalendar: account.calendar }).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
             syncProblem = `Gmail（${account.id}）の同期を始められない: ${errorMessage(error)}`;

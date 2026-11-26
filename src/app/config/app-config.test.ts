@@ -93,21 +93,21 @@ describe("decodeAppConfig", () => {
     }));
 });
 
-describe("Google Calendar のアカウント", () => {
-  it.effect("Calendar のアカウントを書ける（認証は gws に任せる）。LLM Profile を結び付ける。書かなければ空", () =>
+describe("Google Calendar（Gmail のアカウントで見る）", () => {
+  it.effect("Gmail のアカウントごとに、同じ Google アカウントの Calendar も見るかを書ける。既定は見ない", () =>
     Effect.gen(function* () {
-      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).calendarAccounts, []);
+      const config = yield* decodeAppConfig({
+        ...validConfig,
+        gmailAccounts: [
+          { kind: "gmail", id: "mail", llmProfile: "personal", calendar: true },
+          { kind: "gmail", id: "other", llmProfile: "personal" },
+        ],
+      });
 
-      const config = yield* decodeAppConfig({ ...validConfig, calendarAccounts: [{ kind: "calendar", id: "cal", llmProfile: "personal" }] });
-
-      assert.strictEqual(config.calendarAccounts[0]?.id, "cal");
-      assert.strictEqual(config.calendarAccounts[0]?.resolvedLlmProfile.provider, "anthropic");
-    }));
-
-  it.effect("id はほかのアカウントと重ならないようにし、ない LLM Profile はエラーにする", () =>
-    Effect.gen(function* () {
-      assert.include(yield* invalidReason({ ...validConfig, calendarAccounts: [{ kind: "calendar", id: "work" }] }), "重複");
-      assert.include(yield* invalidReason({ ...validConfig, calendarAccounts: [{ kind: "calendar", id: "cal", llmProfile: "missing" }] }), "calendarAccounts[0].llmProfile");
+      assert.deepStrictEqual(config.gmailAccounts.map((account) => [account.id, account.calendar]), [
+        ["mail", true],
+        ["other", false],
+      ]);
     }));
 });
 

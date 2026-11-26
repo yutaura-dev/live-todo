@@ -57,9 +57,9 @@ export type ConfigDocument = {
     id: string;
     llmProfile?: string;
     planNextActions?: boolean;
+    /** 同じ Google アカウントの Calendar も見る（ADR-0016） */
+    calendar?: boolean;
   }>;
-  /** Google Calendar のアカウント（ADR-0016）。認証は gws に任せる */
-  calendarAccounts?: Array<{ kind: "calendar"; id: string; llmProfile?: string }>;
   /** Notion のアカウント（ADR-0015）。token_v2 は秘密情報として別に保存する */
   notionAccounts?: Array<{
     kind: "notion";
