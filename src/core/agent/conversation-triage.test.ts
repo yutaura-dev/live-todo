@@ -50,13 +50,18 @@ describe("会話から Task を決める（Claude Code への指示と回答の�
 describe("mailThreadTriagePrompt", () => {
   const prompt = mailThreadTriagePrompt({ contextDir: "/work/gmail/t1" });
 
-  it("条件つきの依頼（変更があれば連絡、など）も、本人が確かめる必要があるので Task にさせ、期限をタイトルに入れさせる", () => {
-    assert.include(prompt, "条件つき");
-    assert.include(prompt, "本人にしか分からない");
+  it("条件つきの依頼は、本人に当てはまりそうで、することが具体的なものだけ Task にさせ、期限をタイトルに入れさせる", () => {
+    assert.include(prompt, "条件つきの依頼は、その条件が本人に当てはまりそうで");
     assert.include(prompt, "期限");
   });
 
-  it("やることがないのは、知らせるだけ・済んだ・返事を待っているだけのものに限る", () => {
-    assert.include(prompt, "知らせるだけ");
+  it("誰にでも送る注意喚起・「心当たりがなければ」の通知・支払日のお知らせは、やることがないとさせる（mail:eval で余計な Task の元だったもの）", () => {
+    assert.include(prompt, "誰にでも送る注意喚起");
+    assert.include(prompt, "心当たりがなければ");
+    assert.include(prompt, "支払日");
+  });
+
+  it("迷ったら、本人あての個別のメールはやることがあるほうに、多くの人へ送るお知らせはないほうにさせる", () => {
+    assert.include(prompt, "多くの人へ同じ内容を送るお知らせはやることがないほう");
   });
 });

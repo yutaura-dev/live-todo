@@ -61,7 +61,14 @@ const ELIGIBLE_STATUSES: ReadonlyArray<TaskStatus> = ["needs_review", "todo", "i
 // 集めた情報とリポジトリを読ませる。手順の開く先（公式のサイト）を確かめるために Web の検索も許す（ADR-0013）
 const PLANNING_TOOLS: ReadonlyArray<string> = ["Read", "Grep", "Glob", "WebSearch"];
 
-export type NextActionPlanningOptions = { sources: ReadonlyArray<string>; model?: string; maxBudgetUsd?: number; concurrency: number };
+export type NextActionPlanningOptions = {
+  sources: ReadonlyArray<string>;
+  model?: string;
+  maxBudgetUsd?: number;
+  concurrency: number;
+  /** 元の項目の本文など、task.json に足して渡すファイル（Gmail のスレッドの mail.json など）。取れなければ渡さない */
+  extraContext?: (taskId: number) => Effect.Effect<Readonly<Record<string, string>>, unknown>;
+};
 
 const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 const StoredJudgment = Schema.Struct({ request: Schema.Struct({ input: Schema.String }) });
@@ -170,9 +177,11 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
         pull === undefined || repository === undefined
           ? undefined
           : Option.getOrUndefined(yield* workspace.prepare(repository, run.taskId, pull.url).pipe(Effect.option));
+      const extra = options.extraContext === undefined ? {} : yield* options.extraContext(run.taskId).pipe(Effect.orElseSucceed(() => ({})));
       const contextDir = yield* workspace.writeContext(run.taskId, {
         "task.json": JSON.stringify(context, null, 2),
         ...(prState === undefined ? {} : { "pr-state.json": prState }),
+        ...extra,
       });
       const result = yield* claude.run({
         prompt: nextActionPrompt({ title: task.value.title, contextDir, repository: prepared?.cwd, replanning: history !== undefined, request: userRequest }),

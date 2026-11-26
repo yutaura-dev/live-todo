@@ -87,6 +87,25 @@ const nextActionsOf = (taskId: number) =>
     return Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).nextActions as { steps: { title: string }[] } | null;
   });
 
+describe("runNextActionPlanning（元の項目の本文）", () => {
+  it.effect("メールの本文など、足して渡すファイルがあれば task.json と一緒に渡す（取れなければ渡さずに考えさせる）", () =>
+    Effect.gen(function* () {
+      const first = yield* task();
+      const agent = withAgent();
+
+      yield* agent.provide(
+        runNextActionPlanning({
+          sources: ["github:personal"],
+          concurrency: 1,
+          extraContext: (taskId) => (taskId === first ? Effect.succeed({ "mail.json": "[{\"subject\":\"権限の更新\"}]" }) : Effect.fail("取れない")),
+        }),
+      );
+
+      assert.strictEqual(agent.contexts[0]!["mail.json"], "[{\"subject\":\"権限の更新\"}]");
+      assert.include(agent.requests[0]!.prompt, "mail.json");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
 describe("runNextActionPlanning（PR の Task）", () => {
   it.effect("PR を追う Task には、PR の今の状態を集めて渡す（確認する手順を作らせないため）", () =>
     Effect.gen(function* () {

@@ -252,6 +252,8 @@ const startSync = Effect.gen(function* () {
               model: DEPENDENCY_REVIEW_MODEL,
               maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD,
               concurrency: DEPENDENCY_REVIEW_CONCURRENCY,
+              // メールの Task では、元のメールの本文から手順を考えさせる（件名と要約だけだと、手続きのページや期限が分からないため）
+              extraContext: (taskId) => Effect.tryPromise(() => runtime.runPromise(questionContextFor(taskId))),
             }),
             backoffUntil: () => Option.none<DateTime.Utc>(),
           },

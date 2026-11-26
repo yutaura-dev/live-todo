@@ -130,6 +130,7 @@ export function nextActionPrompt(subject: { title: string; contextDir: string; r
     `Task: ${subject.title}`,
     `${subject.contextDir}/task.json に、元の項目（GitHub の PR・issue など）と、通知を判定したときに集めた内容がある。`,
     `PR の Task なら、${subject.contextDir}/pr-state.json に PR の今の状態（作成者・自分のアカウント・draft か・CI・レビュー・merge できるか）がある。`,
+    `メールの Task なら、${subject.contextDir}/mail.json に元のメールのスレッド（差出人・日時・件名・本文）がある。手順は本文に書かれた中身（求められていること・期限・手続きのページ）から考える。`,
     ...(subject.replanning === true
       ? ["考え直しです。task.json の doneSteps は済んだ手順なので繰り返さず、今の状況からの残りの手順だけを考える"]
       : []),
