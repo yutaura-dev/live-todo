@@ -134,10 +134,10 @@ describe("GmailClientLive（gws でGmail を読む）", () => {
     const fake = fakeGws(() => ok({ id: "m1" }));
     return Effect.gen(function* () {
       yield* (yield* client).trash("m1");
-      assert.deepStrictEqual(fake.calls[0]!.slice(0, 4), ["gmail", "users", "messages", "trash"]);
+      // messages.trash は本文のない POST で Gmail が 411 で断り、gws は本文を付けさせないので、ラベルの付け替えでゴミ箱に入れる
+      assert.deepStrictEqual(fake.calls[0]!.slice(0, 4), ["gmail", "users", "messages", "modify"]);
       assert.deepInclude(paramsOf(fake.calls[0]!), { userId: "me", id: "m1" });
-      // 本文のない POST は Gmail が 411（Length Required）で断るので、空の本文を付ける
-      assert.strictEqual(fake.calls[0]![fake.calls[0]!.indexOf("--json") + 1], "{}");
+      assert.deepStrictEqual(JSON.parse(fake.calls[0]![fake.calls[0]!.indexOf("--json") + 1]!), { addLabelIds: ["TRASH"], removeLabelIds: ["INBOX"] });
     }).pipe(Effect.provide(fake.layer));
   });
 
