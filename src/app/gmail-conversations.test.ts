@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
+import { Database } from "../core/db/database.js";
+import { gmailMessages } from "../core/db/schema.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode, type ClaudeRequest } from "../core/agent/claude-code.js";
 import { TestDatabase } from "../core/db/test-database.js";
@@ -77,6 +79,34 @@ describe("runGmailThreadTriage（メールのスレッドを読ませて Task �
       yield* pendingThread("t1");
       yield* harness({ decision: "none", title: "", brief: "", reason: "お礼だけ" }).run;
       assert.strictEqual(Option.getOrThrow(yield* (yield* SourceItemRepository).findItem(SOURCE, "t1")).triage, "ignored");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("対応が要りそうで読ませたメルマガ・お知らせに、やることがなければ、送り主の Task に戻す（そこで片付けられるように）", () =>
+    Effect.gen(function* () {
+      yield* pendingThread("t1");
+      const db = yield* Database;
+      yield* db
+        .insert(gmailMessages)
+        .values({ accountId: "me", messageId: "a", threadId: "t1", senderKey: "news@shop.example", senderName: "Shop", subject: "x", receivedAt: 1, kind: "newsletter", inInbox: true, unread: true, trashed: false, actionChecked: true, actionProbability: 0.9, updatedAt: "2026-11-26T00:00:00.000Z" })
+        .pipe(Effect.orDie);
+      yield* harness({ decision: "none", title: "", brief: "", reason: "全員向けのお知らせ" }).run;
+      const [row] = yield* db.select().from(gmailMessages).pipe(Effect.orDie);
+      assert.strictEqual(row!.actionProbability, 0);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("前に「やることはない」と決めたスレッドのメルマガ・お知らせも、送り主の Task に戻す", () =>
+    Effect.gen(function* () {
+      const item = yield* pendingThread("t1");
+      yield* (yield* SourceItemRepository).setTriage(item.id, "ignored");
+      const db = yield* Database;
+      yield* db
+        .insert(gmailMessages)
+        .values({ accountId: "me", messageId: "a", threadId: "t1", senderKey: "news@shop.example", senderName: "Shop", subject: "x", receivedAt: 1, kind: "notification", inInbox: true, unread: true, trashed: false, actionChecked: true, actionProbability: 0.9, updatedAt: "2026-11-26T00:00:00.000Z" })
+        .pipe(Effect.orDie);
+      const h = harness({ decision: "none", title: "", brief: "", reason: "x" });
+      yield* h.run;
+      assert.lengthOf(h.requests, 0);
+      assert.strictEqual((yield* db.select().from(gmailMessages).pipe(Effect.orDie))[0]!.actionProbability, 0);
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("済んだスレッドは読ませない", () =>

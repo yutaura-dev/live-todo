@@ -1,10 +1,10 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { CONVERSATION_TRIAGE_JSON_SCHEMA, decodeConversationDecision, mailThreadTriagePrompt } from "../core/agent/conversation-triage.js";
 import { Database } from "../core/db/database.js";
-import { sourceItems } from "../core/db/schema.js";
+import { gmailMessages, sourceItems } from "../core/db/schema.js";
 import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import { gmailThreadsSource } from "../sources/gmail/gmail-bindings.js";
@@ -19,6 +19,27 @@ const failedAt = new Map<string, number>();
 
 const ownerOf = (accountId: string, threadId: string) => `gmail-${accountId}-${threadId}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
+/**
+ * やることはないと決めたスレッドのメルマガ・お知らせを、送り主の Task に戻す（対応が要るかを 0 にする）。
+ * 対応が要りそうだと読ませたあと、どの Task にも入らずアプリから片付けられなくなるのを防ぐ
+ */
+const returnToSender = Effect.fnUntraced(function* (accountId: string, threadIds: ReadonlyArray<string>) {
+  if (threadIds.length === 0) return;
+  const db = yield* Database;
+  yield* db
+    .update(gmailMessages)
+    .set({ actionProbability: 0 })
+    .where(
+      and(
+        eq(gmailMessages.accountId, accountId),
+        inArray(gmailMessages.threadId, [...threadIds]),
+        inArray(gmailMessages.kind, ["newsletter", "notification"]),
+        eq(gmailMessages.actionChecked, true),
+      ),
+    )
+    .pipe(Effect.orDie);
+});
+
 export type GmailThreadTriageOptions = { accountId: string; model?: string; maxBudgetUsd?: number };
 
 /** 仕分けを保留にした人からのメールのスレッドを Claude Code に読ませ、やることがあれば何をするかの Task にする */
@@ -30,6 +51,13 @@ export const runGmailThreadTriage = (options: GmailThreadTriageOptions, client: 
     const claude = yield* ClaudeCode;
     const workspace = yield* AgentWorkspace;
     const source = gmailThreadsSource(options.accountId);
+
+    const ignored = yield* db
+      .select({ externalId: sourceItems.externalId })
+      .from(sourceItems)
+      .where(and(eq(sourceItems.source, source), eq(sourceItems.triage, "ignored")))
+      .pipe(Effect.orDie);
+    yield* returnToSender(options.accountId, ignored.map((row) => row.externalId));
 
     const pending = yield* db
       .select()
@@ -83,6 +111,7 @@ export const runGmailThreadTriage = (options: GmailThreadTriageOptions, client: 
       const judgment = { verdict: decision.decision === "none" ? "not_todo" : "todo", method: "conversation", reason: decision.reason };
       if (decision.decision === "none") {
         yield* itemRepository.setTriage(item.id, "ignored", judgment);
+        yield* returnToSender(options.accountId, [item.externalId]);
       } else {
         const title = decision.title.trim() === "" ? item.title : decision.title.trim();
         const task = yield* taskRepository.createTask({ title, status: "todo" });
