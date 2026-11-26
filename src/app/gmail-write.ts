@@ -5,7 +5,7 @@ import { approvals, gmailMessages, sourceItems, taskLinks } from "../core/db/sch
 import { applyItemState } from "../core/sync/sync-source.js";
 import { completeStep, decodePlan, type GmailStepActions, type Step } from "../core/task/next-actions.js";
 import { TaskRepository } from "../core/task/task-repository.js";
-import { gmailLabelChangesOf } from "../core/rules/rule.js";
+import { gmailLabelChangesOf, isReservedLabelName } from "../core/rules/rule.js";
 import { Option } from "effect";
 import type { GmailClient } from "../sources/gmail/gmail-client.js";
 import { effectiveKind, isPastInvite } from "../sources/gmail/gmail-mailbox.js";
@@ -179,8 +179,9 @@ export const gmailRunStep = Effect.fnUntraced(function* <E, R>(
   let failure: string | undefined;
   const outcome = yield* Effect.gen(function* () {
     if ((actions.labels ?? []).length > 0) {
-      for (const label of yield* client.labels) labelIds.set(label.name, label.id);
-      for (const name of actions.labels ?? []) if (!labelIds.has(name)) labelIds.set(name, (yield* client.createLabel(name)).id);
+      // 利用者のラベルだけを名前で引く（TRASH などのシステムのラベルを、名前から付けさせない）
+      for (const label of yield* client.labels) if (label.id.startsWith("Label_")) labelIds.set(label.name, label.id);
+      for (const name of actions.labels ?? []) if (!labelIds.has(name) && !isReservedLabelName(name)) labelIds.set(name, (yield* client.createLabel(name)).id);
     }
   }).pipe(Effect.result);
   if (outcome._tag === "Failure") failure = outcome.failure._tag === "GmailRequestError" ? outcome.failure.message : "Gmail に書き込めなかった";

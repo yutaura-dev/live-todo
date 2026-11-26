@@ -3,7 +3,7 @@ import { DateTime, Effect } from "effect";
 import { Database } from "../../core/db/database.js";
 import { gmailMessages, gmailRuleRuns } from "../../core/db/schema.js";
 import { MAIL_TOPIC_LABELS, MailClassifier } from "../../core/judge/mail-classifier.js";
-import { gmailLabelChangesOf, isRuleCandidate, type Rule, RULE_MATCH_PROBABILITY } from "../../core/rules/rule.js";
+import { gmailLabelChangesOf, isReservedLabelName, isRuleCandidate, type Rule, RULE_MATCH_PROBABILITY } from "../../core/rules/rule.js";
 import { GmailClient } from "./gmail-client.js";
 
 const KIND_LABELS: Record<string, string> = { newsletter: "メルマガ", notification: "お知らせ", personal: "人からのメール" };
@@ -50,11 +50,12 @@ export const applyGmailRules = Effect.fnUntraced(function* (
   let labelsLoaded = false;
   const ensureLabels = Effect.fnUntraced(function* (names: ReadonlyArray<string>) {
     if (!labelsLoaded) {
-      for (const label of yield* client.labels) labelIds.set(label.name, label.id);
+      // 利用者のラベルだけを名前で引く（TRASH などのシステムのラベルを、名前から付けさせない）
+      for (const label of yield* client.labels) if (label.id.startsWith("Label_")) labelIds.set(label.name, label.id);
       labelsLoaded = true;
     }
     for (const name of names) {
-      if (!labelIds.has(name)) labelIds.set(name, (yield* client.createLabel(name)).id);
+      if (!labelIds.has(name) && !isReservedLabelName(name)) labelIds.set(name, (yield* client.createLabel(name)).id);
     }
   });
 

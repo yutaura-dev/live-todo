@@ -31,10 +31,18 @@ const hasGmailActions = (actions: GmailRuleActions | undefined) =>
 export const isRuleCandidate = (mail: { receivedAt: number; kind: string }, rule: Rule) =>
   rule.enabled && mail.kind !== "mine" && rule.interpretedFrom === rule.then && hasGmailActions(rule.actions.gmail) && mail.receivedAt >= Date.parse(rule.createdAt);
 
-/** Gmail の操作を、ラベルの付け外しにする。labelIds はラベルの名前から id への対応 */
+// Gmail のシステムのラベル。付けると、ゴミ箱に入れる・迷惑メールにするなど、ルールでは許していない操作になってしまう
+const RESERVED_LABELS = new Set(["INBOX", "TRASH", "SPAM", "UNREAD", "STARRED", "IMPORTANT", "SENT", "DRAFT", "CHAT"]);
+export const isReservedLabelName = (name: string) => RESERVED_LABELS.has(name.trim().toUpperCase()) || /^CATEGORY_/i.test(name.trim());
+const isUserLabelId = (id: string) => id.startsWith("Label_");
+
+/** Gmail の操作を、ラベルの付け外しにする。labelIds はラベルの名前から id への対応。付けるのは利用者のラベルだけ */
 export function gmailLabelChangesOf(actions: GmailRuleActions, labelIds: ReadonlyMap<string, string>) {
   return {
-    add: (actions.labels ?? []).flatMap((name) => (labelIds.has(name) ? [labelIds.get(name)!] : [])),
+    add: (actions.labels ?? []).flatMap((name) => {
+      const id = labelIds.get(name);
+      return id !== undefined && isUserLabelId(id) && !isReservedLabelName(name) ? [id] : [];
+    }),
     remove: [...(actions.markRead === true ? ["UNREAD"] : []), ...(actions.archive === true ? ["INBOX"] : [])],
   };
 }

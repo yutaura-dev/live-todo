@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { gmailLabelChangesOf, isRuleCandidate, RULE_MATCH_PROBABILITY, type Rule } from "./rule.js";
+import { gmailLabelChangesOf, isReservedLabelName, isRuleCandidate, RULE_MATCH_PROBABILITY, type Rule } from "./rule.js";
 
 const rule = (overrides: Partial<Rule> = {}): Rule => ({
   id: "r1",
@@ -40,5 +40,17 @@ describe("gmailLabelChangesOf（ルールの Gmail の操作をラベルの付�
       add: ["Label_1"],
       remove: ["UNREAD", "INBOX"],
     });
+  });
+});
+describe("システムのラベルを付けさせない", () => {
+  it("利用者のラベル（Label_ で始まる id）だけを付け、TRASH・SPAM などのシステムのラベルは付けない", () => {
+    const ids = new Map([["レシート", "Label_1"], ["TRASH", "TRASH"], ["SPAM", "SPAM"]]);
+    assert.deepStrictEqual(gmailLabelChangesOf({ labels: ["レシート", "TRASH", "SPAM"] }, ids).add, ["Label_1"]);
+  });
+
+  it("システムのラベルと同じ名前は、利用者のラベルとして作らない", () => {
+    assert.isTrue(isReservedLabelName("TRASH"));
+    assert.isTrue(isReservedLabelName("category_promotions"));
+    assert.isFalse(isReservedLabelName("レシート"));
   });
 });
