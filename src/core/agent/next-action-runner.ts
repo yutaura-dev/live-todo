@@ -7,6 +7,7 @@ import { currentSteps, decodePlan, doneHistory, type Step } from "../task/next-a
 import type { TaskStatus } from "../task/task.js";
 import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode } from "./claude-code.js";
+import { listenForStop, statusAfterRun } from "./run-interrupts.js";
 import { isDependencyBot } from "./dependency-review.js";
 import { moveTask, RETRY_FAILED_AFTER_MILLIS } from "./dependency-triage.js";
 import { NEXT_ACTION_PLAN_JSON_SCHEMA, decodeProposedPlan, nextActionPrompt, planFromProposal } from "./next-action-planning.js";
@@ -141,6 +142,7 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
     yield* db.update(agentRuns).set({ status: "running", startedAt: yield* nowIso }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
 
     const outcome = yield* proposePlan(run.taskId, { history: historyOf(run.result), request: userRequestOf(run.result), remaining: remainingOf(run.result) }, options).pipe(
+      listenForStop(run.taskId),
       Effect.result,
     );
 
@@ -149,7 +151,7 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
     if (outcome._tag === "Failure") {
       yield* db.update(agentRuns).set({ status: "failed", error: outcome.failure.message, finishedAt }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
       yield* Effect.logWarning("次にやることを考えられなかった").pipe(Effect.annotateLogs({ taskId: run.taskId, reason: outcome.failure.message }));
-      yield* moveTask(run.taskId, "agent_running", previousStatus);
+      yield* moveTask(run.taskId, "agent_running", yield* statusAfterRun(run.taskId, previousStatus, outcome.failure));
       return Option.some({ taskId: run.taskId, succeeded: false });
     }
 

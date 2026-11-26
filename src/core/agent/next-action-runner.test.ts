@@ -9,6 +9,8 @@ import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
+import { RunInterrupts } from "./run-interrupts.js";
+import { recordingInterrupts, resolveTrackedItems, stoppingClaude } from "./stop-testing.js";
 import { requestReplan, runNextActionPlanning } from "./next-action-runner.js";
 
 const NONE = { kind: "none" as const, repository: "", query: "", pullUrl: "" };
@@ -262,6 +264,20 @@ describe("runNextActionPlanning", () => {
 
       assert.lengthOf(yield* agent.provide(run), 0);
       assert.lengthOf(agent.requests, 0);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("考えている間に追う項目が merge され、Claude Code が考えるのをやめたら、Task を完了にする", () =>
+    Effect.gen(function* () {
+      const taskId = yield* task();
+      const db = yield* Database;
+      const interrupts = recordingInterrupts();
+      const merged = resolveTrackedItems(taskId).pipe(Effect.provideService(Database, db));
+
+      const outcome = yield* withAgent().provide(run.pipe(Effect.provideService(ClaudeCode, stoppingClaude(merged)), Effect.provideService(RunInterrupts, interrupts.service)));
+
+      assert.deepStrictEqual(outcome, [{ taskId, succeeded: false }]);
+      assert.deepStrictEqual(interrupts.listened, [taskId]);
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "done");
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("失敗したら元のレーンに戻し、1 時間あけるまで調べ直さない", () =>

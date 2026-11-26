@@ -3,6 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "../core/agent/claude-code.js";
 import { ConflictWorkspace, ConflictWorkspaceError } from "../core/agent/conflict-workspace.js";
+import { RunInterrupts } from "../core/agent/run-interrupts.js";
+import { recordingInterrupts, resolveTrackedItems, STOPPED_REASON, stoppingClaude } from "../core/agent/stop-testing.js";
 import { Database } from "../core/db/database.js";
 import { agentRuns, approvals } from "../core/db/schema.js";
 import { TestDatabase } from "../core/db/test-database.js";
@@ -117,6 +119,22 @@ describe("コンフリクトを直す", () => {
       assert.deepStrictEqual(yield* currentKinds(taskId), ["resolve_conflicts"]);
       const last = (yield* (yield* TaskRepository).listChanges(taskId)).at(-1);
       assert.include(String(last?.after), "コンフリクトの印が残っている");
+      assert.isNull(last?.seenAt);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("直している間に PR が merge され、Claude Code が作業をやめたら、Task を完了にしてやめた理由を知らせる", () =>
+    Effect.gen(function* () {
+      const taskId = yield* conflictTask;
+      const interrupts = recordingInterrupts();
+      const runId = yield* startConflictResolution(taskId);
+      yield* resolveTrackedItems(taskId);
+
+      yield* doubles().provide(finishConflictResolution(runId, {}).pipe(Effect.provideService(ClaudeCode, stoppingClaude()), Effect.provideService(RunInterrupts, interrupts.service)));
+
+      assert.deepStrictEqual(interrupts.listened, [taskId]);
+      assert.strictEqual((yield* taskOf(taskId)).status, "done");
+      const last = (yield* (yield* TaskRepository).listChanges(taskId)).at(-1);
+      assert.include(String(last?.after), STOPPED_REASON);
       assert.isNull(last?.seenAt);
     }).pipe(Effect.provide(TestDatabase)));
 

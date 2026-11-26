@@ -1,10 +1,12 @@
-import { Context, Effect, Layer, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 export class ClaudeCodeError extends Schema.TaggedError<ClaudeCodeError>()("ClaudeCodeError", {
   message: Schema.String,
   /** 決まった形の回答だけが欠けていたとき、その session を続けて頼み直すための id */
   retrySessionId: Schema.optional(Schema.String),
+  /** 知らせ（追っている PR が merge されたなど）を受けて、Claude Code が作業をやめると判断した理由 */
+  stoppedReason: Schema.optional(Schema.String),
 }) {}
 
 export type ClaudeRequest = {
@@ -12,6 +14,8 @@ export type ClaudeRequest = {
   /** Claude Code の session は作業ディレクトリに結び付く。続けるときは同じ場所を渡す */
   cwd: string;
   resumeSessionId?: string | undefined;
+  /** 新しい会話に使う session id。途中で止めたあと、同じ会話を続けて判断させるために先に決めておく */
+  sessionId?: string | undefined;
   /** 作業ディレクトリのほかに読ませるフォルダ（アプリが書き出した PR の情報など） */
   addDirs?: ReadonlyArray<string> | undefined;
   jsonSchema: object;
@@ -61,7 +65,7 @@ export function claudeArgs(request: ClaudeRequest): string[] {
     "--strict-mcp-config",
     "--tools",
     ...toolNamesOf(request.allowedTools),
-    ...(request.resumeSessionId === undefined ? [] : ["--resume", request.resumeSessionId]),
+    ...(request.resumeSessionId === undefined ? (request.sessionId === undefined ? [] : ["--session-id", request.sessionId]) : ["--resume", request.resumeSessionId]),
     ...(request.addDirs ?? []).flatMap((dir) => ["--add-dir", dir]),
     ...(request.model === undefined ? [] : ["--model", request.model]),
     ...(request.maxBudgetUsd === undefined ? [] : ["--max-budget-usd", String(request.maxBudgetUsd)]),
@@ -146,6 +150,74 @@ export const decodeClaudeOutput = Effect.fnUntraced(function* (stdout: string) {
   } satisfies ClaudeResult;
 });
 
+/**
+ * 動いている Claude Code に届ける知らせ（追っている PR が merge されたなど）。この Service を与えて ClaudeCode.run を呼ぶと、
+ * 知らせが来たときに作業を止め、続ける意味があるかを Claude Code 自身に判断させる
+ */
+export class StopNotice extends Context.Service<StopNotice, {
+  readonly wait: Effect.Effect<string>;
+  readonly poll: Effect.Effect<Option.Option<string>>;
+}>()("live-todo/core/agent/StopNotice") {}
+
+const StopOrContinue = Schema.Struct({
+  decision: Schema.Literals(["stop", "continue"]),
+  reason: Schema.String,
+  result: Schema.optional(Schema.Unknown),
+});
+
+const stopOrContinueSchema = (jsonSchema: object) => ({
+  type: "object",
+  properties: {
+    decision: { type: "string", enum: ["stop", "continue"] },
+    reason: { type: "string" },
+    result: jsonSchema,
+  },
+  required: ["decision", "reason"],
+});
+
+const stopQuestion = (notice: string) =>
+  [
+    `知らせ: ${notice}`,
+    "この知らせを受けて、作業を続ける意味がまだあるかを判断してください。",
+    "- もう意味がないなら、decision を stop にして理由を reason に書き、作業はそこでやめてください。",
+    "- まだ意味があるなら、decision を continue にして理由を reason に書き、元の作業を最後まで続けて、元の指示どおりの回答を result に入れてください。",
+  ].join("\n");
+
+const decideStop = Effect.fnUntraced(function* (judged: ClaudeResult) {
+  const answer = yield* Schema.decodeUnknownEffect(StopOrContinue)(judged.structured).pipe(
+    Effect.mapError(() => new ClaudeCodeError({ message: "続けるかどうかの回答の形が違う" })),
+  );
+  if (answer.decision === "stop") return yield* new ClaudeCodeError({ message: `知らせを受けて作業をやめた: ${answer.reason}`, stoppedReason: answer.reason });
+  if (answer.result === undefined) return yield* new ClaudeCodeError({ message: "続けると判断したが、作業の回答がなかった" });
+  return { ...judged, structured: answer.result };
+});
+
+/**
+ * 知らせが来たら claude を止め、同じ session を続けて、作業をやめるか続けるかを判断させる。
+ * 続けるなら同じ session のまま元の作業を終わらせ、元の形の回答を返す。やめるなら stoppedReason 付きのエラーにする
+ */
+export const runStoppable = Effect.fnUntraced(function* (
+  run: (request: ClaudeRequest) => Effect.Effect<ClaudeResult, ClaudeCodeError>,
+  request: ClaudeRequest,
+  notice: StopNotice["Service"],
+  newSessionId: Effect.Effect<string>,
+) {
+  const judgedRequest = (prompt: string) => ({ ...request, prompt, jsonSchema: stopOrContinueSchema(request.jsonSchema) });
+  // 始める前に知らせが来ていたら、止める作業がまだないので、作業の指示と一緒に判断も頼む
+  const early = yield* notice.poll;
+  if (Option.isSome(early)) {
+    const message = yield* notice.wait;
+    return yield* decideStop(yield* run(judgedRequest(`${request.prompt}\n\n${stopQuestion(message)}`)));
+  }
+  const sessionId = request.resumeSessionId ?? (yield* newSessionId);
+  const first = yield* Effect.raceFirst(
+    run(request.resumeSessionId === undefined ? { ...request, sessionId } : request).pipe(Effect.map((result) => ({ _tag: "finished" as const, result }))),
+    notice.wait.pipe(Effect.map((message) => ({ _tag: "noticed" as const, message }))),
+  );
+  if (first._tag === "finished") return first.result;
+  return yield* decideStop(yield* run({ ...judgedRequest(stopQuestion(first.message)), resumeSessionId: sessionId }));
+});
+
 // 1 回の調査にかけてよい時間。止まったままのプロセスでレーンが詰まらないようにする
 const RUN_TIMEOUT = "20 minutes";
 
@@ -190,7 +262,13 @@ export class ClaudeCode extends Context.Service<ClaudeCode, {
           ),
         );
 
-      return ClaudeCode.of({ run: runWithRetry });
+      const runWithNotice = Effect.fnUntraced(function* (request: ClaudeRequest) {
+        const notice = yield* Effect.serviceOption(StopNotice);
+        if (Option.isNone(notice)) return yield* runWithRetry(request);
+        return yield* runStoppable(runWithRetry, request, notice.value, Effect.sync(() => crypto.randomUUID()));
+      });
+
+      return ClaudeCode.of({ run: runWithNotice });
     }),
   );
 }

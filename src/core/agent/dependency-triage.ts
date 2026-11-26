@@ -7,6 +7,7 @@ import { planFromDependencyReview } from "../task/next-actions.js";
 import type { TaskStatus } from "../task/task.js";
 import { ClaudeCode } from "./claude-code.js";
 import { AgentWorkspace } from "./agent-workspace.js";
+import { listenForStop, statusAfterRun } from "./run-interrupts.js";
 import {
   DEPENDENCY_REVIEW_JSON_SCHEMA,
   DEPENDENCY_REVIEW_TOOLS,
@@ -160,7 +161,7 @@ const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
         Effect.mapError((error) => ({ message: `claude の回答の形が想定と違う: ${error.message}` })),
       );
       return { cwd, result, review, headSha };
-    }).pipe(Effect.result);
+    }).pipe(listenForStop(target.taskId), Effect.result);
 
     const finishedAt = yield* nowIso;
     if (outcome._tag === "Success") {
@@ -195,7 +196,7 @@ const reviewQueued = (runId: number, options: DependencyReviewOptions) =>
 
     yield* db.update(agentRuns).set({ status: "failed", error: outcome.failure.message, finishedAt }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
     yield* Effect.logWarning("依存更新の PR を調べられなかった").pipe(Effect.annotateLogs({ taskId: target.taskId, reason: outcome.failure.message }));
-    yield* moveTask(target.taskId, "agent_running", target.previousStatus);
+    yield* moveTask(target.taskId, "agent_running", yield* statusAfterRun(target.taskId, target.previousStatus, outcome.failure));
     return Option.some({ taskId: target.taskId, succeeded: false });
   });
 

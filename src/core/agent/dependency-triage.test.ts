@@ -10,6 +10,8 @@ import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "./claude-code.js";
 import { AgentWorkspace } from "./agent-workspace.js";
+import { RunInterrupts } from "./run-interrupts.js";
+import { recordingInterrupts, resolveTrackedItems, stoppingClaude } from "./stop-testing.js";
 import { backfillNextActions, recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "./dependency-triage.js";
 
 const REVIEW = {
@@ -243,6 +245,20 @@ describe("runDependencyReviews", () => {
       assert.strictEqual(yield* statusOf(taskId), "needs_review");
       const [runRow] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, taskId));
       assert.deepInclude(runRow, { status: "failed", error: "claude が失敗した（error_max_budget_usd）" });
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("調べている間に PR が merge され、Claude Code が調べるのをやめたら、Task を完了にする", () =>
+    Effect.gen(function* () {
+      const { taskId } = yield* dependencyTask();
+      const db = yield* Database;
+      const interrupts = recordingInterrupts();
+      const merged = resolveTrackedItems(taskId).pipe(Effect.provideService(Database, db));
+
+      const outcome = yield* withAgent().provide(run.pipe(Effect.provideService(ClaudeCode, stoppingClaude(merged)), Effect.provideService(RunInterrupts, interrupts.service)));
+
+      assert.deepStrictEqual(outcome, [{ taskId, succeeded: false }]);
+      assert.deepStrictEqual(interrupts.listened, [taskId]);
+      assert.strictEqual(yield* statusOf(taskId), "done");
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("調べている間に同期が状態を変えたら（merge されて完了など）、そちらを優先する", () =>

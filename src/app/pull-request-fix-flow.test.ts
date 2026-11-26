@@ -2,6 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { ClaudeCode, type ClaudeRequest } from "../core/agent/claude-code.js";
+import { RunInterrupts } from "../core/agent/run-interrupts.js";
+import { recordingInterrupts, resolveTrackedItems, STOPPED_REASON, stoppingClaude } from "../core/agent/stop-testing.js";
 import { ConflictWorkspace } from "../core/agent/conflict-workspace.js";
 import { Database } from "../core/db/database.js";
 import { agentRuns, approvals } from "../core/db/schema.js";
@@ -96,6 +98,24 @@ const kindsOf = (taskId: number) =>
   });
 
 describe("Claude Code に PR を修正させる", () => {
+  it.effect("直している間に PR が merge され、Claude Code が作業をやめたら、Task を完了にしてやめた理由を知らせる", () =>
+    Effect.gen(function* () {
+      const taskId = yield* fixTask;
+      const h = doubles();
+      const interrupts = recordingInterrupts();
+      const runId = yield* startPullRequestFix(taskId);
+      yield* resolveTrackedItems(taskId);
+
+      yield* h.provide(finishPullRequestFix(runId, {}).pipe(Effect.provideService(ClaudeCode, stoppingClaude()), Effect.provideService(RunInterrupts, interrupts.service)));
+
+      const tasks = yield* TaskRepository;
+      assert.deepStrictEqual(interrupts.listened, [taskId]);
+      assert.strictEqual(Option.getOrThrow(yield* tasks.findTask(taskId)).status, "done");
+      const last = (yield* tasks.listChanges(taskId)).at(-1);
+      assert.include(String(last?.after), STOPPED_REASON);
+      assert.isNull(last?.seenAt);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("PR のブランチを取り出し（merge しない）、調査の必要な修正を渡して、コマンドも使える・認証はない環境で直させ、全部の変更を手元で commit する", () =>
     Effect.gen(function* () {
       const taskId = yield* fixTask;

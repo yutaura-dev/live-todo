@@ -18,6 +18,7 @@ type Actor = { kind: "user" } | { kind: "sync" } | { kind: "agent" };
 
 /** tracks で追う Source Item の状態をまとめたもの（未解決 → 解決済み → 消えた の順に見る） */
 type TrackedStates = "未解決がある" | "解決済みだけ" | "消えただけ";
+type ClosedStates = Exclude<TrackedStates, "未解決がある">;
 type Verdict = "todo" | "needs_review" | "not_todo";
 type MovableStatus = "needs_review" | "todo" | "in_progress" | "done" | "dismissed";
 type ReturnTo = Exclude<Task["returnTo"], "なし">;
@@ -121,6 +122,30 @@ export function startAgent(task: Task, actor: Actor): Task {
   return { ...task, status: "agent_running", returnTo: task.status as ReturnTo };
 }
 
+/**
+ * 知らせを受けて AI が作業をやめる
+ *
+ * 処理中に追う項目が merge・close された（または消えた）と同期が知らせると、Claude Code を止め、
+ * 同じ会話で続ける意味があるかを判断させる。やめると判断したら、追う項目から status を導き直す。
+ * 続けると判断したら、そのまま作業を終えて「AI の処理が終わる」になる。
+ */
+export function stopAgent(task: Task, actor: Actor, states: ClosedStates): Task {
+  ensure(actor.kind === "agent", "AI だけ");
+  ensure(task.status === "agent_running", "処理中のときだけ");
+  return { ...task, status: deriveStatus(task.returnTo === "なし" ? "todo" : task.returnTo, states), returnTo: "なし" };
+}
+
+/**
+ * 待ち行列の処理を取り消す
+ *
+ * 処理中の Task の処理がまだ待ち行列にあるだけ（Claude Code が動いていない）なら、判断させずに取り消し、追う項目から status を導き直す。
+ */
+export function cancelQueued(task: Task, actor: Actor, states: ClosedStates): Task {
+  ensure(actor.kind === "sync", "同期だけ");
+  ensure(task.status === "agent_running", "処理中のときだけ");
+  return { ...task, status: deriveStatus(task.returnTo === "なし" ? "todo" : task.returnTo, states), returnTo: "なし" };
+}
+
 /** AI の処理が終わる */
 export function finishAgent(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
@@ -131,6 +156,8 @@ export function finishAgent(task: Task, actor: Actor): Task {
 export const inputs = {
   createBySync: { todo: ["todo"], 要確認: ["needs_review"], todoではない: ["not_todo"] },
   reconcile: { 未解決がある: ["未解決がある"], 解決済みだけ: ["解決済みだけ"], 消えただけ: ["消えただけ"] },
+  stopAgent: { mergeされた: ["解決済みだけ"], 消えた: ["消えただけ"] },
+  cancelQueued: { mergeされた: ["解決済みだけ"], 消えた: ["消えただけ"] },
   move: { 要確認へ: ["needs_review"], todoへ: ["todo"], 進行中へ: ["in_progress"], 完了へ: ["done"], 片付ける: ["dismissed"] },
 };
 
@@ -173,6 +200,8 @@ export const scenarios = {
     { do: reopenSteps, by: "ユーザー", denied: "Task があるときだけ" },
     { do: startAgent, by: "ユーザー", denied: "Task があるときだけ" },
     { do: finishAgent, by: "AI", denied: "処理中のときだけ" },
+    { do: stopAgent, by: "AI", input: "mergeされた", denied: "処理中のときだけ" },
+    { do: cancelQueued, by: "同期", input: "mergeされた", denied: "処理中のときだけ" },
     { do: createBySync, by: "同期", input: "todo" },
     { do: createBySync, by: "同期", input: "todo", denied: "まだ Task がないときだけ" },
     { do: createByHand, by: "ユーザー", denied: "まだ Task がないときだけ" },
@@ -183,10 +212,24 @@ export const scenarios = {
     { do: startAgent, by: "同期", denied: "ユーザーか AI だけ" },
     { do: startAgent, by: "AI" },
     { do: finishAgent, by: "ユーザー", denied: "AI だけ" },
+    { do: stopAgent, by: "ユーザー", input: "mergeされた", denied: "AI だけ" },
+    { do: cancelQueued, by: "ユーザー", input: "mergeされた", denied: "同期だけ" },
   ],
   "要確認の Task は、手順が済んでも完了にならない": [
     { do: createBySync, by: "同期", input: "要確認" },
     { do: finishAllSteps, by: "AI", expect: { status: "needs_review" } },
+  ],
+  "処理中に PR が merge され、AI が作業をやめると完了になる": [
+    { do: createBySync, by: "同期", input: "todo" },
+    { do: startAgent, by: "AI", expect: { status: "agent_running" } },
+    { do: reconcile, by: "同期", input: "解決済みだけ", expect: { status: "agent_running" } },
+    { do: stopAgent, by: "AI", input: "mergeされた", expect: { status: "done" } },
+  ],
+  "処理中に PR が merge されても、AI が続けると判断したら元の列に戻る": [
+    { do: createBySync, by: "同期", input: "todo" },
+    { do: startAgent, by: "AI" },
+    { do: reconcile, by: "同期", input: "解決済みだけ", expect: { status: "agent_running" } },
+    { do: finishAgent, by: "AI", expect: { status: "todo" } },
   ],
   "AI が手順を足しても、完了の Task は戻らない": [
     { do: createByHand, by: "ユーザー" },
@@ -203,11 +246,3 @@ export const reviewed = {
   "same-for-similar-actors:startAgent": "処理はユーザーの依頼（PR を直す・考え直すなど）でも、定期の処理（依存の更新の調査など）でも始まる",
   "unused-field:returnTo": "戻す先はできるかどうかには効かず、処理が終わったときの行き先だけを決める。シナリオ「AI の処理が終わると元の列に戻る」で確かめている",
 };
-
-export const questions = [
-  {
-    ask: "処理中に追う Source Item が解決・消えたとき、処理が終わったあとで status を導き直さなくてよいか？ 今は処理前の status（todo など）に戻り、次の Activity まで完了にならない",
-    about: finishAgent,
-    note: "同期は、処理中の Task の status を、追う項目が開いても閉じても変えない",
-  },
-];

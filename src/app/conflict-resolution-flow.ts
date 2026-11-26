@@ -9,6 +9,7 @@ import {
   decodeConflictResolution,
 } from "../core/agent/conflict-resolution.js";
 import { ConflictWorkspace } from "../core/agent/conflict-workspace.js";
+import { isStopped, listenForStop, statusAfterRun } from "../core/agent/run-interrupts.js";
 import { Database } from "../core/db/database.js";
 import { agentRuns, approvals, sourceItems, taskLinks } from "../core/db/schema.js";
 import { completeStep, currentSteps, decodePlan } from "../core/task/next-actions.js";
@@ -141,13 +142,14 @@ export const finishConflictResolution = (runId: number, options: { model?: strin
     const tasks = yield* TaskRepository;
     const [run] = yield* db.select().from(agentRuns).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
     if (run === undefined) return;
-    const outcome = yield* resolve(runId, options).pipe(Effect.result);
+    const outcome = yield* resolve(runId, options).pipe(listenForStop(run.taskId), Effect.result);
     const finishedAt = yield* nowIso;
     if (outcome._tag === "Failure") {
       const message = messageOf(outcome.failure);
       yield* db.update(agentRuns).set({ status: "failed", error: message, finishedAt }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
-      yield* moveTask(run.taskId, run.previousStatus as TaskStatus, "agent");
-      yield* tasks.recordChange(run.taskId, { kind: "field_changed", field: "conflict", before: null, after: `コンフリクトを直せなかった: ${message}`, unread: true, actor: "agent" });
+      yield* moveTask(run.taskId, yield* statusAfterRun(run.taskId, run.previousStatus as TaskStatus, outcome.failure), "agent");
+      const after = isStopped(outcome.failure) ? `コンフリクトを直すのをやめた: ${outcome.failure.stoppedReason}` : `コンフリクトを直せなかった: ${message}`;
+      yield* tasks.recordChange(run.taskId, { kind: "field_changed", field: "conflict", before: null, after, unread: true, actor: "agent" });
       return;
     }
     const { stored, headSha, sessionId, costUsd } = outcome.success;

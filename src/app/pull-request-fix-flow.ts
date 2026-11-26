@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { ConflictWorkspace } from "../core/agent/conflict-workspace.js";
+import { isStopped, listenForStop, statusAfterRun } from "../core/agent/run-interrupts.js";
 import {
   decodePullRequestFix,
   PULL_FIX_DISALLOWED_TOOLS,
@@ -145,13 +146,14 @@ export const finishPullRequestFix = (runId: number, options: PullRequestFixOptio
     const tasks = yield* TaskRepository;
     const [run] = yield* db.select().from(agentRuns).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
     if (run === undefined) return;
-    const outcome = yield* fix(runId, options).pipe(Effect.result);
+    const outcome = yield* fix(runId, options).pipe(listenForStop(run.taskId), Effect.result);
     const finishedAt = yield* nowIso;
     if (outcome._tag === "Failure") {
       const message = messageOf(outcome.failure);
       yield* db.update(agentRuns).set({ status: "failed", error: message, finishedAt }).where(eq(agentRuns.id, runId)).pipe(Effect.orDie);
-      yield* moveTask(run.taskId, run.previousStatus as TaskStatus, "agent");
-      yield* tasks.recordChange(run.taskId, { kind: "field_changed", field: "fix", before: null, after: `Claude Code が修正できなかった: ${message}`, unread: true, actor: "agent" });
+      yield* moveTask(run.taskId, yield* statusAfterRun(run.taskId, run.previousStatus as TaskStatus, outcome.failure), "agent");
+      const after = isStopped(outcome.failure) ? `Claude Code が修正をやめた: ${outcome.failure.stoppedReason}` : `Claude Code が修正できなかった: ${message}`;
+      yield* tasks.recordChange(run.taskId, { kind: "field_changed", field: "fix", before: null, after, unread: true, actor: "agent" });
       return;
     }
     const { stored, headSha, sessionId, costUsd } = outcome.success;
