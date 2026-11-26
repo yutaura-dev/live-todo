@@ -18,6 +18,19 @@ describe("isAllowedExternalUrl（Slack）", () => {
   );
 });
 
+describe("isAllowedExternalUrl（Gmail）", () => {
+  it("Gmail のスレッドや検索の URL は開ける", () => {
+    assert.isTrue(isAllowedExternalUrl("https://mail.google.com/mail/u/0/#all/abc123"));
+    assert.isTrue(isAllowedExternalUrl("https://mail.google.com/mail/u/0/#search/in%3Ainbox%20from%3Anews%40shop.example"));
+  });
+
+  it("http や、似せたドメインは開かない", () => {
+    assert.isFalse(isAllowedExternalUrl("http://mail.google.com/mail/u/0/"));
+    assert.isFalse(isAllowedExternalUrl("https://mail.google.com.evil.example/"));
+    assert.isFalse(isAllowedExternalUrl("https://docs.google.com/document/d/x"));
+  });
+});
+
 describe("isAllowedExternalUrl", () => {
   it.each(["https://github.com/acme/app/pull/42", "https://github.com/acme/app/issues/7#issuecomment-1"])(
     "github.com の https の URL は開いてよい: %s",

@@ -60,9 +60,12 @@ export const decodeFilterPreviewRequest = Schema.decodeUnknownEffect(
   }),
 );
 
-/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue）だけに絞る */
+/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue、Slack、Gmail）だけに絞る */
 export function isAllowedExternalUrl(url: string): boolean {
   if (!URL.canParse(url)) return false;
   const parsed = new URL(url);
-  return parsed.protocol === "https:" && (parsed.hostname === "github.com" || /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(parsed.hostname));
+  return (
+    parsed.protocol === "https:" &&
+    (parsed.hostname === "github.com" || parsed.hostname === "mail.google.com" || /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(parsed.hostname))
+  );
 }
