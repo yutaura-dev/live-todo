@@ -12,17 +12,63 @@ import { TaskRepository } from "../core/task/task-repository.js";
 export class TaskQuestionError extends Schema.TaggedError<TaskQuestionError>()("TaskQuestionError", { message: Schema.String }) {}
 
 /**
- * 調べるのに使わせる道具。読む・探す・Web で検索するだけで、コマンドの実行や書き込みはさせない。
- * WebFetch を渡さない理由: メールなどに仕込まれた指示に従って、外部の URL にデータを付けて送られうるため
+ * 調べるのに使わせる道具。読むことは広く許し、書き込み（Edit・Write、外部への送信）はさせない（ADR-0013）
  */
-export const QUESTION_TOOLS = ["Read", "Grep", "Glob", "WebSearch"] as const;
+export const QUESTION_TOOLS = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"] as const;
+
+/** GitHub を読むだけの gh のコマンドと、リポジトリの履歴を読む git のコマンド。gh api は書き込みにも使えるので許さない */
+export const GITHUB_READ_TOOLS = [
+  "Bash(gh pr view:*)",
+  "Bash(gh pr diff:*)",
+  "Bash(gh pr list:*)",
+  "Bash(gh pr checks:*)",
+  "Bash(gh issue view:*)",
+  "Bash(gh issue list:*)",
+  "Bash(gh search:*)",
+  "Bash(gh run view:*)",
+  "Bash(gh run list:*)",
+  "Bash(gh repo view:*)",
+  "Bash(gh release view:*)",
+  "Bash(gh release list:*)",
+  "Bash(git log:*)",
+  "Bash(git show:*)",
+  "Bash(git diff:*)",
+  "Bash(git blame:*)",
+] as const;
+const GITHUB_DOMAINS = ["api.github.com", "github.com"];
 
 /**
- * Gmail を探してよいときに足す、gws で Gmail を読むだけのコマンド。送る・ゴミ箱に入れる・ラベルを変えるなどは許さない。
+ * Google（gws）を読んでよいときに足す、読むだけのコマンド（Gmail・カレンダー・ドライブ・ドキュメント・スプレッドシート・連絡先）。
+ * 送る・ゴミ箱に入れる・予定を作る・ファイルを書き換えるなどは許さない。
  * 書き込みの引数（--output など）は、sandbox で作業ディレクトリの外に書けないようにして防ぐ
  */
-export const GMAIL_READ_TOOLS = ["Bash(gws gmail users messages list:*)", "Bash(gws gmail users messages get:*)", "Bash(gws gmail users threads get:*)"] as const;
-const GOOGLE_API_DOMAINS = ["gmail.googleapis.com", "oauth2.googleapis.com", "www.googleapis.com", "accounts.google.com"];
+export const GMAIL_READ_TOOLS = [
+  "Bash(gws gmail users messages list:*)",
+  "Bash(gws gmail users messages get:*)",
+  "Bash(gws gmail users threads get:*)",
+  "Bash(gws gmail users threads list:*)",
+  "Bash(gws calendar events list:*)",
+  "Bash(gws calendar events get:*)",
+  "Bash(gws calendar calendarList list:*)",
+  "Bash(gws drive files list:*)",
+  "Bash(gws drive files get:*)",
+  "Bash(gws drive files export:*)",
+  "Bash(gws docs documents get:*)",
+  "Bash(gws sheets spreadsheets get:*)",
+  "Bash(gws sheets spreadsheets values get:*)",
+  "Bash(gws people people get:*)",
+  "Bash(gws people people searchContacts:*)",
+  "Bash(gws schema:*)",
+] as const;
+const GOOGLE_API_DOMAINS = [
+  "gmail.googleapis.com",
+  "oauth2.googleapis.com",
+  "www.googleapis.com",
+  "accounts.google.com",
+  "docs.googleapis.com",
+  "sheets.googleapis.com",
+  "people.googleapis.com",
+];
 
 const MAX_QUESTION = 2000;
 const RECENT_CHANGES = 20;
@@ -40,7 +86,7 @@ export const QUESTION_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export function questionPrompt(subject: { question: string; contextDir: string; repository: string | undefined; gmail?: boolean }): string {
+export function questionPrompt(subject: { question: string; contextDir: string; repository: string | undefined; gmail?: boolean; github?: boolean }): string {
   return [
     "Task について、ユーザーから質問がありました。調べて答えてください。",
     "",
@@ -52,17 +98,23 @@ export function questionPrompt(subject: { question: string; contextDir: string; 
     ...(subject.gmail === true
       ? [
           "",
-          "ユーザー本人の Gmail を、次のコマンドで検索して読める（読むだけ。ほかのコマンドは使えない）:",
+          "ユーザー本人の Google（Gmail・カレンダー・ドライブ・ドキュメント・スプレッドシート・連絡先）を、gws で読める（読むだけ。書き込むコマンドは使えない）:",
           `- 検索: gws gmail users messages list --params '{"userId":"me","q":"from:example.com 当選","maxResults":20}'（q は Gmail の検索の書き方）`,
           `- 1 通を読む: gws gmail users messages get --params '{"userId":"me","id":"<id>","format":"full"}'（件名などだけなら "format":"metadata"）`,
           `- スレッドを読む: gws gmail users threads get --params '{"userId":"me","id":"<threadId>","format":"full"}'`,
           "- 本文は payload の parts の body.data に base64url で入っている。過去のやりとりや履歴が要る質問では、まず検索して確かめる",
+          `- 予定: gws calendar events list --params '{"calendarId":"primary","timeMin":"2026-11-01T00:00:00Z","q":"打ち合わせ"}'`,
+          `- ドライブ: gws drive files list --params '{"q":"name contains '見積'"}'、ドキュメント: gws docs documents get --params '{"documentId":"<id>"}'`,
+          "- 使い方が分からなければ gws schema <service.resource.method> で引数を調べる",
         ]
+      : []),
+    ...(subject.github === true
+      ? ["", "GitHub は gh（pr view / diff / checks、issue view、search、run view、repo view など読むだけのもの）で調べられる。リポジトリの履歴は git log / show / diff / blame で読める。"]
       : []),
     "",
     "答え方:",
     "- 聞かれたことに答える。結論を最初の 1〜2 行で書き、根拠（どのファイル・どのメール・どの URL から分かったか）を添える",
-    "- 集めた情報で足りなければ、自分で調べる（Gmail・Web の検索など）。ユーザーに調べ方を頼まない",
+    "- 集めた情報で足りなければ、自分で調べる（Gmail・GitHub・Web など）。ユーザーに調べ方を頼まない",
     "- 調べても分からないことは、分からないと短く書く。聞かれていない周辺の話で埋めない",
     "- 何かを書き込んだり送ったりはしない（調べて答えるだけ）",
     "",
@@ -98,8 +150,11 @@ export const listQuestions = Effect.fnUntraced(function* (taskId: number) {
 export type AnswerOptions<R = never> = {
   model?: string;
   maxBudgetUsd?: number;
-  /** ユーザーの Gmail を探させる（gws で読むだけ。sandbox に閉じ込める）。denyRead は sandbox の中から読ませない場所 */
-  gmail?: { denyRead: ReadonlyArray<string> };
+  /**
+   * コマンドで読ませるもの（Gmail は gws、GitHub は gh で、どちらも読むだけ）。コマンドは sandbox に閉じ込め、
+   * 書き込めるのは作業場所だけ、denyRead は読ませない場所（アプリの秘密情報など）
+   */
+  readAccess?: { gmail: boolean; github: boolean; denyRead: ReadonlyArray<string> };
   /** 元の項目の本文など、Task の情報に足して渡すファイル（Gmail のスレッドなど）。取れなければ渡さない */
   extraContext?: (taskId: number) => Effect.Effect<Readonly<Record<string, string>>, unknown, R>;
 };
@@ -152,17 +207,32 @@ export const answerQuestion = Effect.fnUntraced(function* <R = never>(questionId
     // リポジトリを用意できなくても、集めた情報だけで答えさせる
     const prepared = pull === undefined || repository === undefined ? undefined : Option.getOrUndefined(yield* workspace.prepare(repository, row.taskId, pull.url).pipe(Effect.option));
     const cwd = prepared?.cwd ?? contextDir;
+    const access = { gmail: options.readAccess?.gmail === true, github: options.readAccess?.github === true };
     const last = previous.findLast((entry) => entry.sessionId !== null && entry.workspace === cwd);
 
     const result = yield* claude.run({
-      prompt: questionPrompt({ question: row.question, contextDir, repository: prepared === undefined ? undefined : repository, gmail: options.gmail !== undefined }),
+      prompt: questionPrompt({
+        question: row.question,
+        contextDir,
+        repository: prepared === undefined ? undefined : repository,
+        gmail: options.readAccess?.gmail === true,
+        github: options.readAccess?.github === true,
+      }),
       cwd,
       ...(prepared === undefined ? {} : { addDirs: [contextDir] }),
       jsonSchema: QUESTION_JSON_SCHEMA,
-      allowedTools: options.gmail === undefined ? QUESTION_TOOLS : [...QUESTION_TOOLS, ...GMAIL_READ_TOOLS],
-      ...(options.gmail === undefined
+      allowedTools: [...QUESTION_TOOLS, ...(access.gmail ? GMAIL_READ_TOOLS : []), ...(access.github ? GITHUB_READ_TOOLS : [])],
+      ...(!access.gmail && !access.github
         ? {}
-        : { sandbox: { allowedDomains: GOOGLE_API_DOMAINS, denyRead: options.gmail.denyRead, allowRead: [...new Set([cwd, contextDir])], allowWrite: [contextDir] } }),
+        : {
+            sandbox: {
+              allowedDomains: [...(access.gmail ? GOOGLE_API_DOMAINS : []), ...(access.github ? GITHUB_DOMAINS : [])],
+              denyRead: options.readAccess?.denyRead ?? [],
+              allowRead: [...new Set([cwd, contextDir])],
+              allowWrite: [contextDir],
+              weakerNetworkIsolation: access.github,
+            },
+          }),
       model: options.model,
       maxBudgetUsd: options.maxBudgetUsd,
       resumeSessionId: last?.sessionId ?? undefined,

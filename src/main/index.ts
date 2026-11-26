@@ -534,18 +534,6 @@ const questionAllowedFor = (taskId: number) =>
     });
   });
 
-const questionSourcesOf = (taskId: number) =>
-  Effect.gen(function* () {
-    const db = yield* Database;
-    const rows = yield* db
-      .select({ source: sourceItems.source })
-      .from(taskLinks)
-      .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
-      .where(eq(taskLinks.taskId, taskId))
-      .pipe(Effect.orDie);
-    return rows.map((row) => row.source);
-  });
-
 const MAX_MAIL_TEXT = 8000;
 
 /** 質問に答えるときに渡す、元の項目の本文（今は Gmail のスレッドだけ） */
@@ -606,30 +594,36 @@ function registerTaskQuestions() {
         }
         const id = yield* askQuestion(request.taskId, request.question);
         const config = yield* loadAppConfigFile(configPath);
-        // Gmail を探させるのは、Gmail のアカウントで Claude Code で考えるのを有効にしていて、元の項目が Gmail か手で追加した Task のときだけ。
-        // GitHub・Slack の Task で許さない理由: 他人が書いた PR やメッセージに仕込まれた指示と、自分のメールが同じ会話にそろわないようにするため
-        const sources = yield* questionSourcesOf(request.taskId);
-        const gmail =
-          config.gmailAccounts.some((account) => account.planNextActions) && sources.every((source) => source.startsWith("gmail:"))
-          ? {
-              denyRead: [
-                secretsPath,
-                tokenInfoPath,
-                ...[dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`],
-                configPath,
-                app.getAppPath(),
-                process.cwd(),
-                agentWorkspaceRoot,
-                ...[".ssh", ".aws", ".config/gh", ".npmrc", ".netrc", ".git-credentials", ".docker", ".kube", ".gnupg", ".claude", ".claude.json"].map((path) => join(app.getPath("home"), path)),
-              ],
-            }
-          : undefined;
+        // 読むことは広く許し、書き込みだけを止める（ADR-0013）。Google（gws）と GitHub（gh）は、そのアカウントで Claude Code で考えるのを
+        // 有効にしているときに、どの Task の質問でも読ませる
+        const google = config.gmailAccounts.some((account) => account.planNextActions);
+        const github = config.accounts.some((account) => account.planNextActions || account.reviewDependencyPrs);
+        const readAccess =
+          google || github
+            ? {
+                gmail: google,
+                github,
+                denyRead: [
+                  secretsPath,
+                  tokenInfoPath,
+                  ...[dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`],
+                  configPath,
+                  app.getAppPath(),
+                  process.cwd(),
+                  agentWorkspaceRoot,
+                  // gh の認証（~/.config/gh）は、gh で読ませるときだけ読める場所に残す
+                  ...[".ssh", ".aws", ...(github ? [] : [".config/gh"]), ".npmrc", ".netrc", ".git-credentials", ".docker", ".kube", ".gnupg", ".claude", ".claude.json"].map((path) =>
+                    join(app.getPath("home"), path),
+                  ),
+                ],
+              }
+            : undefined;
         runtime.runFork(
           answerQuestion(id, {
             model: DEPENDENCY_REVIEW_MODEL,
             maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD,
             extraContext: questionContextFor,
-            ...(gmail === undefined ? {} : { gmail }),
+            ...(readAccess === undefined ? {} : { readAccess }),
           }),
         );
       }),

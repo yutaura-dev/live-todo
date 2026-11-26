@@ -22,7 +22,14 @@ export type ClaudeRequest = {
   withoutCredentials?: { ghConfigDir: string } | undefined;
   /** Bash を OS の sandbox に閉じ込める（書き込みは作業ディレクトリと allowWrite、通信は allowedDomains だけ。ADR-0012） */
   sandbox?:
-    | { allowedDomains: ReadonlyArray<string>; denyRead: ReadonlyArray<string>; allowRead?: ReadonlyArray<string>; allowWrite: ReadonlyArray<string> }
+    | {
+        allowedDomains: ReadonlyArray<string>;
+        denyRead: ReadonlyArray<string>;
+        allowRead?: ReadonlyArray<string>;
+        allowWrite: ReadonlyArray<string>;
+        /** macOS の証明書の確認（trustd）を許す。gh のような Go のコマンドは、これがないと TLS の確認で失敗する */
+        weakerNetworkIsolation?: boolean;
+      }
     | undefined;
   /** 追加で渡す環境変数（パッケージのキャッシュの場所など） */
   env?: Readonly<Record<string, string>> | undefined;
@@ -69,6 +76,7 @@ export function claudeArgs(request: ClaudeRequest): string[] {
               // sandbox を起動できないときに、閉じ込めずに動かすことをさせない
               failIfUnavailable: true,
               allowUnsandboxedCommands: false,
+              ...(request.sandbox.weakerNetworkIsolation === true ? { enableWeakerNetworkIsolation: true } : {}),
               filesystem: {
                 denyRead: request.sandbox.denyRead,
                 ...(request.sandbox.allowRead === undefined ? {} : { allowRead: request.sandbox.allowRead }),

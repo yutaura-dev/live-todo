@@ -73,7 +73,9 @@ describe("Task への質問", () => {
       assert.include(h.requests[0]!.prompt, "何時から？");
       assert.deepStrictEqual([...(h.requests[0]!.allowedTools ?? [])], [...QUESTION_TOOLS]);
       assert.notInclude(QUESTION_TOOLS, "Bash");
-      assert.notInclude(QUESTION_TOOLS, "WebFetch");
+      assert.include(QUESTION_TOOLS, "WebFetch");
+      assert.notInclude(QUESTION_TOOLS, "Edit");
+      assert.notInclude(QUESTION_TOOLS, "Write");
       const [question] = yield* listQuestions(taskId);
       assert.deepInclude(question, { status: "answered", answer: "11/27 の 19:00 からです" });
       assert.deepStrictEqual(question!.sources, ["mail.json"]);
@@ -84,18 +86,41 @@ describe("Task への質問", () => {
     const h = harness();
     return Effect.gen(function* () {
       const taskId = yield* taskWithItem("gmail:mail:threads", "https://mail.google.com/");
-      yield* h.provide(answerQuestion(yield* askQuestion(taskId, "前に何を買った？"), { gmail: { denyRead: ["/app/secrets.json"] } }));
+      yield* h.provide(answerQuestion(yield* askQuestion(taskId, "前に何を買った？"), { readAccess: { gmail: true, github: false, denyRead: ["/app/secrets.json"] } }));
 
       const request = h.requests[0]!;
-      assert.includeMembers([...request.allowedTools], ["Bash(gws gmail users messages list:*)", "Bash(gws gmail users messages get:*)", "Bash(gws gmail users threads get:*)"]);
-      assert.isFalse(request.allowedTools.some((tool) => tool === "Bash" || /send|trash|modify|delete|insert|import/.test(tool)));
+      assert.includeMembers([...request.allowedTools], [
+        "Bash(gws gmail users messages list:*)",
+        "Bash(gws gmail users messages get:*)",
+        "Bash(gws gmail users threads get:*)",
+        "Bash(gws calendar events list:*)",
+        "Bash(gws drive files list:*)",
+        "Bash(gws docs documents get:*)",
+        "Bash(gws sheets spreadsheets values get:*)",
+      ]);
+      assert.isFalse(request.allowedTools.some((tool) => tool === "Bash" || /send|trash|modify|delete|insert|import|update|patch|create|batchUpdate|copy|move/.test(tool)));
+      assert.includeMembers([...(request.sandbox?.allowedDomains ?? [])], ["docs.googleapis.com", "sheets.googleapis.com"]);
       assert.includeMembers([...(request.sandbox?.allowedDomains ?? [])], ["gmail.googleapis.com", "oauth2.googleapis.com"]);
       assert.includeMembers([...(request.sandbox?.denyRead ?? [])], ["/app/secrets.json"]);
       assert.include(request.prompt, "gws gmail users messages list");
     }).pipe(Effect.provide(TestDatabase));
   });
 
-  it.effect("Gmail を探してよくないときは、コマンドを許さない", () => {
+  it.effect("GitHub を見てよいときは、gh で読むだけのコマンドと、リポジトリの履歴を読む git のコマンドを許す（書き込みうるものは許さない）", () => {
+    const h = harness();
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("github:personal", "https://github.com/acme/app/pull/42");
+      yield* h.provide(answerQuestion(yield* askQuestion(taskId, "CI は通っている？"), { readAccess: { gmail: false, github: true, denyRead: [] } }));
+
+      const request = h.requests[0]!;
+      assert.includeMembers([...request.allowedTools], ["Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh run view:*)", "Bash(git log:*)"]);
+      assert.isFalse(request.allowedTools.some((tool) => /gh api|gh pr (comment|merge|edit|review|close)|git push|gh issue (comment|edit|close)/.test(tool)));
+      assert.includeMembers([...(request.sandbox?.allowedDomains ?? [])], ["api.github.com", "github.com"]);
+      assert.isTrue(request.sandbox?.weakerNetworkIsolation);
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("読む権限を渡さないときは、コマンドを許さない", () => {
     const h = harness();
     return Effect.gen(function* () {
       const taskId = yield* taskWithItem("github:personal", "https://github.com/acme/app/issues/1");
