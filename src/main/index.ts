@@ -534,6 +534,18 @@ const questionAllowedFor = (taskId: number) =>
     });
   });
 
+const questionSourcesOf = (taskId: number) =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const rows = yield* db
+      .select({ source: sourceItems.source })
+      .from(taskLinks)
+      .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+      .where(eq(taskLinks.taskId, taskId))
+      .pipe(Effect.orDie);
+    return rows.map((row) => row.source);
+  });
+
 const MAX_MAIL_TEXT = 8000;
 
 /** 質問に答えるときに渡す、元の項目の本文（今は Gmail のスレッドだけ） */
@@ -594,8 +606,11 @@ function registerTaskQuestions() {
         }
         const id = yield* askQuestion(request.taskId, request.question);
         const config = yield* loadAppConfigFile(configPath);
-        // Gmail を探させるのは、Gmail のアカウントで Claude Code で考えるのを有効にしているときだけ
-        const gmail = config.gmailAccounts.some((account) => account.planNextActions)
+        // Gmail を探させるのは、Gmail のアカウントで Claude Code で考えるのを有効にしていて、元の項目が Gmail か手で追加した Task のときだけ。
+        // GitHub・Slack の Task で許さない理由: 他人が書いた PR やメッセージに仕込まれた指示と、自分のメールが同じ会話にそろわないようにするため
+        const sources = yield* questionSourcesOf(request.taskId);
+        const gmail =
+          config.gmailAccounts.some((account) => account.planNextActions) && sources.every((source) => source.startsWith("gmail:"))
           ? {
               denyRead: [
                 secretsPath,
