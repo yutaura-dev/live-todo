@@ -251,7 +251,8 @@ export const taskQuestions = sqliteTable(
   (table) => [index("task_questions_task_id").on(table.taskId)],
 );
 
-export const GMAIL_RULE_RUN_STATUSES = ["executed", "failed"] as const;
+/** skipped: 条件に当てはまらなかった（判定し直さないために残す） */
+export const GMAIL_RULE_RUN_STATUSES = ["executed", "failed", "skipped"] as const;
 
 /**
  * 利用者が決めた Gmail のルールを、メールに当てた記録（ADR-0014）。ルールを決めたことを承認とみなして自動で書き込むので、
@@ -268,6 +269,8 @@ export const gmailRuleRuns = sqliteTable(
     /** 付けたラベルの名前・外したラベル（UNREAD・INBOX） */
     actions: text({ mode: "json" }).notNull(),
     status: text({ enum: GMAIL_RULE_RUN_STATUSES }).notNull(),
+    /** 条件に当てはまる確率（Decisions の判定。答えが返らなければ null） */
+    probability: real(),
     error: text(),
     executedAt: text("executed_at").notNull(),
   },

@@ -152,29 +152,31 @@ describe("Gmail のアカウント", () => {
       assert.include(yield* invalidReason({ ...validConfig, gmailAccounts: [{ ...gmail, id: "work" }] }), "重複");
     }));
 
+});
+
+describe("ルール", () => {
   const receiptRule = {
     id: "r1",
     name: "請求書にレシートのラベル",
     createdAt: "2026-11-26T00:00:00.000Z",
-    when: { topics: ["billing"] },
-    then: { labels: ["レシート"], markRead: true },
+    when: "請求書に関するメール",
+    then: { gmail: { labels: ["レシート"], markRead: true } },
   };
 
-  it.effect("利用者が決めたルールを書ける。書かなければ空で、書いたルールは既定で有効", () =>
+  it.effect("利用者が決めたルールを、Source とは別に書ける。書かなければ空で、書いたルールは既定で有効", () =>
     Effect.gen(function* () {
-      assert.deepStrictEqual((yield* decodeAppConfig({ ...validConfig, gmailAccounts: [gmail] })).gmailAccounts[0]?.rules, []);
-      const config = yield* decodeAppConfig({ ...validConfig, gmailAccounts: [{ ...gmail, rules: [receiptRule] }] });
-      assert.deepInclude(config.gmailAccounts[0]?.rules[0], { id: "r1", enabled: true });
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).rules, []);
+      const config = yield* decodeAppConfig({ ...validConfig, rules: [receiptRule] });
+      assert.deepInclude(config.rules[0], { id: "r1", enabled: true, when: "請求書に関するメール" });
     }));
 
   it.effect("条件か操作が空のルールや、ゴミ箱に入れるなど決めていない操作は、エラーにする", () =>
     Effect.gen(function* () {
-      assert.include(yield* invalidReason({ ...validConfig, gmailAccounts: [{ ...gmail, rules: [{ ...receiptRule, when: {} }] }] }), "条件");
-      assert.include(yield* invalidReason({ ...validConfig, gmailAccounts: [{ ...gmail, rules: [{ ...receiptRule, then: {} }] }] }), "操作");
-      yield* invalidReason({ ...validConfig, gmailAccounts: [{ ...gmail, rules: [{ ...receiptRule, then: { trash: true } }] }] });
-      yield* invalidReason({ ...validConfig, gmailAccounts: [{ ...gmail, rules: [{ ...receiptRule, when: { topics: ["invoice"] } }] }] });
+      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, when: " " }] }), "条件");
+      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: {} }] }), "操作");
+      yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: { gmail: { trash: true } } }] });
+      yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: { slack: { post: true } } }] });
     }));
-
 });
 
 describe("Decisions の閾値", () => {

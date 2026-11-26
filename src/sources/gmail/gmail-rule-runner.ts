@@ -2,18 +2,23 @@ import { and, eq, gte } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { Database } from "../../core/db/database.js";
 import { gmailMessages, gmailRuleRuns } from "../../core/db/schema.js";
+import { MAIL_TOPIC_LABELS, MailClassifier } from "../../core/judge/mail-classifier.js";
+import { gmailLabelChangesOf, isRuleCandidate, type Rule, RULE_MATCH_PROBABILITY } from "../../core/rules/rule.js";
 import { GmailClient } from "./gmail-client.js";
-import { type GmailRule, labelChangesOf, matchesRule } from "./gmail-rules.js";
+
+const KIND_LABELS: Record<string, string> = { newsletter: "メルマガ", notification: "お知らせ", personal: "人からのメール" };
 
 /**
- * 利用者が決めたルールを、条件に合うメールに当てる（ADR-0014）。ルールを決めたことを、その範囲の書き込みの承認とみなす。
- * 当てるのはルールを作ったあとに届いたメールだけで、同じメールに同じルールは一度しか当てない（失敗してもやり直さない）
+ * 利用者が決めたルールを、条件に当てはまるメールに当てる（ADR-0014）。ルールを決めたことを、その範囲の書き込みの承認とみなす。
+ * 条件は言葉で書かれているので、当てはまるかを Decisions で判定し、確率が高いときだけ当てる。判定するのはルールを作ったあとに
+ * 届いたメールだけで、同じメールを同じルールで判定するのは一度だけ（当てはまらなくても、失敗してもやり直さない）
  */
-export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, rules: ReadonlyArray<GmailRule>) {
-  const active = rules.filter((rule) => rule.enabled);
+export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, rules: ReadonlyArray<Rule>) {
+  const active = rules.filter((rule) => rule.enabled && rule.then.gmail !== undefined);
   if (active.length === 0) return 0;
   const db = yield* Database;
   const client = yield* GmailClient;
+  const classifier = yield* MailClassifier;
   const since = Math.min(...active.map((rule) => Date.parse(rule.createdAt)));
   const mails = yield* db
     .select()
@@ -41,28 +46,38 @@ export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, r
   let applied = 0;
   for (const rule of active) {
     for (const mail of mails) {
-      if (done.has(`${mail.messageId} ${rule.id}`) || !matchesRule(mail, rule)) continue;
+      if (done.has(`${mail.messageId} ${rule.id}`) || !isRuleCandidate(mail, rule)) continue;
+      const actions = rule.then.gmail!;
+      const judged = yield* classifier.matchesCondition({
+        input: [`差出人: ${mail.senderName} <${mail.senderKey}>`, `件名: ${mail.subject}`].join("\n"),
+        context: [`種類: ${KIND_LABELS[mail.kind] ?? mail.kind}`, ...(mail.topic === null ? [] : [`用件: ${MAIL_TOPIC_LABELS[mail.topic]}`])].join("\n"),
+        condition: rule.when,
+      });
+      const record = { accountId, messageId: mail.messageId, ruleId: rule.id, ruleName: rule.name, actions, probability: judged.probability ?? null };
+      done.add(`${mail.messageId} ${rule.id}`);
+      if (judged.probability === undefined || judged.probability < RULE_MATCH_PROBABILITY) {
+        yield* db.insert(gmailRuleRuns).values({ ...record, status: "skipped", executedAt: DateTime.formatIso(yield* DateTime.now) }).onConflictDoNothing().pipe(Effect.orDie);
+        continue;
+      }
       const outcome = yield* Effect.gen(function* () {
-        yield* ensureLabels(rule.then.labels ?? []);
-        const change = labelChangesOf(rule.then, labelIds);
+        yield* ensureLabels(actions.labels ?? []);
+        const change = gmailLabelChangesOf(actions, labelIds);
         yield* client.modifyLabels(mail.messageId, change);
         return change;
       }).pipe(Effect.result);
       const executedAt = DateTime.formatIso(yield* DateTime.now);
-      const record = { accountId, messageId: mail.messageId, ruleId: rule.id, ruleName: rule.name, actions: rule.then, executedAt };
       if (outcome._tag === "Failure") {
         const message = outcome.failure._tag === "GmailRequestError" ? outcome.failure.message : "Gmail に書き込めなかった";
-        yield* db.insert(gmailRuleRuns).values({ ...record, status: "failed", error: message }).onConflictDoNothing().pipe(Effect.orDie);
+        yield* db.insert(gmailRuleRuns).values({ ...record, status: "failed", error: message, executedAt }).onConflictDoNothing().pipe(Effect.orDie);
         yield* Effect.logWarning("Gmail のルールを当てられなかった").pipe(Effect.annotateLogs({ rule: rule.name, reason: message }));
         continue;
       }
-      yield* db.insert(gmailRuleRuns).values({ ...record, status: "executed" }).onConflictDoNothing().pipe(Effect.orDie);
+      yield* db.insert(gmailRuleRuns).values({ ...record, status: "executed", executedAt }).onConflictDoNothing().pipe(Effect.orDie);
       yield* db
         .update(gmailMessages)
-        .set({ ...(rule.then.markRead === true ? { unread: false } : {}), ...(rule.then.archive === true ? { inInbox: false } : {}), updatedAt: executedAt })
+        .set({ ...(actions.markRead === true ? { unread: false } : {}), ...(actions.archive === true ? { inInbox: false } : {}), updatedAt: executedAt })
         .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.messageId, mail.messageId)))
         .pipe(Effect.orDie);
-      done.add(`${mail.messageId} ${rule.id}`);
       applied++;
     }
   }

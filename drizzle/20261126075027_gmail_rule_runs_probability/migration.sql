@@ -1,0 +1,1 @@
+ALTER TABLE `gmail_rule_runs` ADD `probability` real;

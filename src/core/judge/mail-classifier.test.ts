@@ -103,4 +103,20 @@ describe("MailClassifier（Decisions API でメールを仕分ける）", () => 
         ).layer,
       ),
     ));
+
+  it.effect("利用者が言葉で書いた条件に当てはまるかを、確率で返す（条件は指示の側、メールは評価対象に入れる）", () => {
+    const model = fakeDecisionModel(() => Effect.succeed({ condition: { _tag: "Probability", probability: 0.93 } }));
+    return Effect.gen(function* () {
+      const answer = yield* (yield* MailClassifier).matchesCondition({ input: "件名: Your invoice", context: "Gmail のカテゴリ: 新着", condition: "請求書に関するメール" });
+      assert.deepStrictEqual(answer, { probability: 0.93 });
+      const call = model.calls[0]!;
+      assert.include(JSON.stringify(call.state), "Your invoice");
+      assert.include(JSON.stringify(call.decisions["condition"]?.instructions), "請求書に関するメール");
+    }).pipe(Effect.provide(model.layer));
+  });
+
+  it.effect("条件の判定が返らなければ、確率なし（当てない）", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* (yield* MailClassifier).matchesCondition({ input: "x", context: "", condition: "請求書" }), { probability: undefined });
+    }).pipe(Effect.provide(fakeDecisionModel(() => Effect.succeed({ condition: { _tag: "Refusal" } })).layer)));
 });

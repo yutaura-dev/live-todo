@@ -27,6 +27,8 @@ export class MailClassifier extends Context.Service<MailClassifier, {
   classify(request: { input: string; context: string }): Effect.Effect<MailClassification, JudgeRequestError>;
   /** 受け取った本人に、返信・確認・手続き・支払いなどの対応を求めているかと、メールの用件（同じ呼び出しで聞く） */
   needsAction(request: { input: string; context: string }): Effect.Effect<ActionJudgment, JudgeRequestError>;
+  /** 利用者が言葉で書いたルールの条件（「請求書に関するメール」など）に当てはまるか。答えが返らなければ probability なし */
+  matchesCondition(request: { input: string; context: string; condition: string }): Effect.Effect<{ probability: number | undefined }, JudgeRequestError>;
 }>()("live-todo/core/judge/MailClassifier") {}
 
 const MailInput = Schema.Struct({ mail: Schema.String });
@@ -113,6 +115,24 @@ export const DecisionModelMailClassifier = Layer.effect(
       return { probability: outcome.success.probability, method: "decisions", topic } satisfies ActionJudgment;
     });
 
-    return MailClassifier.of({ classify, needsAction });
+    const matchesCondition = Effect.fn("DecisionModelMailClassifier.matchesCondition")(function* (request: { input: string; context: string; condition: string }) {
+      // 条件を instructions に入れる理由: メールの中に書かれた文を、利用者の決めた条件と取り違えないようにするため
+      const definition = Decision.make({
+        input: MailInput,
+        decisions: {
+          condition: Decision.probability({
+            instructions: `このメールは、次の条件に当てはまるか。\n条件: ${request.condition}\n\n次は live-todo が書いた信頼できる情報です（評価対象 mail ではありません）:\n${request.context}`,
+            criteria: { true: "条件に当てはまる", false: "条件に当てはまらない" },
+          }),
+        },
+      });
+      const response = yield* model
+        .decideSettled(definition, { input: { mail: request.input } })
+        .pipe(Effect.mapError((error) => new JudgeRequestError({ message: `Decisions の呼び出しに失敗した（${error.reason._tag}）` })));
+      const outcome = response.outcomes.condition;
+      return { probability: Result.isFailure(outcome) ? undefined : outcome.success.probability };
+    });
+
+    return MailClassifier.of({ classify, needsAction, matchesCondition });
   }),
 );

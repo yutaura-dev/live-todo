@@ -166,7 +166,7 @@ const startSync = Effect.gen(function* () {
   ).flat();
   const gmailJobs = (
     yield* Effect.forEach(config.gmailAccounts, (account) =>
-      makeGmailJobs(account).pipe(
+      makeGmailJobs(account, config.rules).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
             syncProblem = `Gmail（${account.id}）の同期を始められない: ${errorMessage(error)}`;
