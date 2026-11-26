@@ -41,6 +41,19 @@ describe("isAllowedExternalUrl（Google Calendar）", () => {
   });
 });
 
+describe("isAllowedExternalUrl（Microsoft）", () => {
+  it.each(["https://microsoft.com/devicelogin", "https://login.microsoft.com/device", "https://outlook.office365.com/owa/?itemid=AAMk1", "https://outlook.office.com/calendar/item/x"])(
+    "サインインの画面と Outlook のページは開いてよい: %s",
+    (url) => {
+      assert.isTrue(isAllowedExternalUrl(url));
+    },
+  );
+
+  it.each(["https://microsoft.com/other", "http://outlook.office365.com/owa/", "https://outlook.office365.com.evil.example/"])("それ以外は開かない: %s", (url) => {
+    assert.isFalse(isAllowedExternalUrl(url));
+  });
+});
+
 describe("isAllowedExternalUrl（Notion）", () => {
   it.each(["https://www.notion.so/33333333333343338333333333333333?d=d1", "https://notion.so/abc", "https://app.notion.com/p/abc"])("Notion のページは開いてよい: %s", (url) => {
     assert.isTrue(isAllowedExternalUrl(url));

@@ -93,6 +93,43 @@ describe("decodeAppConfig", () => {
     }));
 });
 
+describe("Microsoft のアカウント", () => {
+  const microsoft = {
+    kind: "microsoft",
+    id: "corp",
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    clientId: "22222222-2222-4222-8222-222222222222",
+    llmProfile: "work",
+  };
+
+  it.effect("テナント ID・client ID・使う機能（既定はどれも使わない）で書ける。書かなければ空", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).microsoftAccounts, []);
+
+      const config = yield* decodeAppConfig({ ...validConfig, microsoftAccounts: [microsoft, { ...microsoft, id: "corp2", tenantId: "contoso.onmicrosoft.com", calendar: true }] });
+
+      assert.deepInclude(config.microsoftAccounts[0], { id: "corp", calendar: false });
+      assert.deepInclude(config.microsoftAccounts[1], { tenantId: "contoso.onmicrosoft.com", calendar: true });
+      assert.strictEqual(config.microsoftAccounts[0]?.resolvedLlmProfile.provider, "azure-openai");
+    }));
+
+  it.effect("会社のデータを扱うので、LLM Profile を書いていなければエラーにする（既定の LLM Profile に黙って流さない）", () =>
+    Effect.gen(function* () {
+      const { llmProfile: _omitted, ...withoutProfile } = microsoft;
+
+      const reason = yield* invalidReason({ ...validConfig, microsoftAccounts: [withoutProfile] });
+
+      assert.include(reason, "microsoftAccounts[0].llmProfile");
+    }));
+
+  it.effect("UUID でない client ID・テナントの形でないテナント ID・ほかと重なる id はエラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({ ...validConfig, microsoftAccounts: [{ ...microsoft, clientId: "x" }] });
+      yield* invalidReason({ ...validConfig, microsoftAccounts: [{ ...microsoft, tenantId: "evil/../x" }] });
+      assert.include(yield* invalidReason({ ...validConfig, microsoftAccounts: [{ ...microsoft, id: "work" }] }), "重複");
+    }));
+});
+
 describe("Google Calendar（Gmail のアカウントで見る）", () => {
   it.effect("Gmail のアカウントごとに、同じ Google アカウントの Calendar も見るかを書ける。既定は見ない", () =>
     Effect.gen(function* () {

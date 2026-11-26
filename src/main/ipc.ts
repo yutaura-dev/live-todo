@@ -63,9 +63,15 @@ export const decodeFilterPreviewRequest = Schema.decodeUnknownEffect(
 const isCalendarUrl = (parsed: URL) =>
   parsed.hostname === "calendar.google.com" || (parsed.hostname === "www.google.com" && parsed.pathname.startsWith("/calendar/"));
 
+const isMicrosoftUrl = (parsed: URL) =>
+  (parsed.hostname === "microsoft.com" && parsed.pathname === "/devicelogin") ||
+  (parsed.hostname === "login.microsoft.com" && parsed.pathname === "/device") ||
+  parsed.hostname === "outlook.office365.com" ||
+  parsed.hostname === "outlook.office.com";
+
 const NOTION_HOSTS = new Set(["notion.so", "www.notion.so", "app.notion.com", "www.notion.com"]);
 
-/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue、Slack、Gmail、Notion、Calendar）だけに絞る */
+/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue、Slack、Gmail、Notion、Calendar、Microsoft のサインインと Outlook）だけに絞る */
 export function isAllowedExternalUrl(url: string): boolean {
   if (!URL.canParse(url)) return false;
   const parsed = new URL(url);
@@ -73,6 +79,7 @@ export function isAllowedExternalUrl(url: string): boolean {
     parsed.protocol === "https:" &&
     (parsed.hostname === "github.com" || parsed.hostname === "mail.google.com" || /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(parsed.hostname) ||
       NOTION_HOSTS.has(parsed.hostname) ||
-      isCalendarUrl(parsed))
+      isCalendarUrl(parsed) ||
+      isMicrosoftUrl(parsed))
   );
 }

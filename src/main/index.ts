@@ -36,6 +36,8 @@ import { captureNotionSession } from "./notion-connect.js";
 import { withNotionSession } from "../app/notion-session.js";
 import { makeNotionJobs, notionTokenKey } from "../app/notion-jobs.js";
 import { makeCalendarJobs } from "../app/calendar-jobs.js";
+import { graphClientFor, makeMicrosoftJobs, microsoftAppOf, microsoftRefreshTokenKey } from "../app/microsoft-jobs.js";
+import { type DeviceCode, type MicrosoftApp, pollDeviceToken, requestDeviceCode } from "../sources/microsoft/microsoft-auth.js";
 import { NotionClient, NotionRequestError } from "../sources/notion/notion-client.js";
 import { NotionClientLive } from "../sources/notion/notion-client-live.js";
 import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js";
@@ -198,6 +200,20 @@ const startSync = Effect.gen(function* () {
       ),
     )
   ).flat();
+  // 終日の予定の日付は、この PC のタイムゾーンで読む（Graph のタイムゾーン名は Windows の名前で、IANA に直す表が要るため）
+  const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const microsoftJobs = (
+    yield* Effect.forEach(config.microsoftAccounts, (account) =>
+      makeMicrosoftJobs(account, { timeZone: localTimeZone }).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Microsoft（${account.id}）の同期を始められない: ${errorMessage(error)}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
   const calendarJobs = (
     yield* Effect.forEach(
       config.gmailAccounts.filter((account) => account.calendar),
@@ -333,8 +349,8 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...calendarJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(calendarJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...microsoftJobs, ...calendarJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(microsoftJobs), runJobs(calendarJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
     concurrency: 8,
     discard: true,
   });
@@ -392,6 +408,10 @@ const settingsSnapshot = Effect.gen(function* () {
     Option.map((loaded) => loaded.notionAccounts.map((account) => account.id)),
     Option.getOrElse((): string[] => []),
   );
+  const microsoftIds = loadedConfig.pipe(
+    Option.map((loaded) => loaded.microsoftAccounts.map((account) => account.id)),
+    Option.getOrElse((): string[] => []),
+  );
   const stored = new Set(yield* (yield* SecretVault).storedKeys);
   const store = yield* SecretStore;
   const secrets: Record<string, SecretStatus> = {};
@@ -399,6 +419,7 @@ const settingsSnapshot = Effect.gen(function* () {
     ...accountIds.map((id) => `github.${id}.token`),
     ...slackIds.flatMap((id) => [`slack.${id}.token`, `slack.${id}.cookie`]),
     ...notionIds.map(notionTokenKey),
+    ...microsoftIds.map(microsoftRefreshTokenKey),
     ...LLM_SECRET_KEYS,
   ]) {
     secrets[key] = stored.has(key) ? "saved" : Option.isSome(yield* store.get(key)) ? "env" : "missing";
@@ -894,6 +915,62 @@ function registerSlackSettings() {
   );
 }
 
+const pendingMicrosoftSignIns = new Map<string, { app: MicrosoftApp; code: DeviceCode }>();
+
+const microsoftAccountFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const account = config.microsoftAccounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) return yield* Effect.fail(new Error(`保存した設定に Microsoft のアカウント「${accountId}」がない。先に設定を保存してください`));
+    return account;
+  });
+
+function registerMicrosoftSettings() {
+  const AccountIdInput = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/));
+  // 外部への書き込みではない（自分のサインインを済ませるだけ）。コードとトークンはログに出さない
+  ipcMain.handle(IPC_CHANNELS.startMicrosoftSignIn, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const accountId = yield* Schema.decodeUnknownEffect(AccountIdInput)(input);
+        const app = microsoftAppOf(yield* microsoftAccountFor(accountId));
+        const code = yield* requestDeviceCode(app);
+        pendingMicrosoftSignIns.set(accountId, { app, code });
+        if (isAllowedExternalUrl(code.verificationUri)) void shell.openExternal(code.verificationUri);
+        return { userCode: code.userCode, verificationUri: code.verificationUri, expiresInSeconds: code.expiresInSeconds };
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.finishMicrosoftSignIn, (_event, input: unknown) =>
+    runtime
+      .runPromise(
+        Effect.gen(function* () {
+          const accountId = yield* Schema.decodeUnknownEffect(AccountIdInput)(input);
+          const pending = pendingMicrosoftSignIns.get(accountId);
+          if (pending === undefined) return { error: "サインインを始めていない" };
+          const tokens = yield* pollDeviceToken(pending.app, pending.code).pipe(Effect.ensuring(Effect.sync(() => pendingMicrosoftSignIns.delete(accountId))));
+          yield* (yield* SecretVault).set(microsoftRefreshTokenKey(accountId), tokens.refreshToken);
+          const me = (yield* (yield* graphClientFor(yield* microsoftAccountFor(accountId))).get("/me", { query: { $select: "displayName,mail" } })) as { displayName?: string; mail?: string };
+          return { user: me.displayName ?? me.mail ?? "" };
+        }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+      )
+      .then(async (result) => {
+        if (!("error" in result)) await restartSync();
+        return result;
+      }),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.testMicrosoft, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const accountId = yield* Schema.decodeUnknownEffect(AccountIdInput)(input);
+        const me = (yield* (yield* graphClientFor(yield* microsoftAccountFor(accountId))).get("/me", { query: { $select: "displayName,mail" } })) as { displayName?: string; mail?: string };
+        return { user: me.displayName ?? me.mail ?? "" };
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+}
+
 function registerNotionSettings() {
   // 外部への書き込みではない（自分のセッションを読み取るだけ）。読み取った値は暗号化して保存し、ログに出さない
   ipcMain.handle(IPC_CHANNELS.connectNotion, async (_event, input: unknown) => {
@@ -1253,6 +1330,7 @@ void app.whenReady().then(() => {
   registerTasksAndRecurring();
   registerSlackSettings();
   registerNotionSettings();
+  registerMicrosoftSettings();
   registerGmailActions();
   registerTaskQuestions();
   createWindow();

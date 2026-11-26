@@ -57,9 +57,9 @@ const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const pad = (value: number) => String(value).padStart(2, "0");
 
 // 終日の予定の日付は、カレンダーのタイムゾーンのその日の 0 時にする（UTC の 0 時にすると日本では 9 時間ずれる）
-function epochOf(time: typeof Time.Type | undefined, timeZone: string): Option.Option<number> {
-  if (time?.dateTime !== undefined) return Option.map(DateTime.make(time.dateTime), DateTime.toEpochMillis);
-  const match = time?.date === undefined ? null : DATE_PATTERN.exec(time.date);
+/** YYYY-MM-DD の日付の、タイムゾーンでの 0 時（Unix ミリ秒） */
+export function localMidnight(date: string, timeZone: string): Option.Option<number> {
+  const match = DATE_PATTERN.exec(date);
   if (match === null) return Option.none();
   return Option.map(
     DateTime.makeZoned({ year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) }, { timeZone, adjustForTimeZone: true }),
@@ -67,7 +67,13 @@ function epochOf(time: typeof Time.Type | undefined, timeZone: string): Option.O
   );
 }
 
-function labelOf(epochMs: number, allDay: boolean, timeZone: string): string {
+function epochOf(time: typeof Time.Type | undefined, timeZone: string): Option.Option<number> {
+  if (time?.dateTime !== undefined) return Option.map(DateTime.make(time.dateTime), DateTime.toEpochMillis);
+  return time?.date === undefined ? Option.none() : localMidnight(time.date, timeZone);
+}
+
+/** タイムゾーンでの「11/27 10:00」（終日なら「11/27」） */
+export function labelOf(epochMs: number, allDay: boolean, timeZone: string): string {
   const zoned = DateTime.makeZoned(epochMs, { timeZone });
   if (Option.isNone(zoned)) return "";
   const parts = DateTime.toParts(zoned.value);

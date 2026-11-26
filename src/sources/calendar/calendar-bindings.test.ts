@@ -56,6 +56,13 @@ const judgeWith = (answer: unknown) => {
 };
 
 describe("Calendar の Source", () => {
+  it.effect("Outlook の予定は、Source 名の頭を outlook にする（Google Calendar と分ける）", () =>
+    Effect.gen(function* () {
+      const bindings = yield* makeCalendarBindings({ accountId: "corp", events: [], sourcePrefix: "outlook" });
+
+      assert.deepStrictEqual([bindings.invites.source, bindings.prep.source, bindings.todos.source], ["outlook:corp:invites", "outlook:corp:prep", "outlook:corp:todos"]);
+    }));
+
   it.effect("Source はアカウントごとに、出欠・準備・自分の todo の 3 つに分ける", () =>
     Effect.gen(function* () {
       const { bindings } = yield* run([]);

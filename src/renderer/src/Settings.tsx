@@ -17,6 +17,7 @@ type Account = ConfigDocument["accounts"][number];
 type SlackAccountDraft = NonNullable<ConfigDocument["slackAccounts"]>[number];
 type GmailAccountDraft = NonNullable<ConfigDocument["gmailAccounts"]>[number];
 type NotionAccountDraft = NonNullable<ConfigDocument["notionAccounts"]>[number];
+type MicrosoftAccountDraft = NonNullable<ConfigDocument["microsoftAccounts"]>[number];
 
 const PREVIEW_DELAY_MS = 400;
 
@@ -44,6 +45,7 @@ function toDocument(config: unknown): ConfigDocument {
     // 画面で扱わない項目も落とさない（ここで落とすと、保存したときに設定ファイルから消える）
     gmailAccounts: Array.isArray(draft.gmailAccounts) ? draft.gmailAccounts : [],
     notionAccounts: Array.isArray(draft.notionAccounts) ? draft.notionAccounts : [],
+    microsoftAccounts: Array.isArray(draft.microsoftAccounts) ? draft.microsoftAccounts : [],
     rules: Array.isArray(draft.rules) ? draft.rules : [],
   };
 }
@@ -147,6 +149,40 @@ export function Settings() {
                 slackAccounts: [...(current.slackAccounts ?? []), { kind: "slack", id, workspace: "", userAgent: "" }],
               }))
             }
+          />
+        </section>
+
+        <section className="settings-section" aria-labelledby="microsoft-heading">
+          <h3 id="microsoft-heading" className="section-title">
+            Microsoft（Outlook・Teams）
+          </h3>
+          <p className="field-hint">
+            職場のアカウントに device code 認証でサインインします。Entra ID に登録したアプリの client ID とテナント ID が要ります（手順は docs/setup/microsoft.md）。職場のデータを扱うので、使う LLM Profile を選んでください
+          </p>
+          {(draft.microsoftAccounts ?? []).map((account, index) => (
+            <MicrosoftAccountEditor
+              key={account.id || index}
+              account={account}
+              profiles={Object.keys(draft.llmProfiles)}
+              secrets={snapshot.secrets}
+              onChange={(next) =>
+                setDraft((current) => ({ ...current, microsoftAccounts: (current.microsoftAccounts ?? []).map((entry, at) => (at === index ? next : entry)) }))
+              }
+              onRemove={() => setDraft((current) => ({ ...current, microsoftAccounts: (current.microsoftAccounts ?? []).filter((_, at) => at !== index) }))}
+              onSignedIn={reload}
+            />
+          ))}
+          <AddAccount
+            label="Microsoft のアカウントを追加"
+            placeholder="corp"
+            existing={[
+              ...draft.accounts.map((account) => account.id),
+              ...(draft.slackAccounts ?? []).map((account) => account.id),
+              ...(draft.gmailAccounts ?? []).map((account) => account.id),
+              ...(draft.notionAccounts ?? []).map((account) => account.id),
+              ...(draft.microsoftAccounts ?? []).map((account) => account.id),
+            ]}
+            onAdd={(id) => setDraft((current) => ({ ...current, microsoftAccounts: [...(current.microsoftAccounts ?? []), { kind: "microsoft", id, tenantId: "", clientId: "" }] }))}
           />
         </section>
 
@@ -565,6 +601,101 @@ function SlackAccountEditor(props: {
         </label>
         <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
           このワークスペースを外す
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function MicrosoftAccountEditor(props: {
+  account: MicrosoftAccountDraft;
+  profiles: string[];
+  secrets: Record<string, SecretStatus>;
+  onChange: (next: MicrosoftAccountDraft) => void;
+  onRemove: () => void;
+  onSignedIn: () => Promise<unknown>;
+}) {
+  const { account } = props;
+  const [open, setOpen] = useState(account.clientId === "");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [code, setCode] = useState<{ userCode: string; verificationUri: string } | null>(null);
+  const tokenStatus = props.secrets[`microsoft.${account.id}.refresh_token`] ?? "missing";
+  const signIn = async () => {
+    setBusy(true);
+    setMessage(null);
+    const started = await api.startMicrosoftSignIn(account.id);
+    if ("error" in started) {
+      setBusy(false);
+      setMessage(`サインインを始められませんでした: ${started.error}`);
+      return;
+    }
+    setCode(started);
+    const finished = await api.finishMicrosoftSignIn(account.id);
+    setBusy(false);
+    setCode(null);
+    if ("error" in finished) {
+      setMessage(`サインインできませんでした: ${finished.error}`);
+      return;
+    }
+    await props.onSignedIn();
+    setMessage(`${finished.user} としてサインインしました`);
+  };
+  const test = async () => {
+    setMessage("確かめています");
+    const result = await api.testMicrosoft(account.id);
+    setMessage("error" in result ? `つながりません: ${result.error}` : `${result.user} としてつながりました`);
+  };
+
+  return (
+    <details className="account" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="account-header">
+        <h4 className="account-name">{account.id}</h4>
+        <span className="field-hint">サインイン: {tokenStatus === "missing" ? "まだ" : "済み"}</span>
+      </summary>
+      <div className="account-body">
+        <label className="field">
+          <span className="field-label">テナント ID</span>
+          <span className="field-hint">Entra ID の「概要」にあるディレクトリ（テナント）ID か、contoso.onmicrosoft.com の形のドメイン</span>
+          <input value={account.tenantId} onChange={(event) => props.onChange({ ...account, tenantId: event.target.value.trim() })} />
+        </label>
+        <label className="field">
+          <span className="field-label">アプリケーション（クライアント）ID</span>
+          <input value={account.clientId} onChange={(event) => props.onChange({ ...account, clientId: event.target.value.trim() })} />
+        </label>
+        <label className="field">
+          <span className="field-label">LLM Profile</span>
+          <span className="field-hint">職場のデータを送ってよい LLM Profile を選んでください</span>
+          <select value={account.llmProfile ?? ""} onChange={(event) => props.onChange({ ...account, llmProfile: event.target.value === "" ? undefined : event.target.value } as MicrosoftAccountDraft)}>
+            <option value="">選んでください</option>
+            {props.profiles.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={account.calendar === true} onChange={(event) => props.onChange({ ...account, calendar: event.target.checked })} />
+          Outlook の予定を見る（出欠が未回答の招待・準備が要る予定・自分で入れた todo の予定を Task にします。準備が要るかの判定で、予定の名前と説明がこの LLM Profile に送られます）
+        </label>
+        <div className="request-review">
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void signIn()}>
+            サインインする
+          </button>
+          <span className="field-hint">
+            {code !== null
+              ? `開いたブラウザ（${code.verificationUri}）で、コード ${code.userCode} を入れてサインインしてください`
+              : (message ?? "設定を保存してから押してください。見る機能を変えたら、サインインし直してください")}
+          </span>
+        </div>
+        <div className="request-review">
+          <button type="button" className="quiet-button" onClick={() => void test()}>
+            接続を確かめる
+          </button>
+        </div>
+        <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
+          このアカウントを外す
         </button>
       </div>
     </details>

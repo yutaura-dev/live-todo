@@ -28,7 +28,8 @@ const RESPONSE_LABELS = { needsAction: "未回答", accepted: "出席", declined
 const PREP_QUESTION = "信頼できる情報にある予定の前に、ユーザー本人が資料の用意・事前の確認・下調べなどの準備をする必要があるか？";
 const TODO_QUESTION = "この終日の予定は、ユーザー本人がその日にやる作業か？（休暇・記念日・場所や状態を示すだけの予定ではないか）";
 
-export const calendarSourceName = (accountId: string, kind: "invites" | "prep" | "todos") => `calendar:${accountId}:${kind}`;
+export type CalendarSourcePrefix = "calendar" | "outlook";
+export const calendarSourceName = (accountId: string, kind: "invites" | "prep" | "todos", prefix: CalendarSourcePrefix = "calendar") => `${prefix}:${accountId}:${kind}`;
 
 const fingerprintOf = (item: CalendarItem) => JSON.stringify([item.resolved, item.title]);
 
@@ -125,7 +126,13 @@ const bindingOf = <EJ, RJ>(
   }) satisfies SourceBinding<CalendarItem, CalendarCursor, never, EJ, RJ>;
 
 /** 同期ごとに取った予定の一覧から、出欠・準備・自分の todo の 3 つの Source を作る（ADR-0016） */
-export const makeCalendarBindings = Effect.fnUntraced(function* (options: { accountId: string; events: ReadonlyArray<CalendarEvent>; thresholds?: TodoJudgeThresholds }) {
+export const makeCalendarBindings = Effect.fnUntraced(function* (options: {
+  accountId: string;
+  events: ReadonlyArray<CalendarEvent>;
+  thresholds?: TodoJudgeThresholds;
+  sourcePrefix?: CalendarSourcePrefix;
+}) {
+  const prefix = options.sourcePrefix ?? "calendar";
   const thresholds = options.thresholds ?? DEFAULT_TODO_THRESHOLDS;
   const prepJudge = yield* makeTodoJudge<CalendarItem>({ rules: [], describe: (item) => describeEvent(item.event), question: PREP_QUESTION, thresholds }).pipe(Effect.orDie);
   const todoJudge = yield* makeTodoJudge<CalendarItem>({
@@ -137,15 +144,15 @@ export const makeCalendarBindings = Effect.fnUntraced(function* (options: { acco
 
   return {
     invites: bindingOf(
-      calendarSourceName(options.accountId, "invites"),
+      calendarSourceName(options.accountId, "invites", prefix),
       adapterFor(options.events, isInvite, (event) => `出欠を返す: ${event.summary}（${event.startLabel}）`),
       () => Effect.succeed(INVITE_JUDGMENT),
     ),
     prep: bindingOf(
-      calendarSourceName(options.accountId, "prep"),
+      calendarSourceName(options.accountId, "prep", prefix),
       adapterFor(options.events, isPrep, (event) => `準備: ${event.summary}（${event.startLabel}）`),
       prepJudge,
     ),
-    todos: bindingOf(calendarSourceName(options.accountId, "todos"), adapterFor(options.events, isTodo, (event) => `${event.summary}（${event.startLabel}）`), todoJudge),
+    todos: bindingOf(calendarSourceName(options.accountId, "todos", prefix), adapterFor(options.events, isTodo, (event) => `${event.summary}（${event.startLabel}）`), todoJudge),
   };
 });

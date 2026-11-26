@@ -60,6 +60,15 @@ export type ConfigDocument = {
     /** 同じ Google アカウントの Calendar も見る（ADR-0016） */
     calendar?: boolean;
   }>;
+  /** Microsoft の職場のアカウント（ADR-0017）。リフレッシュトークンは秘密情報として別に保存する */
+  microsoftAccounts?: Array<{
+    kind: "microsoft";
+    id: string;
+    tenantId: string;
+    clientId: string;
+    llmProfile?: string;
+    calendar?: boolean;
+  }>;
   /** Notion のアカウント（ADR-0015）。token_v2 は秘密情報として別に保存する */
   notionAccounts?: Array<{
     kind: "notion";
@@ -219,6 +228,11 @@ export interface LiveTodoApi {
   testNotion(accountId: string): Promise<{ user: string; spaces: string[] } | { error: string }>;
   /** Notion のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する */
   connectNotion(accountId: string): Promise<{ user: string } | { error: string }>;
+  /** device code 認証を始める。サインインの画面を外部のブラウザで開き、打ち込むコードを返す（保存済みの設定のアカウントだけ） */
+  startMicrosoftSignIn(accountId: string): Promise<{ userCode: string; verificationUri: string; expiresInSeconds: number } | { error: string }>;
+  /** サインインが済むまで待ち、済んだらリフレッシュトークンを保存して同期をやり直す */
+  finishMicrosoftSignIn(accountId: string): Promise<{ user: string } | { error: string }>;
+  testMicrosoft(accountId: string): Promise<{ user: string } | { error: string }>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;
