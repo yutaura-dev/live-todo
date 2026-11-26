@@ -89,6 +89,20 @@ export function doneHistory(plan: NextActionPlan): ActionStep[] {
     });
 }
 
+/** 定期の Task のひな形にする。済んだ印・選んだ分かれ道・待つ条件（その回だけのもの）を外す */
+export function templateOf(plan: NextActionPlan): NextActionPlan {
+  const fresh = (steps: ReadonlyArray<Step>): Step[] =>
+    steps.map((step): Step => {
+      if (step.kind === "decision") {
+        const { chosen: _chosen, ...rest } = step;
+        return { ...rest, status: "todo", options: step.options.map((option) => ({ ...option, steps: fresh(option.steps) })) };
+      }
+      const { until: _until, ...rest } = step;
+      return { ...rest, status: "todo" };
+    });
+  return { steps: fresh(plan.steps) };
+}
+
 export const completeStep = (plan: NextActionPlan, id: string): NextActionPlan => ({
   steps: mapSteps(plan.steps, (step) => (step.id === id ? { ...step, status: "done" } : step)),
 });

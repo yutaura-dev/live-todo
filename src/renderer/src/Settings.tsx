@@ -8,6 +8,7 @@ import type {
   SettingsSnapshot,
 } from "../../shared/api.js";
 import { api } from "./api.js";
+import { RecurringSettings } from "./Recurring.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
@@ -140,6 +141,8 @@ export function Settings() {
             }
           />
         </section>
+
+        <RecurringSettings />
 
         <section className="settings-section" aria-labelledby="judge-heading">
           <h3 id="judge-heading" className="section-title">

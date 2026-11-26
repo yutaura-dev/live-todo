@@ -27,6 +27,7 @@
 | Sync | ポーリングで Source の状態変化を取得し、Task に反映する処理 |
 | Agent Thread | Task ごとの AI Agent との会話履歴 |
 | Pre-work | AI がユーザーの依頼を待たずに先回りして進める作業 |
+| 定期の Task | 決まった時期（毎月 N 日など）に、決まった手順つきで作られる Task。決まりは `recurring_tasks` に持つ（[ADR-0011](docs/decisions/0011-recurring-tasks.md)） |
 | Approval | 外部への書き込み（返信、コメント、送信など）をユーザーが承認する手続き |
 | LLM Profile | 使う LLM プロバイダ・モデル・認証情報の組み合わせ。当面は PC 単位で 1 つ |
 | Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる |

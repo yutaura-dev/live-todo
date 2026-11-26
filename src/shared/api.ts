@@ -77,6 +77,10 @@ export type ConflictResolutionView = {
   commitSha: string;
 };
 
+export type RecurrenceScheduleView = { kind: "monthly"; day: number; leadDays: number };
+/** 定期の Task の決まり */
+export type RecurringTaskView = { id: number; title: string; note: string; schedule: RecurrenceScheduleView; active: boolean; lastPeriod: string | null };
+
 export type Outcome = { ok: true; detail?: string } | { ok: false; message: string };
 
 export type FilterPreviewRequest = {
@@ -110,6 +114,14 @@ export interface LiveTodoApi {
   conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;
   /** 直した内容を PR のブランチに push する。外部への書き込み。差分を確かめて承認したあとにだけ呼ぶ */
   pushConflictResolution(taskId: number, commitSha: string): Promise<Outcome>;
+  /** Task を手で追加する */
+  addTask(input: { title: string; brief?: string }): Promise<Outcome>;
+  recurringList(): Promise<RecurringTaskView[]>;
+  /** 定期の Task の決まりを登録する。includeCurrent なら、時期を過ぎた今月の分もすぐに作る */
+  recurringCreate(input: { title: string; note: string; schedule: RecurrenceScheduleView; includeCurrent: boolean }): Promise<Outcome>;
+  /** Task をもとに定期の Task を作る（タイトルと次にやることをひな形にする） */
+  recurringFromTask(input: { taskId: number; note: string; schedule: RecurrenceScheduleView; includeCurrent: boolean }): Promise<Outcome>;
+  recurringUpdate(input: { id: number; title?: string; note?: string; schedule?: RecurrenceScheduleView; active?: boolean }): Promise<Outcome>;
   /** Slack の To-do を完了にする・To-do から外す。外部への書き込み。確認で承認したあとにだけ呼ぶ */
   slackAction(taskId: number, action: "complete" | "remove"): Promise<Outcome>;
   /** Slack のセッションでつながるかを確かめる（auth.test）。誰のどのワークスペースか */

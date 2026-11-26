@@ -133,6 +133,7 @@ export function App() {
         <p className="sync-note">
           {isMock ? "見本のデータを表示しています" : loadedAt ? `${timeOf(loadedAt)} に読み込み` : "読み込んでいます"}
         </p>
+        {view === "board" && <AddTask onAdded={load} />}
         {view === "board" && (
           <button type="button" className="quiet-button" onClick={() => void load()}>
             再読み込み
@@ -414,4 +415,50 @@ function Judgment({ judgment }: { judgment: NonNullable<BoardCard["judgment"]> }
   }
   if (judgment.reason !== undefined) return <blockquote className="judgment-reason">{judgment.reason}</blockquote>;
   return null;
+}
+
+/** Task を手で追加する（元の項目のない Task。Todo に入る） */
+function AddTask({ onAdded }: { onAdded: () => Promise<unknown> }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [brief, setBrief] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  if (!open) {
+    return (
+      <button type="button" className="primary-button" onClick={() => setOpen(true)}>
+        Task を追加
+      </button>
+    );
+  }
+  const submit = async () => {
+    const outcome = await api.addTask(brief.trim() === "" ? { title } : { title, brief });
+    if (!outcome.ok) {
+      setProblem(outcome.message);
+      return;
+    }
+    setTitle("");
+    setBrief("");
+    setProblem(null);
+    setOpen(false);
+    await onAdded();
+  };
+  return (
+    <form
+      className="add-task"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="何をするか（例: 年末調整の書類を出す）" aria-label="タイトル" />
+      <input value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="メモ（なくてもよい）" aria-label="メモ" />
+      <button type="submit" className="primary-button" disabled={title.trim() === ""}>
+        追加する
+      </button>
+      <button type="button" className="quiet-button" onClick={() => setOpen(false)}>
+        やめる
+      </button>
+      {problem && <span className="problem">{problem}</span>}
+    </form>
+  );
 }

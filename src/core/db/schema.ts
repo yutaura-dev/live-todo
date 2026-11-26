@@ -37,6 +37,22 @@ export const activities = sqliteTable(
   (table) => [index("activities_source_item_id").on(table.sourceItemId)],
 );
 
+/** 定期の Task の決まり。時期が来たら Task を作る（src/core/task/recurrence.ts） */
+export const recurringTasks = sqliteTable("recurring_tasks", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  title: text().notNull(),
+  /** 作る Task の状況（brief）に載せるメモ（その月だけの注意など） */
+  note: text().notNull().default(""),
+  /** 作る Task に持たせる次にやることのひな形 */
+  nextActions: text("next_actions", { mode: "json" }),
+  schedule: text({ mode: "json" }).notNull(),
+  /** 最後に Task を作った月（"YYYY-MM"）。同じ月の分を二度作らない。Task を消しても作り直さない */
+  lastPeriod: text("last_period"),
+  active: integer({ mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const tasks = sqliteTable("tasks", {
   id: integer().primaryKey({ autoIncrement: true }),
   title: text().notNull(),
@@ -44,6 +60,9 @@ export const tasks = sqliteTable("tasks", {
   /** 次にやること（手順の並び。src/core/task/next-actions.ts） */
   nextActions: text("next_actions", { mode: "json" }),
   status: text({ enum: TASK_STATUSES }).notNull(),
+  /** 定期の Task から作ったなら、その決まりと何月分か */
+  recurringTaskId: integer("recurring_task_id").references(() => recurringTasks.id),
+  recurrencePeriod: text("recurrence_period"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

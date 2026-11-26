@@ -116,6 +116,8 @@ const effortRank = (card: { effort?: Effort }) => (card.effort === undefined ? E
 const byAttention = (a: TaskWithUnread, b: TaskWithUnread) =>
   Number(b.unreadChanges > 0) - Number(a.unreadChanges > 0) || b.updatedAt.localeCompare(a.updatedAt);
 
+export class InvalidTaskInputError extends Schema.TaggedError<InvalidTaskInputError>()("InvalidTaskInputError", { message: Schema.String }) {}
+
 export class BoardService extends Context.Service<BoardService, {
   readonly board: Effect.Effect<Board>;
   /** ユーザーがカードを動かした。ユーザーの操作として記録し、判定の正解として集められるようにする */
@@ -128,6 +130,8 @@ export class BoardService extends Context.Service<BoardService, {
   chooseOption(taskId: number, stepId: string, optionKey: string): Effect.Effect<void, TaskNotFoundError>;
   /** 済んだにした手順・選んだ分かれ道を戻す（押し間違えたとき） */
   reopenStep(taskId: number, stepId: string): Effect.Effect<void, TaskNotFoundError>;
+  /** Task を手で追加する（元の項目のない Task）。作った Task の id */
+  addTask(input: { title: string; brief?: string }): Effect.Effect<number, InvalidTaskInputError>;
 }>()("live-todo/core/board/BoardService") {
   static readonly layer = Layer.effect(
     BoardService,
@@ -323,6 +327,16 @@ export class BoardService extends Context.Service<BoardService, {
         completeStep: (taskId, stepId) => updatePlan(taskId, (plan) => completeStep(plan, stepId)),
         chooseOption: (taskId, stepId, optionKey) => updatePlan(taskId, (plan) => chooseOption(plan, stepId, optionKey)),
         reopenStep: (taskId, stepId) => updatePlan(taskId, (plan) => reopenStep(plan, stepId)),
+        addTask: (input) =>
+          Effect.gen(function* () {
+            const title = input.title.trim();
+            if (title === "") return yield* new InvalidTaskInputError({ message: "タイトルが空" });
+            const task = yield* tasks.createTask({ title, status: "todo" });
+            const brief = input.brief?.trim() ?? "";
+            if (brief !== "") yield* tasks.updateTask(task.id, { brief }, "user");
+            yield* tasks.recordChange(task.id, { kind: "created", after: { manual: true }, unread: false, actor: "user" });
+            return task.id;
+          }),
       });
     }),
   );

@@ -1176,6 +1176,26 @@ button:disabled {
   border-radius: 4px;
 }
 
+.recurrence-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-field input {
+  inline-size: 4.5rem;
+}
+
+.add-task {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.add-task input {
+  min-inline-size: 14rem;
+}
+
 .effort--wait {
   background: var(--card-edge);
   color: var(--muted);

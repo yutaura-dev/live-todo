@@ -107,6 +107,7 @@ export function TaskDrawer(props: {
 
             <NextAction detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />
             <SlackActions detail={detail} onDone={props.onChanged} />
+            <MakeRecurring detail={detail} onCreated={props.onChanged} />
             {detail.agentRun && <AgentRunSection run={detail.agentRun} problem={detail.agentRunProblem} taskId={detail.id} onRequested={props.onChanged} />}
 
             <section className="drawer-section" aria-labelledby="drawer-items">
@@ -233,6 +234,90 @@ function NextAction({ detail, onMerged, onStarted }: { detail: TaskDetail; onMer
       <StepList steps={plan.steps} current={current} detail={detail} onChanged={onMerged} onStarted={onStarted} />
       {detail.agentRun?.kind !== "dependency_review" && <ReplanButton taskId={detail.id} onStarted={onStarted} />}
     </section>
+  );
+}
+
+/** この Task をもとに定期の Task を作る（タイトルと次にやることをひな形にする）。将来、AI の提案もこの形で出す */
+export function MakeRecurring({ detail, onCreated }: { detail: TaskDetail; onCreated: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [day, setDay] = useState(1);
+  const [leadDays, setLeadDays] = useState(0);
+  const [note, setNote] = useState("");
+  const [includeCurrent, setIncludeCurrent] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  if (!open) {
+    return (
+      <div className="request-review">
+        <button type="button" className="quiet-button" onClick={() => setOpen(true)}>
+          定期の Task にする
+        </button>
+        {message && <span className="field-hint">{message}</span>}
+      </div>
+    );
+  }
+  const submit = async () => {
+    const outcome = await api.recurringFromTask({ taskId: detail.id, note, schedule: { kind: "monthly", day, leadDays }, includeCurrent });
+    if (outcome.ok) {
+      setOpen(false);
+      setMessage(`毎月 ${day} 日${leadDays > 0 ? `（${leadDays} 日前から）` : ""}に作ります。設定画面の「定期の Task」で変えられます`);
+      await onCreated();
+    } else setMessage(`作れませんでした: ${outcome.message}`);
+  };
+  return (
+    <div className="merge-confirm">
+      <p className="merge-confirm-title">この Task を毎月作る</p>
+      <RecurrenceFields day={day} leadDays={leadDays} note={note} includeCurrent={includeCurrent} onDay={setDay} onLeadDays={setLeadDays} onNote={setNote} onIncludeCurrent={setIncludeCurrent} />
+      <div className="merge-confirm-actions">
+        <button type="button" className="primary-button" onClick={() => void submit()}>
+          定期の Task にする
+        </button>
+        <button type="button" className="quiet-button" onClick={() => setOpen(false)}>
+          やめる
+        </button>
+      </div>
+      {message && <p className="problem">{message}</p>}
+    </div>
+  );
+}
+
+/** 毎月何日に作るか・何日前から出すか・メモ（設定画面と共通） */
+export function RecurrenceFields(props: {
+  day: number;
+  leadDays: number;
+  note: string;
+  includeCurrent?: boolean;
+  onDay: (day: number) => void;
+  onLeadDays: (days: number) => void;
+  onNote: (note: string) => void;
+  onIncludeCurrent?: (value: boolean) => void;
+}) {
+  return (
+    <div className="recurrence-fields">
+      <label className="field">
+        <span className="field-label">毎月</span>
+        <span className="inline-field">
+          <input type="number" min={1} max={31} value={props.day} onChange={(event) => props.onDay(Number(event.target.value))} /> 日に作る
+        </span>
+        <span className="field-hint">その月にない日（31 日など）は月末に作ります</span>
+      </label>
+      <label className="field">
+        <span className="field-label">前もって出す</span>
+        <span className="inline-field">
+          <input type="number" min={0} max={27} value={props.leadDays} onChange={(event) => props.onLeadDays(Number(event.target.value))} /> 日前から
+        </span>
+      </label>
+      <label className="field">
+        <span className="field-label">メモ</span>
+        <span className="field-hint">作る Task の状況に載せます（例: 11月分から金額を倍にする）</span>
+        <textarea rows={2} value={props.note} onChange={(event) => props.onNote(event.target.value)} />
+      </label>
+      {props.onIncludeCurrent && (
+        <label className="checkbox">
+          <input type="checkbox" checked={props.includeCurrent ?? false} onChange={(event) => props.onIncludeCurrent?.(event.target.checked)} />
+          <span>今月の分も、時期を過ぎていればすぐに作る</span>
+        </label>
+      )}
+    </div>
   );
 }
 

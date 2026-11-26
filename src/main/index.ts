@@ -12,6 +12,15 @@ import { withSlackSession } from "../app/slack-session.js";
 import { captureSlackSession } from "./slack-connect.js";
 import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js";
 import { slackWrite } from "../app/slack-write.js";
+import {
+  createRecurringFromTask,
+  createRecurringTask,
+  listRecurringTasks,
+  localToday,
+  runRecurringTasks,
+  updateRecurringActive,
+  updateRecurringTask,
+} from "../app/recurring-tasks.js";
 import { SlackClientLive } from "../sources/slack/slack-client-live.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { finishMerge, mergePlan, startMerge } from "../app/merge-approval.js";
@@ -199,8 +208,15 @@ const startSync = Effect.gen(function* () {
     run: applyConflictPlans,
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...agentJobs, conflictPlanJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(agentJobs), runJobs([conflictPlanJob])], { concurrency: 4, discard: true });
+  // 日付が変わったら作るものなので、1 時間おきで足りる
+  const recurringJob: SyncJob<never, Database | TaskRepository> = {
+    name: "app:recurring",
+    interval: "1 hour",
+    run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
+    backoffUntil: () => Option.none<DateTime.Utc>(),
+  };
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...agentJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob])], { concurrency: 4, discard: true });
 }).pipe(
   // 設定やトークンがなくても画面は開けるようにする（同期だけが止まり、設定画面に理由を出す）
   Effect.catchCause((cause) =>
@@ -477,6 +493,76 @@ function registerSlackSettings() {
   );
 }
 
+const ScheduleInput = Schema.Struct({
+  kind: Schema.Literal("monthly"),
+  day: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 31 })),
+  leadDays: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 27 })),
+});
+const TextInput = Schema.String.check(Schema.isMaxLength(2000));
+
+function registerTasksAndRecurring() {
+  ipcMain.handle(IPC_CHANNELS.addTask, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(Schema.Struct({ title: TextInput, brief: Schema.optional(TextInput) }))(input);
+        yield* (yield* BoardService).addTask(request.brief === undefined ? { title: request.title } : { title: request.title, brief: request.brief });
+      }),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.recurringList, () =>
+    runtime.runPromise(
+      listRecurringTasks.pipe(
+        Effect.map((rules) =>
+          rules.map((rule) => ({ id: rule.id, title: rule.title, note: rule.note, schedule: rule.schedule, active: rule.active, lastPeriod: rule.lastPeriod })),
+        ),
+      ),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.recurringCreate, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ title: TextInput, note: TextInput, schedule: ScheduleInput, includeCurrent: Schema.Boolean }),
+        )(input);
+        yield* createRecurringTask(request, yield* localToday);
+        yield* runRecurringTasks(yield* localToday);
+      }),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.recurringFromTask, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), note: TextInput, schedule: ScheduleInput, includeCurrent: Schema.Boolean }),
+        )(input);
+        yield* createRecurringFromTask(request.taskId, request, yield* localToday);
+        yield* runRecurringTasks(yield* localToday);
+      }),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.recurringUpdate, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            id: Schema.Int.check(Schema.isGreaterThan(0)),
+            title: Schema.optional(TextInput),
+            note: Schema.optional(TextInput),
+            schedule: Schema.optional(ScheduleInput),
+            active: Schema.optional(Schema.Boolean),
+          }),
+        )(input);
+        if (request.active !== undefined) yield* updateRecurringActive(request.id, request.active);
+        yield* updateRecurringTask(request.id, {
+          ...(request.title === undefined ? {} : { title: request.title }),
+          ...(request.note === undefined ? {} : { note: request.note }),
+          ...(request.schedule === undefined ? {} : { schedule: request.schedule }),
+        });
+      }),
+    ),
+  );
+}
+
 function registerReplan() {
   ipcMain.handle(IPC_CHANNELS.replanNextActions, (_event, input: unknown) =>
     outcomeOf(
@@ -656,6 +742,7 @@ void app.whenReady().then(() => {
   registerMerge();
   registerConflictResolution();
   registerReplan();
+  registerTasksAndRecurring();
   registerSlackSettings();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();

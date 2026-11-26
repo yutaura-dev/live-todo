@@ -207,6 +207,29 @@ describe("BoardService.taskDetail", () => {
       }),
     ));
 
+  it.effect("Task を手で追加できる（元の項目のない Task。Todo に入り、自分で作ったと記録する）", () =>
+    run(
+      Effect.gen(function* () {
+        const service = yield* BoardService;
+
+        const id = yield* service.addTask({ title: "  年末調整の書類を出す  ", brief: "会社から届いた書類" });
+
+        const detail = yield* service.taskDetail(id);
+        assert.deepInclude(detail, { title: "年末調整の書類を出す", brief: "会社から届いた書類", status: "todo" });
+        assert.lengthOf(detail.items, 0);
+        assert.deepInclude(detail.changes[0], { kind: "created", actor: "user", unread: false });
+      }),
+    ));
+
+  it.effect("タイトルが空なら追加しない", () =>
+    run(
+      Effect.gen(function* () {
+        const error = yield* (yield* BoardService).addTask({ title: "   " }).pipe(Effect.flip);
+
+        assert.include(error.message, "タイトル");
+      }),
+    ));
+
   it.effect("存在しない Task なら TaskNotFoundError にする", () =>
     run(
       Effect.gen(function* () {
