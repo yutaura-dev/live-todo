@@ -75,6 +75,7 @@ const ACTION_CRITERIA = {
 // これより確率が低いときは、メルマガやお知らせと決めつけず、人からのメールとして扱う（見落とさないため）
 const MIN_PROBABILITY = 0.6;
 const FALLBACK: MailClassification = { kind: "personal", probability: undefined, method: "fallback" };
+const MAX_PERSONAL_FOR_BULK = 0.25;
 
 export const DecisionModelMailClassifier = Layer.effect(
   MailClassifier,
@@ -100,6 +101,13 @@ export const DecisionModelMailClassifier = Layer.effect(
       if (Result.isFailure(outcome)) return FALLBACK;
       const entries = Object.entries(outcome.success.probabilities) as Array<[MailKind, number]>;
       const [kind, probability] = entries.reduce((best, entry) => (entry[1] > best[1] ? entry : best));
+      // お知らせかメルマガかで確率が割れると、どちらも 0.6 に届かずに人からのメールに倒れていた（mail:eval で、人からと仕分けた
+      // 9 件がすべてこれ）。人からのメールの確率が十分低ければ、人からではないとして高いほうに仕分ける
+      const personal = outcome.success.probabilities.personal ?? 1;
+      if (probability < MIN_PROBABILITY && personal <= MAX_PERSONAL_FOR_BULK) {
+        const [bulkKind, bulkProbability] = entries.filter(([label]) => label !== "personal").reduce((best, entry) => (entry[1] > best[1] ? entry : best));
+        return { kind: bulkKind, probability: bulkProbability, method: "decisions" } satisfies MailClassification;
+      }
       if (probability < MIN_PROBABILITY) return FALLBACK;
       return { kind, probability, method: "decisions" } satisfies MailClassification;
     });

@@ -17,6 +17,7 @@ node_modules/
 /live-todo-*.db*
 /judge-dataset*.json
 /mail-eval-dataset*.json
+/mail-eval-personal.json
 /mail-eval-results-*.json
 /plan-eval-results-*.json
 /.mail-eval-work/

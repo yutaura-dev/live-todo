@@ -37,6 +37,11 @@ describe("MailClassifier（Decisions API でメールを仕分ける）", () => 
       });
     }).pipe(Effect.provide(answering({ _tag: "Classify", label: "newsletter", probabilities: { personal: 0.05, notification: 0.05, newsletter: 0.9 } }).layer)));
 
+  it.effect("お知らせかメルマガかで確率が割れても、人からのメールの確率が低ければ（0.25 以下）、高いほうに仕分ける", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* classify({ input: "x", context: "" }), { kind: "notification", probability: 0.5, method: "decisions" });
+    }).pipe(Effect.provide(answering({ _tag: "Classify", label: "notification", probabilities: { personal: 0.1, notification: 0.5, newsletter: 0.4 } }).layer)));
+
   it.effect("確率が低い（0.6 未満）ときは、隠さない側（人からのメール）に倒す", () =>
     Effect.gen(function* () {
       assert.deepInclude(yield* classify({ input: "x", context: "" }), { kind: "personal", method: "fallback" });

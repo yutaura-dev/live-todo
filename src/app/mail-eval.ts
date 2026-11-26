@@ -245,6 +245,46 @@ const AppLayer = Layer.mergeAll(
   ),
 ).pipe(Layer.provideMerge(Layer.mergeAll(FetchHttpClient.layer, NodeServices.layer)));
 
+/**
+ * 人・お知らせ・メルマガの仕分けだけを測る（Decisions だけなので安い）。人からのメールと仕分けると、対応が要るかの判定を飛ばして
+ * Claude Code に読ませるので、人からではないメールを人からと仕分けた数を見る。正解は personal（人から / 人からでない / どちらでも）
+ */
+const PersonalExpectation = Schema.Literals(["yes", "no", "either"]);
+const classifyOnly = (label: string) =>
+  Effect.gen(function* () {
+    const account = yield* accountOf;
+    const classifier = yield* makeMailClassifier(account.resolvedLlmProfile);
+    const fs = yield* FileSystem.FileSystem;
+    const expectations = Schema.decodeUnknownSync(Schema.Record(Schema.String, PersonalExpectation))(
+      JSON.parse(yield* fs.readFileString("./mail-eval-personal.json")),
+    );
+    const cases = (yield* readDataset).filter((entry) => expectations[entry.id] !== undefined);
+    const results = yield* Effect.forEach(
+      cases,
+      (entry) =>
+        Effect.gen(function* () {
+          const message = entry.messages.find((candidate) => !candidate.isMe && candidate.classify !== undefined);
+          if (message === undefined) return undefined;
+          const answer = yield* classifier.classify(message.classify!).pipe(Effect.option);
+          const kind = Option.match(answer, { onNone: () => "personal", onSome: (value) => value.kind });
+          return { id: entry.id, subject: entry.subject.trim(), expected: expectations[entry.id]!, kind, ...Option.match(answer, { onNone: () => ({}), onSome: (value) => ({ probability: value.probability, method: value.method }) }) };
+        }),
+      { concurrency: CONCURRENCY },
+    );
+    const decided = results.filter((result) => result !== undefined && result.expected !== "either");
+    const falsePersonal = decided.filter((result) => result!.expected === "no" && result!.kind === "personal");
+    const missedPersonal = decided.filter((result) => result!.expected === "yes" && result!.kind !== "personal");
+    const summary = {
+      label,
+      total: decided.length,
+      falsePersonal: falsePersonal.map((result) => `${result!.subject.slice(0, 40)}（${result!.method} ${result!.probability ?? "-"}）`),
+      missedPersonal: missedPersonal.map((result) => result!.subject.slice(0, 40)),
+      fallback: results.filter((result) => result?.method === "fallback").length,
+    };
+    yield* fs.writeFileString(`./mail-eval-results-classify-${label}.json`, `${JSON.stringify({ summary, results }, null, 2)}\n`);
+    console.log(JSON.stringify(summary, null, 2));
+  });
+
 /** 残した結果の手順を、今の決まりごとで採点し直す（API は呼ばない） */
 const rescore = (label: string) =>
   Effect.gen(function* () {
@@ -264,7 +304,9 @@ const rescore = (label: string) =>
 
 const mode = process.argv[2];
 // 三項演算子で選ばない理由: エラーの型が違う 2 つの Effect の union になり、Effect.provide に渡せないため
-if (mode === "rescore") {
+if (mode === "classify") {
+  NodeRuntime.runMain(classifyOnly(process.argv[3] ?? "run").pipe(Effect.provide(AppLayer)));
+} else if (mode === "rescore") {
   NodeRuntime.runMain(rescore(process.argv[3] ?? "run").pipe(Effect.provide(NodeServices.layer)));
 } else if (mode === "run") {
   NodeRuntime.runMain(runEvaluation(process.argv[3] ?? "run").pipe(Effect.provide(AppLayer)));
