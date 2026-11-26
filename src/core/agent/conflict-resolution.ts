@@ -7,6 +7,11 @@ export const CONFLICT_RESOLUTION_TOOLS = ["Read", "Edit", "Grep", "Glob"] as con
 const SAFE_REF = /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/;
 export const isSafeRef = (ref: string) => SAFE_REF.test(ref) && !ref.includes("..");
 
+const githubUrl = (repository: string) => `https://github.com/${repository}.git`;
+// 非公開のリポジトリも取れるよう、github.com への https の認証に gh の認証を使う（AI が触れる前の、取り直したばかりの git のデータでだけ使う）
+const GH_CREDENTIAL = "credential.https://github.com.helper=!gh auth git-credential";
+const WITH_GH_CREDENTIAL = ["-c", "credential.helper=", "-c", GH_CREDENTIAL, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always"] as const;
+
 /** git のデータ（gitDir）を直接指して git を動かす引数。作業ディレクトリの .git は AI が書き換えられるので、探させない */
 export const trustedGitArgs = (gitDir: string, workTree: string, args: ReadonlyArray<string>) => [
   `--git-dir=${gitDir}`,
@@ -21,13 +26,12 @@ export const trustedGitArgs = (gitDir: string, workTree: string, args: ReadonlyA
  */
 export function conflictWorkspaceCommands(options: { repository: string; dir: string; gitDir: string; headRef: string; baseRef: string }) {
   return {
-    // merge には共通の祖先までの履歴が要るので浅い clone にはしない。中身は取り出すときに必要な分だけ取る
-    clone: [
-      "gh",
-      ["repo", "clone", options.repository, options.dir, "--", "--filter=blob:none", "--no-checkout", `--separate-git-dir=${options.gitDir}`],
-    ] as const,
-    checkout: ["git", trustedGitArgs(options.gitDir, options.dir, ["checkout", "-B", options.headRef, `origin/${options.headRef}`])] as const,
-    merge: ["git", trustedGitArgs(options.gitDir, options.dir, ["merge", "--no-ff", "--no-commit", `origin/${options.baseRef}`])] as const,
+    // merge には共通の祖先までの履歴が要るので浅い clone にはしない。中身は取り出すときに必要な分だけ取る。
+    // gh repo clone を使わない理由: gh の設定によっては SSH で clone され、足りない中身を SSH で取りに行って https 以外を禁止した設定で止まるため
+    clone: ["git", [...WITH_GH_CREDENTIAL, "clone", "--filter=blob:none", "--no-checkout", `--separate-git-dir=${options.gitDir}`, githubUrl(options.repository), options.dir]] as const,
+    // 打ち消し（credential.helper=）より後ろに gh の認証を置く（-c は並んだ順に効く）
+    checkout: ["git", trustedGitArgs(options.gitDir, options.dir, ["-c", GH_CREDENTIAL, "checkout", "-B", options.headRef, `origin/${options.headRef}`])] as const,
+    merge: ["git", trustedGitArgs(options.gitDir, options.dir, ["-c", GH_CREDENTIAL, "merge", "--no-ff", "--no-commit", `origin/${options.baseRef}`])] as const,
   };
 }
 
@@ -83,7 +87,8 @@ export const HARDENED_GIT_ARGS = [
 export function trustedCommitCommands(options: { repository: string; trustedGitDir: string; workTree: string; headRef: string; headSha: string; message: string }) {
   const trusted = (args: ReadonlyArray<string>) => trustedGitArgs(options.trustedGitDir, options.workTree, args);
   return {
-    clone: ["gh", ["repo", "clone", options.repository, options.trustedGitDir, "--", "--bare", "--filter=blob:none", "--single-branch", "--branch", options.headRef]] as const,
+    // 中身を省かず最新 1 件だけ取る（あとで差分を出すときに、足りない中身を取りに行かずに済むように）
+    clone: ["git", [...WITH_GH_CREDENTIAL, "clone", "--bare", "--depth", "1", "--single-branch", "--branch", options.headRef, githubUrl(options.repository), options.trustedGitDir]] as const,
     readTree: ["git", trusted(["read-tree", options.headSha])] as const,
     add: ["git", trusted(["add", "-A"])] as const,
     commit: ["git", trusted(["-c", "user.name=live-todo", "-c", "user.email=live-todo@localhost", "commit", "--no-verify", "-m", options.message])] as const,

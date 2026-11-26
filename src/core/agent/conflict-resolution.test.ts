@@ -17,11 +17,20 @@ import {
 describe("conflictWorkspaceCommands", () => {
   const options = { repository: "acme/app", dir: "/w/task-1/conflict", gitDir: "/w/task-1/conflict.git", headRef: "feature/x", baseRef: "main" };
 
-  it("git のデータは AI が触れる作業ディレクトリの外に分けて clone する（履歴ごと、中身は必要な分だけ）", () => {
-    assert.deepStrictEqual(conflictWorkspaceCommands(options).clone, [
-      "gh",
-      ["repo", "clone", "acme/app", "/w/task-1/conflict", "--", "--filter=blob:none", "--no-checkout", "--separate-git-dir=/w/task-1/conflict.git"],
-    ]);
+  it("git のデータは AI が触れる作業ディレクトリの外に分けて、https で clone する（gh の認証を使う。中身は必要な分だけ）", () => {
+    const [command, args] = conflictWorkspaceCommands(options).clone;
+
+    assert.strictEqual(command, "git");
+    assert.includeMembers([...args], ["clone", "--filter=blob:none", "--no-checkout", "--separate-git-dir=/w/task-1/conflict.git", "https://github.com/acme/app.git", "/w/task-1/conflict"]);
+    assert.include(args.join(" "), "credential.https://github.com.helper=!gh auth git-credential");
+  });
+
+  it("取り出しや merge で足りない中身を取りに行くときも、https と gh の認証を使う（SSH は使わない）", () => {
+    const commands = conflictWorkspaceCommands(options);
+    for (const [, args] of [commands.checkout, commands.merge]) {
+      assert.include(args.join(" "), "credential.https://github.com.helper=!gh auth git-credential");
+      assert.include(args.join(" "), "protocol.allow=never");
+    }
   });
 
   it("git はいつも外に分けたデータを直接指して動かし、作業ディレクトリの .git（AI が書き換えられる）は見ない", () => {
@@ -40,7 +49,9 @@ describe("trustedCommitCommands（AI に修正させたあとの commit）", () 
   it("AI が触れていない git のデータを取り直し、AI の作業ツリーのファイルをそのデータで commit する（AI が書き換えた設定を使わない）", () => {
     const commands = trustedCommitCommands(options);
 
-    assert.deepStrictEqual(commands.clone, ["gh", ["repo", "clone", "acme/app", "/w/task-1/fix-trusted.git", "--", "--bare", "--filter=blob:none", "--single-branch", "--branch", "feature/x"]]);
+    assert.strictEqual(commands.clone[0], "git");
+    assert.includeMembers([...commands.clone[1]], ["clone", "--bare", "--depth", "1", "--single-branch", "--branch", "feature/x", "https://github.com/acme/app.git", "/w/task-1/fix-trusted.git"]);
+    assert.include(commands.clone[1].join(" "), "credential.https://github.com.helper=!gh auth git-credential");
     for (const [command, args] of [commands.readTree, commands.add, commands.commit]) {
       assert.strictEqual(command, "git");
       assert.deepStrictEqual(args.slice(0, 2), ["--git-dir=/w/task-1/fix-trusted.git", "--work-tree=/w/task-1/fix"]);
