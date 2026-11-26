@@ -62,9 +62,10 @@
 
 ## 仕様（live-spec）
 
-- 振る舞いの仕様（どの状態で・誰が・何をできるか）は `specs/*.spec.ts` に、1 ファイル 1 ドメインオブジェクトで置く。書き方は live-spec-authoring skill、コードから書き起こすときは live-spec-from-code skill に従う（[ADR-0015](docs/decisions/0015-adopt-live-spec.md)）
-- 実装で振る舞いを変えたら `specs/` も直し、`pnpm spec:check` を通す。根拠（`// 根拠: path:line`）を足したり直したりしたら `pnpm exec live-spec evidence --update specs/` で `specs/live-spec.evidence.lock` を更新してコミットする
-- 生成した仕様書（HTML / Markdown）はコミットしない。正本は `*.spec.ts` と `live-spec.evidence.lock`
+- 振る舞いの仕様（どの状態で・誰が・何をできるか）の正本は `specs/*.spec.ts`。1 ファイル 1 ドメインオブジェクトで置き、書き方は live-spec-authoring skill に従う（[ADR-0015](docs/decisions/0015-adopt-live-spec.md)）
+- 振る舞いを変えるときは、実装より先に spec を直す。`pnpm spec:check` を通し、生成した図と一覧（`pnpm spec`）をユーザーに見せて振る舞いが決まってから実装する。実装に合わせて spec を書き換えない
+- spec からコードを指さない（`// 根拠: path:line` と `live-spec.evidence.lock` は使わない。live-spec-from-code skill で書き起こすときも同じ）。spec と実装が合っているかはテストで確かめる
+- 生成した仕様書（HTML / Markdown）はコミットしない
 - 人の判断が要ることは推測で埋めず、spec の `questions` に書く。決まった理由を残したいときは ADR に書く
 
 ## 開発環境

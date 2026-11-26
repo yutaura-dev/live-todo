@@ -9,14 +9,14 @@ export type Task = {
   status: "未作成" | "todo" | "in_progress" | "done" | "needs_review" | "dismissed" | "archived" | "agent_running";
   /** tracks で追う Source Item があるか。同期で作った Task はあり、手動・定期で作った Task はなし */
   tracked: "あり" | "なし";
-  /** AI の処理が終わったときに戻す status（agent_runs.previous_status）。処理中でなければ「なし」 */
+  /** AI の処理が終わったときに戻す status。処理中でなければ「なし」 */
   returnTo: "なし" | "todo" | "in_progress" | "done" | "needs_review" | "dismissed" | "archived";
 };
 
 type Status = Task["status"];
 type Actor = { kind: "user" } | { kind: "sync" } | { kind: "agent" };
 
-/** tracks で追う Source Item の状態をまとめたもの（deriveTaskStatus が見る順） */
+/** tracks で追う Source Item の状態をまとめたもの（未解決 → 解決済み → 消えた の順に見る） */
 type TrackedStates = "未解決がある" | "解決済みだけ" | "消えただけ";
 type Verdict = "todo" | "needs_review" | "not_todo";
 type MovableStatus = "needs_review" | "todo" | "in_progress" | "done" | "dismissed";
@@ -46,17 +46,14 @@ const PLAN_DRIVEN: ReadonlyArray<Status> = ["todo", "in_progress", "done"];
 
 /** 同期で Task を作る */
 export function createBySync(task: Task, actor: Actor, verdict: Verdict): Task {
-  // 根拠: src/core/sync/sync-source.ts:185-189（未解決の Item を判定したときだけ作る）
   ensure(actor.kind === "sync", "同期だけ");
   ensure(task.status === "未作成", "まだ Task がないときだけ");
-  // 根拠: src/core/sync/sync-source.ts:51-55（not_todo も隠さず要確認にする）
   const status = verdict === "todo" ? "todo" : "needs_review";
   return { status, tracked: "あり", returnTo: "なし" };
 }
 
 /** 手動・定期で Task を作る */
 export function createByHand(task: Task, actor: Actor): Task {
-  // 根拠: src/core/board/board-service.ts:348-352、src/app/recurring-tasks.ts:153
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status === "未作成", "まだ Task がないときだけ");
   return { status: "todo", tracked: "なし", returnTo: "なし" };
@@ -68,15 +65,12 @@ export function createByHand(task: Task, actor: Actor): Task {
  * resolved / reopened / removed の Activity が起きたとき、追う Item 全体の状態から status を導き直す。
  */
 export function reconcile(task: Task, actor: Actor, states: TrackedStates): Task {
-  // 根拠: src/core/sync/sync-source.ts:196-204
   ensure(actor.kind === "sync", "同期だけ");
   ensure(task.status !== "未作成", "Task があるときだけ");
-  // 根拠: src/core/task/task-status.ts:8
   ensure(task.tracked === "あり", "追う Source Item があるときだけ");
   return { ...task, status: deriveStatus(task.status, states) };
 }
 
-// 根拠: src/core/task/task-status.ts:7-17
 function deriveStatus(current: Status, states: TrackedStates): Status {
   if (current === "dismissed") return current;
   if (states === "未解決がある") return CLOSED.includes(current) ? "todo" : current;
@@ -86,10 +80,8 @@ function deriveStatus(current: Status, states: TrackedStates): Status {
 
 /** 列を移す */
 export function move(task: Task, actor: Actor, to: MovableStatus): Task {
-  // 根拠: src/main/ipc.ts:6-12、src/core/board/board-service.ts:229-234
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status !== "未作成", "Task があるときだけ");
-  // 根拠: src/core/task/task-status.ts:19-22
   ensure(task.status !== "agent_running", "処理中でないときだけ");
   return { ...task, status: to };
 }
@@ -101,10 +93,8 @@ export function move(task: Task, actor: Actor, to: MovableStatus): Task {
  * todo・in_progress のときだけ動き、要確認・処理中・片付けた Task はそのまま。
  */
 export function finishAllSteps(task: Task, actor: Actor): Task {
-  // 根拠: src/core/task/task-repository.ts:105-108
   ensure(actor.kind !== "sync", "ユーザーか AI だけ");
   ensure(task.status !== "未作成", "Task があるときだけ");
-  // 根拠: src/core/task/task-repository.ts:28-35（要確認・処理中・片付けた Task は動かさない）
   return { ...task, status: PLAN_DRIVEN.includes(task.status) ? "done" : task.status };
 }
 
@@ -114,7 +104,6 @@ export function finishAllSteps(task: Task, actor: Actor): Task {
  * 完了した Task に未完了の手順ができたとき、ユーザーが戻したときだけ todo に戻す。
  */
 export function reopenSteps(task: Task, actor: Actor): Task {
-  // 根拠: src/core/task/task-repository.ts:28-38（AI が書き込んだときは完了のまま）
   ensure(actor.kind !== "sync", "ユーザーか AI だけ");
   ensure(task.status !== "未作成", "Task があるときだけ");
   return { ...task, status: task.status === "done" && actor.kind === "user" ? "todo" : task.status };
@@ -126,7 +115,6 @@ export function reopenSteps(task: Task, actor: Actor): Task {
  * 次にやることを考え直す・PR を直す・コンフリクトを直すなど。元の status を覚えて処理中に移す。
  */
 export function startAgent(task: Task, actor: Actor): Task {
-  // 根拠: src/core/agent/next-action-runner.ts:22-40（ユーザーの依頼か、定期の処理が入れる）
   ensure(actor.kind !== "sync", "ユーザーか AI だけ");
   ensure(task.status !== "未作成", "Task があるときだけ");
   ensure(task.status !== "agent_running", "処理中でないときだけ");
@@ -136,7 +124,6 @@ export function startAgent(task: Task, actor: Actor): Task {
 /** AI の処理が終わる */
 export function finishAgent(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
-  // 根拠: src/core/agent/next-action-runner.ts:136-152（処理中でなくなっていたら戻さない）
   ensure(task.status === "agent_running", "処理中のときだけ");
   return { ...task, status: task.returnTo === "なし" ? "todo" : task.returnTo, returnTo: "なし" };
 }
@@ -210,7 +197,7 @@ export const scenarios = {
 };
 
 export const reviewed = {
-  "indistinguishable-example:createBySync:要確認,todoではない": "todo ではないと判定しても、判定の当たり具合を確かめるまでは隠さずに要確認にする（sync-source.ts:49-55 のコメント）",
+  "indistinguishable-example:createBySync:要確認,todoではない": "todo ではないと判定しても、判定の当たり具合を確かめるまでは隠さずに要確認にする",
   "same-for-similar-actors:finishAllSteps": "手順を済ませたのがユーザーでも AI でも、残りがなければ完了にする",
   "same-for-similar-actors:reopenSteps": "できるかどうかは同じで、違うのは結果だけ（完了から todo に戻すのはユーザーが戻したときだけ）。シナリオ「AI が手順を足しても、完了の Task は戻らない」で確かめている",
   "same-for-similar-actors:startAgent": "処理はユーザーの依頼（PR を直す・考え直すなど）でも、定期の処理（依存の更新の調査など）でも始まる",
@@ -221,6 +208,6 @@ export const questions = [
   {
     ask: "処理中に追う Source Item が解決・消えたとき、処理が終わったあとで status を導き直さなくてよいか？ 今は処理前の status（todo など）に戻り、次の Activity まで完了にならない",
     about: finishAgent,
-    note: "src/core/task/task-status.ts:7-17 は agent_running を開いた・閉じたどちらにも数えないので変えない",
+    note: "同期は、処理中の Task の status を、追う項目が開いても閉じても変えない",
   },
 ];
