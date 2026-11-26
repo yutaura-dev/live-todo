@@ -9,6 +9,7 @@ import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
+import { runGmailThreadTriage } from "../app/gmail-conversations.js";
 import { gmailTrash, gmailTrashTarget, GmailWriteError } from "../app/gmail-write.js";
 import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
@@ -204,6 +205,18 @@ const startSync = Effect.gen(function* () {
     ),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   }));
+  // 人からのメールのスレッドから Task を決める（本文を Claude に送るので、Claude Code で考えるのを有効にしたアカウントだけ）
+  const gmailThreadJobs = config.gmailAccounts
+    .filter((account) => account.planNextActions)
+    .map((account) => ({
+      name: `agent:gmail-threads:${account.id}`,
+      interval: AGENT_JOB_INTERVAL,
+      run: gmailClientFor(account.id).pipe(
+        Effect.flatMap((client) => runGmailThreadTriage({ accountId: account.id, model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD }, client)),
+        Effect.catch((error) => Effect.logWarning("メールのスレッドから Task を決められなかった").pipe(Effect.annotateLogs({ reason: errorMessage(error) }))),
+      ),
+      backoffUntil: () => Option.none<DateTime.Utc>(),
+    }));
   const planJobs: ReadonlyArray<SyncJob<never, AgentWorkspace | ClaudeCode | Database | TaskRepository>> =
     planSources.length === 0
       ? []
@@ -252,9 +265,9 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs)], {
-    concurrency: 6,
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs)], {
+    concurrency: 7,
     discard: true,
   });
 }).pipe(
