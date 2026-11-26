@@ -8,6 +8,7 @@ import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
+import { makeGmailJobs } from "../app/gmail-jobs.js";
 import { withSlackSession } from "../app/slack-session.js";
 import { releaseUntouchedInboxTasks, runSlackConversationTriage } from "../app/slack-conversations.js";
 import { captureSlackSession } from "./slack-connect.js";
@@ -157,6 +158,18 @@ const startSync = Effect.gen(function* () {
       ),
     )
   ).flat();
+  const gmailJobs = (
+    yield* Effect.forEach(config.gmailAccounts, (account) =>
+      makeGmailJobs(account).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Gmail（${account.id}）の同期を始められない: ${errorMessage(error)}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
 
   yield* backfillNextActions;
   yield* applyConflictPlans;
@@ -236,8 +249,11 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...agentJobs, ...conversationJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs)], { concurrency: 5, discard: true });
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs)], {
+    concurrency: 6,
+    discard: true,
+  });
 }).pipe(
   // 設定やトークンがなくても画面は開けるようにする（同期だけが止まり、設定画面に理由を出す）
   Effect.catchCause((cause) =>

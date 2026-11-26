@@ -3,7 +3,7 @@ import { ConfigProvider, Effect, Layer } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { EnvSecretStore, MissingSecretError } from "../core/config/secret-store.js";
 import { Option } from "effect";
-import { judgeThresholdsFor, makeDecisionsProvider, makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
+import { judgeThresholdsFor, makeDecisionsProvider, makeMailClassifier, makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
 
 const withEnv = (env: Record<string, string>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -113,6 +113,35 @@ describe("makeDecisionsProvider", () => {
       assert.instanceOf(error, UnsupportedLlmProviderError);
       assert.strictEqual(error.provider, "jev");
     }).pipe(withEnv({})));
+});
+
+describe("makeMailClassifier", () => {
+  it.effect("LLM Profile に decisions がなければ、作れない理由を示すエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(makeMailClassifier({ provider: "anthropic", model: "claude-haiku-5-5" }));
+
+      assert.instanceOf(error, UnsupportedLlmProviderError);
+    }).pipe(withEnv({})));
+
+  it.effect("OpenAI の Decisions で、メールの種類を分類させる", () => {
+    const requests: { path: string; body: unknown }[] = [];
+    const http = HttpClient.make((request, url) => {
+      requests.push({ path: url.pathname, body: request.body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(request.body.body)) : undefined });
+      return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}", { status: 500 })));
+    });
+    return Effect.gen(function* () {
+      const classifier = yield* makeMailClassifier({ provider: "none", model: "-", decisions: { provider: "openai" } });
+
+      yield* Effect.exit(classifier.classify({ input: "件名: x", context: "" }));
+
+      assert.match(requests[0]?.path ?? "", /decisions$/);
+      assert.deepInclude(requests[0]?.body, { model: "gpt-6-luna" });
+    }).pipe(
+      Effect.provide(EnvSecretStore),
+      Effect.provideService(HttpClient.HttpClient, http),
+      Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: { LIVE_TODO_SECRET_LLM_OPENAI_API_KEY: "sk-test" } })),
+    );
+  });
 });
 
 describe("judgeThresholdsFor", () => {

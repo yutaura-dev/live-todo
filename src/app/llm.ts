@@ -5,6 +5,7 @@ import { SecretStore } from "../core/config/secret-store.js";
 import { ConservativeClassifier } from "../core/judge/conservative-classifier.js";
 import { LlmStructuredClassifier } from "../core/judge/llm-classifier.js";
 import { DecisionModelDecisionsProvider } from "../core/judge/decision-model-provider.js";
+import { DecisionModelMailClassifier, MailClassifier } from "../core/judge/mail-classifier.js";
 import { DecisionsProvider, StructuredClassifier, type TodoJudgeThresholds } from "../core/judge/todo-judge.js";
 import type { LlmProfile } from "./config/app-config.js";
 
@@ -82,6 +83,29 @@ export const makeDecisionsProvider = Effect.fnUntraced(function* (profile: LlmPr
     }
     default:
       // Jev・Gemini Decisions は effect/ai の provider がないので、使うときに DecisionModel.make で足す
+      return yield* new UnsupportedLlmProviderError({ provider: profile.decisions.provider });
+  }
+});
+
+/** LLM Profile の decisions で、メールを人・お知らせ・メルマガに仕分ける。decisions がなければ作れない（Gmail はこれで仕分ける） */
+export const makeMailClassifier = Effect.fnUntraced(function* (profile: LlmProfile) {
+  if (profile.decisions === undefined) return yield* new UnsupportedLlmProviderError({ provider: `${profile.provider}（decisions なし）` });
+  const secrets = yield* SecretStore;
+  switch (profile.decisions.provider) {
+    case "openai": {
+      const apiKey = yield* secrets.require("llm.openai.api_key");
+      return yield* Effect.gen(function* () {
+        return yield* MailClassifier;
+      }).pipe(
+        Effect.provide(
+          DecisionModelMailClassifier.pipe(
+            Layer.provide(OpenAiDecisionModel.layer({ model: profile.decisions.model ?? DEFAULT_OPENAI_DECISIONS_MODEL })),
+            Layer.provide(OpenAiClient.layer({ apiKey })),
+          ),
+        ),
+      );
+    }
+    default:
       return yield* new UnsupportedLlmProviderError({ provider: profile.decisions.provider });
   }
 });

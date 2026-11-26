@@ -54,21 +54,34 @@ const SlackAccount = Schema.Struct({
 });
 export type SlackAccount = typeof SlackAccount.Type;
 
+const GmailAccount = Schema.Struct({
+  kind: Schema.Literal("gmail"),
+  id: AccountId,
+  llmProfile: Schema.optional(Schema.String),
+  // 人からのメールを Claude Code に読ませて Task にするか。本文を Claude に送るので、ほかの Source と同じく既定はオフ
+  planNextActions: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+});
+export type GmailAccount = typeof GmailAccount.Type;
+
 const AppConfigFile = Schema.Struct({
   llmProfiles: Schema.Record(Schema.String, LlmProfile),
   defaultLlmProfile: Schema.String,
   accounts: Schema.Array(GitHubAccount),
   // GitHub の accounts と分ける理由: GitHub だけの項目（リポジトリのフィルタ・依存更新の調査）を読む箇所を、種類で分けずに済ませるため
   slackAccounts: Schema.Array(SlackAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  gmailAccounts: Schema.Array(GmailAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 });
 
 export type ResolvedAccount = GitHubAccount & { resolvedLlmProfile: LlmProfile };
 
 export type ResolvedSlackAccount = SlackAccount & { resolvedLlmProfile: LlmProfile };
 
-export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts"> & {
+export type ResolvedGmailAccount = GmailAccount & { resolvedLlmProfile: LlmProfile };
+
+export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts" | "gmailAccounts"> & {
   accounts: ReadonlyArray<ResolvedAccount>;
   slackAccounts: ReadonlyArray<ResolvedSlackAccount>;
+  gmailAccounts: ReadonlyArray<ResolvedGmailAccount>;
 };
 
 const decodeFile = Schema.decodeUnknownEffect(AppConfigFile);
@@ -121,10 +134,27 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
     slackAccounts.push({ ...account, resolvedLlmProfile });
   });
 
+  const gmailAccounts: ResolvedGmailAccount[] = [];
+  file.gmailAccounts.forEach((account, index) => {
+    if (seenIds.has(account.id)) issues.push(`gmailAccounts[${index}].id: "${account.id}" が重複している`);
+    seenIds.add(account.id);
+    const profileName = account.llmProfile ?? file.defaultLlmProfile;
+    const resolvedLlmProfile = profileOf(profileName);
+    if (resolvedLlmProfile === undefined) {
+      if (account.llmProfile !== undefined) issues.push(`gmailAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
+      return;
+    }
+    if (resolvedLlmProfile.decisions === undefined) {
+      issues.push(`gmailAccounts[${index}]: メールの仕分けに Decisions を使うので、LLM Profile「${profileName}」に decisions を書いてください`);
+      return;
+    }
+    gmailAccounts.push({ ...account, resolvedLlmProfile });
+  });
+
   if (issues.length > 0) {
     return yield* new InvalidAppConfigError({ message: issues.join("\n") });
   }
-  return { ...file, accounts, slackAccounts };
+  return { ...file, accounts, slackAccounts, gmailAccounts };
 });
 
 /** 設定画面に出すための、検証前の設定。ファイルがなければ none */

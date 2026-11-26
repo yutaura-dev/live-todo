@@ -127,6 +127,32 @@ describe("Slack のアカウント", () => {
     }));
 });
 
+describe("Gmail のアカウント", () => {
+  const gmail = { kind: "gmail", id: "mail", llmProfile: "personal" };
+
+  it.effect("Gmail のアカウントを書ける。書かなければ空で、Claude Code で考えるのは既定でオフ", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).gmailAccounts, []);
+
+      const config = yield* decodeAppConfig({ ...validConfig, gmailAccounts: [gmail] });
+
+      assert.deepInclude(config.gmailAccounts[0], { id: "mail", planNextActions: false });
+      assert.strictEqual(config.gmailAccounts[0]?.resolvedLlmProfile.provider, "anthropic");
+    }));
+
+  it.effect("メールの仕分けに Decisions を使うので、LLM Profile に decisions がなければエラーにする", () =>
+    Effect.gen(function* () {
+      const reason = yield* invalidReason({ ...validConfig, gmailAccounts: [{ ...gmail, llmProfile: "work" }] });
+
+      assert.include(reason, "decisions");
+    }));
+
+  it.effect("id はほかのアカウントとも重ならないようにする", () =>
+    Effect.gen(function* () {
+      assert.include(yield* invalidReason({ ...validConfig, gmailAccounts: [{ ...gmail, id: "work" }] }), "重複");
+    }));
+});
+
 describe("Decisions の閾値", () => {
   it.effect("decisions に閾値を書ける", () =>
     Effect.gen(function* () {
