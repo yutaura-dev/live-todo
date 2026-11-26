@@ -7,6 +7,7 @@ import { gmailMessages, tasks } from "../core/db/schema.js";
 import { TestDatabase } from "../core/db/test-database.js";
 import { syncSource } from "../core/sync/sync-source.js";
 import { decodePlan } from "../core/task/next-actions.js";
+import { TaskRepository } from "../core/task/task-repository.js";
 import { makeGmailSendersBinding } from "../sources/gmail/gmail-bindings.js";
 import { applyGmailSenderPlans } from "./gmail-plans.js";
 
@@ -63,5 +64,25 @@ describe("applyGmailSenderPlans", () => {
       yield* syncSource(binding);
       yield* applyGmailSenderPlans("me");
       assert.include((yield* planOfOnlyTask).plan.steps[0]!.title, "1 通");
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("希望に合わせて書き換えた手順（アプリが決めたもの以外の手順を含む）は、上書きしない", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      yield* insertMail("a");
+      yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
+      yield* applyGmailSenderPlans("me");
+      const { id } = yield* planOfOnlyTask;
+      const custom = {
+        steps: [
+          { id: "s1", kind: "manual", title: "レシートのラベルを付ける", effort: "easy", mode: "serial", status: "todo" },
+          { id: "s2", kind: "process_mail", title: "アーカイブする", effort: "easy", mode: "serial", status: "todo" },
+        ],
+      } as const;
+      yield* (yield* TaskRepository).updateTask(id, { nextActions: custom });
+
+      yield* applyGmailSenderPlans("me");
+
+      assert.deepStrictEqual((yield* planOfOnlyTask).plan.steps.map((step) => step.title), ["レシートのラベルを付ける", "アーカイブする"]);
     }).pipe(Effect.provide(TestDatabase)));
 });

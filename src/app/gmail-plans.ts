@@ -8,6 +8,7 @@ import { gmailSendersSource, loadMails } from "../sources/gmail/gmail-bindings.j
 import { senderGroups } from "../sources/gmail/gmail-mailbox.js";
 
 const OPEN = ["todo", "in_progress", "needs_review"] as const;
+const SENDER_STEP_IDS: ReadonlySet<string> = new Set(["process", "past-invites", "subscription"]);
 
 const touched = (steps: ReadonlyArray<Step>): boolean =>
   steps.some((step) => step.status === "done" || (step.kind === "decision" && (step.chosen !== undefined || step.options.some((option) => touched(option.steps)))));
@@ -45,7 +46,8 @@ export const applyGmailSenderPlans = Effect.fnUntraced(function* (accountId: str
     const current = decodePlan(row.nextActions);
     let next: NextActionPlan | undefined;
     if (Option.isNone(current)) next = desired;
-    else if (!current.value.steps.some((step) => step.kind === "process_mail")) continue;
+    // アプリが決めた手順（senderPlan の id）だけでできていなければ、Claude Code やユーザーが書き換えたものなので触らない
+    else if (!current.value.steps.every((step) => SENDER_STEP_IDS.has(step.id))) continue;
     else if (touched(current.value.steps)) {
       const title = desired.steps.find((step) => step.kind === "process_mail")!.title;
       const changed = current.value.steps.map((step) => (step.kind === "process_mail" ? { ...step, title } : step));
