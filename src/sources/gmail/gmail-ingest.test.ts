@@ -5,19 +5,30 @@ import { TestClock } from "effect/testing";
 import { Database } from "../../core/db/database.js";
 import { gmailMessages } from "../../core/db/schema.js";
 import { TestDatabase } from "../../core/db/test-database.js";
-import { type MailClassification, MailClassifier } from "../../core/judge/mail-classifier.js";
+import { type ActionJudgment, type MailClassification, MailClassifier } from "../../core/judge/mail-classifier.js";
 import { GmailClient, GmailRequestError } from "./gmail-client.js";
 import { ingestGmail } from "./gmail-ingest.js";
 import { gmailMessage, makeTestGmail } from "./test-client.js";
 
 const NOW = Date.UTC(2026, 10, 26);
 
-function setup(messages: Parameters<typeof makeTestGmail>[0], answer: (input: string) => MailClassification = () => ({ kind: "newsletter", probability: 0.9, method: "decisions" })) {
+function setup(
+  messages: Parameters<typeof makeTestGmail>[0],
+  answer: (input: string) => MailClassification = () => ({ kind: "newsletter", probability: 0.9, method: "decisions" }),
+  action: (input: string) => ActionJudgment = () => ({ probability: 0.1, method: "decisions" }),
+) {
   const gmail = makeTestGmail(messages);
   const requests: Array<{ input: string; context: string }> = [];
-  const classifier = Layer.succeed(MailClassifier, MailClassifier.of({ classify: (request) => Effect.sync(() => (requests.push(request), answer(request.input))) }));
+  const actionRequests: Array<{ input: string; context: string }> = [];
+  const classifier = Layer.succeed(
+    MailClassifier,
+    MailClassifier.of({
+      classify: (request) => Effect.sync(() => (requests.push(request), answer(request.input))),
+      needsAction: (request) => Effect.sync(() => (actionRequests.push(request), action(request.input))),
+    }),
+  );
   const layer = Layer.mergeAll(TestDatabase, classifier, Layer.succeed(GmailClient, gmail.client));
-  return { gmail, requests, layer };
+  return { gmail, requests, actionRequests, layer };
 }
 
 const stored = Effect.gen(function* () {
@@ -235,6 +246,27 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
       const listing = { ...gmail.client, listMessages: (query: string, pageToken?: string) => (query === "in:inbox filename:ics" ? originalList(query, pageToken) : Effect.succeed({ ids: [], nextPageToken: undefined })) };
       yield* run.pipe(Effect.provideService(GmailClient, listing));
       assert.deepStrictEqual((yield* stored).map((row) => row.messageId), ["old-invite"]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("受信トレイのメルマガ・お知らせは、1 通ずつ対応を求めているかを判定して覚える（人からのメールと自分のメールは判定しない）", () => {
+    const { actionRequests, layer } = setup(
+      [gmailMessage({ id: "news", headers: { from: "Shop <news@shop.example>", subject: "ご住所確認のお願い", "list-unsubscribe": "<u>" } }), gmailMessage({ id: "news2", headers: { from: "Shop <news@shop.example>", subject: "セール", "list-unsubscribe": "<u>" } }), gmailMessage({ id: "person", headers: { from: "Sato <sato@example.com>", subject: "相談" } }), gmailMessage({ id: "sent", labelIds: ["SENT"] })],
+      (input) => (input.includes("sato@") ? { kind: "personal", probability: 0.9, method: "decisions" } : { kind: "newsletter", probability: 0.9, method: "decisions" }),
+      (input) => ({ probability: input.includes("住所") ? 0.8 : 0.1, method: "decisions" }),
+    );
+    return Effect.gen(function* () {
+      yield* run;
+      const rows = yield* stored;
+      assert.deepStrictEqual(rows.map((row) => [row.messageId, row.actionChecked, row.actionProbability]), [
+        ["news", true, 0.8],
+        ["news2", true, 0.1],
+        ["person", false, null],
+        ["sent", false, null],
+      ]);
+      assert.lengthOf(actionRequests, 2);
+      yield* run;
+      assert.lengthOf(actionRequests, 2);
     }).pipe(Effect.provide(layer));
   });
 });

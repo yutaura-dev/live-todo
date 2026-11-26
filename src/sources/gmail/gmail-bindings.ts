@@ -7,7 +7,7 @@ import type { TodoJudgment } from "../../core/judge/todo-judge.js";
 import type { SourceAdapter } from "../../core/sync/source-adapter.js";
 import { diffSnapshot, type DuplicateExternalIdError } from "../../core/sync/snapshot-differ.js";
 import type { SourceBinding } from "../../core/sync/sync-source.js";
-import { isPastInvite, type PersonalThread, personalThreads, type SenderGroup, senderGroups, type StoredMail } from "./gmail-mailbox.js";
+import { effectiveKind, isPastInvite, type PersonalThread, personalThreads, type SenderGroup, senderGroups, type StoredMail } from "./gmail-mailbox.js";
 
 export const gmailSendersSource = (accountId: string) => `gmail:${accountId}:senders`;
 export const gmailThreadsSource = (accountId: string) => `gmail:${accountId}:threads`;
@@ -30,7 +30,7 @@ export const loadMails = Effect.fnUntraced(function* (accountId: string) {
       senderName: row.senderName,
       subject: row.subject,
       receivedAt: row.receivedAt,
-      kind: row.kind,
+      kind: effectiveKind(row),
       inInbox: row.inInbox,
       unread: row.unread,
       trashed: row.trashed,

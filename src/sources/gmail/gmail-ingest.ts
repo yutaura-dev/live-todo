@@ -105,6 +105,33 @@ const checkInvites = Effect.fnUntraced(function* (accountId: string, ids: Readon
   );
 });
 
+/** 受信トレイのメルマガ・お知らせが、受け取った本人に対応を求めているかを 1 通ずつ判定する（送り主ごとに使い回さない） */
+const checkActions = Effect.fnUntraced(function* (accountId: string, now: string) {
+  const classifier = yield* MailClassifier;
+  const db = yield* Database;
+  const rows = yield* db
+    .select({ messageId: gmailMessages.messageId, senderName: gmailMessages.senderName, senderKey: gmailMessages.senderKey, subject: gmailMessages.subject, listUnsubscribe: gmailMessages.listUnsubscribe })
+    .from(gmailMessages)
+    .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.actionChecked, false), eq(gmailMessages.inInbox, true), inArray(gmailMessages.kind, ["newsletter", "notification"])))
+    .pipe(Effect.orDie);
+  yield* Effect.forEach(
+    rows,
+    (row) =>
+      Effect.gen(function* () {
+        const answer = yield* classifier.needsAction({
+          input: [`差出人: ${row.senderName} <${row.senderKey}>`, `件名: ${row.subject}`].join("\n"),
+          context: `List-Unsubscribe: ${row.listUnsubscribe === null ? "なし" : "あり"}`,
+        });
+        yield* db
+          .update(gmailMessages)
+          .set({ actionChecked: true, actionProbability: answer.probability ?? null, updatedAt: now })
+          .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.messageId, row.messageId)))
+          .pipe(Effect.orDie);
+      }),
+    { concurrency: FETCH_CONCURRENCY },
+  );
+});
+
 /**
  * Gmail のメールを取り込み、新しいメールを仕分けて gmail_messages に保存する。2 回目からは履歴の差分だけを見る。
  * 送り主ごと・スレッドごとの Source Item は、この表から別に作る
@@ -226,6 +253,7 @@ export const ingestGmail = Effect.fnUntraced(function* (options: { accountId: st
   }
   yield* markTrashed(changed.deleted);
   yield* checkInvites(options.accountId, inviteIds, now);
+  yield* checkActions(options.accountId, now);
   yield* items.saveCursor(source, { historyId: changed.historyId });
   return { fetched: ids.length };
 });

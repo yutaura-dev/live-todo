@@ -123,3 +123,12 @@ export function personalThreads(mails: ReadonlyArray<StoredMail>): PersonalThrea
 /** 日程が過ぎた（または取り消された）招待か。終わりが決まっていない予定は過ぎない */
 export const isPastInvite = (invite: { inviteState: "ends" | "open" | "cancelled" | null; inviteEndsAt: number | null }, now: number) =>
   invite.inviteState === "cancelled" || (invite.inviteState === "ends" && invite.inviteEndsAt !== null && invite.inviteEndsAt < now);
+
+// これ以上の確率で対応を求めていれば、メルマガ・お知らせでも人からのメールとして読ませる（迷うものは読む側に倒す）
+const ACTION_MIN_PROBABILITY = 0.5;
+
+/** 対応を求めるメルマガ・お知らせ（住所の確認のお願いなど）は、送り主にまとめず人からのメールとして扱う */
+export const effectiveKind = (mail: { kind: StoredMail["kind"]; actionChecked: boolean; actionProbability: number | null }): StoredMail["kind"] =>
+  (mail.kind === "newsletter" || mail.kind === "notification") && mail.actionChecked && (mail.actionProbability === null || mail.actionProbability >= ACTION_MIN_PROBABILITY)
+    ? "personal"
+    : mail.kind;

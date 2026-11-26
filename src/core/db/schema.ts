@@ -209,6 +209,9 @@ export const gmailMessages = sqliteTable(
     inviteChecked: integer("invite_checked", { mode: "boolean" }).notNull().default(false),
     inviteState: text("invite_state", { enum: ["ends", "open", "cancelled"] }),
     inviteEndsAt: integer("invite_ends_at"),
+    /** メルマガ・お知らせが、受け取った本人に対応を求めているか（確率。判定できなければ null）。求めていれば送り主にまとめない */
+    actionChecked: integer("action_checked", { mode: "boolean" }).notNull().default(false),
+    actionProbability: real("action_probability"),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [

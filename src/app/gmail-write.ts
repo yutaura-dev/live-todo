@@ -4,7 +4,7 @@ import { Database } from "../core/db/database.js";
 import { approvals, gmailMessages, sourceItems, taskLinks } from "../core/db/schema.js";
 import { applyItemState } from "../core/sync/sync-source.js";
 import type { GmailClient } from "../sources/gmail/gmail-client.js";
-import { isPastInvite } from "../sources/gmail/gmail-mailbox.js";
+import { effectiveKind, isPastInvite } from "../sources/gmail/gmail-mailbox.js";
 
 export class GmailWriteError extends Schema.TaggedError<GmailWriteError>()("GmailWriteError", { message: Schema.String }) {}
 
@@ -38,6 +38,9 @@ const candidates = Effect.fnUntraced(function* (group: { accountId: string; kind
       inInbox: gmailMessages.inInbox,
       inviteState: gmailMessages.inviteState,
       inviteEndsAt: gmailMessages.inviteEndsAt,
+      kind: gmailMessages.kind,
+      actionChecked: gmailMessages.actionChecked,
+      actionProbability: gmailMessages.actionProbability,
     })
     .from(gmailMessages)
     .where(
@@ -49,7 +52,8 @@ const candidates = Effect.fnUntraced(function* (group: { accountId: string; kind
     )
     .orderBy(asc(gmailMessages.receivedAt), asc(gmailMessages.messageId))
     .pipe(Effect.orDie);
-  return group.kind === "senders" ? rows.filter((row) => row.inInbox) : rows;
+  // 対応を求めるメールは人からのメールとして別の Task にしているので、送り主の Task からは片付けない
+  return group.kind === "senders" ? rows.filter((row) => row.inInbox && effectiveKind(row) !== "personal") : rows;
 });
 
 /** 承認の確認に見せる、確認済みにする・ゴミ箱に入れるメールの一覧 */

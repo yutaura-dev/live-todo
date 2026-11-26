@@ -58,4 +58,19 @@ describe("MailClassifier（Decisions API でメールを仕分ける）", () => 
       assert.include(JSON.stringify(call?.decisions["kind"]?.instructions), "List-Unsubscribe: なし");
     }).pipe(Effect.provide(model.layer));
   });
+
+  it.effect("対応を求めているかを、確率で返す（メルマガでも住所の確認などを求めることがある）", () => {
+    const model = fakeDecisionModel(() => Effect.succeed({ action: { _tag: "Probability", probability: 0.7 } }));
+    return Effect.gen(function* () {
+      const answer = yield* (yield* MailClassifier).needsAction({ input: "件名: ご住所確認のお願い", context: "List-Unsubscribe: あり" });
+      assert.deepStrictEqual(answer, { probability: 0.7, method: "decisions" });
+      assert.include(JSON.stringify(model.calls[0]?.state), "ご住所確認");
+      assert.notInclude(JSON.stringify(model.calls[0]?.state), "List-Unsubscribe");
+    }).pipe(Effect.provide(model.layer));
+  });
+
+  it.effect("対応を求めているかの判定が返らなければ、求めているものとして扱う（読む側に倒す）", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* (yield* MailClassifier).needsAction({ input: "x", context: "" }), { probability: undefined, method: "fallback" });
+    }).pipe(Effect.provide(fakeDecisionModel(() => Effect.succeed({ action: { _tag: "Refusal" } })).layer)));
 });

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { isPastInvite, personalThreads, senderGroups, senderKeyOf, senderNameOf, type StoredMail } from "./gmail-mailbox.js";
+import { effectiveKind, isPastInvite, personalThreads, senderGroups, senderKeyOf, senderNameOf, type StoredMail } from "./gmail-mailbox.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 10, 26);
@@ -123,5 +123,15 @@ describe("日程が過ぎた招待", () => {
     const mails = [mail({ messageId: "a", pastInvite: true }), mail({ messageId: "b" }), mail({ messageId: "c", pastInvite: true, inInbox: false })];
     assert.deepStrictEqual(senderGroups(mails, NOW)[0]!.pastInvites, ["a"]);
     assert.deepStrictEqual(personalThreads(mails.map((entry) => ({ ...entry, kind: "personal" as const })))[0]!.pastInvites, ["a"]);
+  });
+});
+
+describe("effectiveKind（対応を求めるメルマガは、人からのメールとして扱う）", () => {
+  it("対応を求めている確率が 0.5 以上か、判定できなかったメルマガ・お知らせは、人からのメールとして扱う", () => {
+    assert.strictEqual(effectiveKind({ kind: "newsletter", actionChecked: true, actionProbability: 0.8 }), "personal");
+    assert.strictEqual(effectiveKind({ kind: "notification", actionChecked: true, actionProbability: null }), "personal");
+    assert.strictEqual(effectiveKind({ kind: "newsletter", actionChecked: true, actionProbability: 0.2 }), "newsletter");
+    assert.strictEqual(effectiveKind({ kind: "newsletter", actionChecked: false, actionProbability: null }), "newsletter");
+    assert.strictEqual(effectiveKind({ kind: "mine", actionChecked: false, actionProbability: null }), "mine");
   });
 });
