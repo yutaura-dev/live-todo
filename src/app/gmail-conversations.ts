@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { DateTime, Effect } from "effect";
+import { DateTime, Effect, Predicate } from "effect";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { CONVERSATION_TRIAGE_JSON_SCHEMA, decodeConversationDecision, mailThreadTriagePrompt } from "../core/agent/conversation-triage.js";
@@ -40,6 +40,13 @@ const returnToSender = Effect.fnUntraced(function* (accountId: string, threadIds
     .pipe(Effect.orDie);
 });
 
+/**
+ * 決め方（プロンプト）の版。変えたら上げると、前の版で「やることはない」としたスレッドを考え直させる。
+ * 2: 条件つきの依頼（変更があれば連絡、など）も Task にする
+ */
+export const MAIL_TRIAGE_VERSION = 2;
+const versionOf = (judgment: unknown) => (Predicate.isObject(judgment) && "version" in judgment ? judgment.version : undefined);
+
 export type GmailThreadTriageOptions = { accountId: string; model?: string; maxBudgetUsd?: number };
 
 /** 仕分けを保留にした人からのメールのスレッドを Claude Code に読ませ、やることがあれば何をするかの Task にする */
@@ -53,11 +60,28 @@ export const runGmailThreadTriage = (options: GmailThreadTriageOptions, client: 
     const source = gmailThreadsSource(options.accountId);
 
     const ignored = yield* db
-      .select({ externalId: sourceItems.externalId })
+      .select({ id: sourceItems.id, externalId: sourceItems.externalId, judgment: sourceItems.judgment })
       .from(sourceItems)
       .where(and(eq(sourceItems.source, source), eq(sourceItems.triage, "ignored")))
       .pipe(Effect.orDie);
-    yield* returnToSender(options.accountId, ignored.map((row) => row.externalId));
+    const current = ignored.filter((row) => versionOf(row.judgment) === MAIL_TRIAGE_VERSION);
+    const outdated = ignored.filter((row) => versionOf(row.judgment) !== MAIL_TRIAGE_VERSION);
+    yield* returnToSender(options.accountId, current.map((row) => row.externalId));
+    // 前の決め方で「やることはない」としたものは考え直させる。メルマガ・お知らせは送り主に戻していたので、対応が要るかから判定し直させる
+    for (const row of outdated) yield* itemRepository.setTriage(row.id, "pending");
+    if (outdated.length > 0) {
+      yield* db
+        .update(gmailMessages)
+        .set({ actionChecked: false, actionProbability: null })
+        .where(
+          and(
+            eq(gmailMessages.accountId, options.accountId),
+            inArray(gmailMessages.threadId, outdated.map((row) => row.externalId)),
+            inArray(gmailMessages.kind, ["newsletter", "notification"]),
+          ),
+        )
+        .pipe(Effect.orDie);
+    }
 
     const pending = yield* db
       .select()
@@ -108,7 +132,7 @@ export const runGmailThreadTriage = (options: GmailThreadTriageOptions, client: 
         continue;
       }
       const decision = outcome.success;
-      const judgment = { verdict: decision.decision === "none" ? "not_todo" : "todo", method: "conversation", reason: decision.reason };
+      const judgment = { verdict: decision.decision === "none" ? "not_todo" : "todo", method: "conversation", reason: decision.reason, version: MAIL_TRIAGE_VERSION };
       if (decision.decision === "none") {
         yield* itemRepository.setTriage(item.id, "ignored", judgment);
         yield* returnToSender(options.accountId, [item.externalId]);

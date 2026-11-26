@@ -4,6 +4,7 @@ import {
   CONVERSATION_TRIAGE_JSON_SCHEMA,
   conversationKeyOf,
   conversationTriagePrompt,
+  mailThreadTriagePrompt,
   decodeConversationDecision,
 } from "./conversation-triage.js";
 
@@ -44,4 +45,18 @@ describe("会話から Task を決める（Claude Code への指示と回答の�
       const error = yield* decodeConversationDecision({ decision: "create", title: "", brief: "x", reason: "y" }).pipe(Effect.flip);
       assert.include(error.message, "タイトル");
     }));
+});
+
+describe("mailThreadTriagePrompt", () => {
+  const prompt = mailThreadTriagePrompt({ contextDir: "/work/gmail/t1" });
+
+  it("条件つきの依頼（変更があれば連絡、など）も、本人が確かめる必要があるので Task にさせ、期限をタイトルに入れさせる", () => {
+    assert.include(prompt, "条件つき");
+    assert.include(prompt, "本人にしか分からない");
+    assert.include(prompt, "期限");
+  });
+
+  it("やることがないのは、知らせるだけ・済んだ・返事を待っているだけのものに限る", () => {
+    assert.include(prompt, "知らせるだけ");
+  });
 });

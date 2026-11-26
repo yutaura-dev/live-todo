@@ -8,7 +8,7 @@ import { TestDatabase } from "../core/db/test-database.js";
 import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import { gmailMessage, makeTestGmail } from "../sources/gmail/test-client.js";
-import { runGmailThreadTriage } from "./gmail-conversations.js";
+import { MAIL_TRIAGE_VERSION, runGmailThreadTriage } from "./gmail-conversations.js";
 
 const SOURCE = "gmail:me:threads";
 
@@ -94,10 +94,26 @@ describe("runGmailThreadTriage（メールのスレッドを読ませて Task �
       assert.strictEqual(row!.actionProbability, 0);
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("前に「やることはない」と決めたスレッドのメルマガ・お知らせも、送り主の Task に戻す", () =>
+  it.effect("前の決め方で「やることはない」と決めたスレッドは、保留に戻し、メルマガ・お知らせは対応が要るかを判定し直させる", () =>
     Effect.gen(function* () {
       const item = yield* pendingThread("t1");
-      yield* (yield* SourceItemRepository).setTriage(item.id, "ignored");
+      yield* (yield* SourceItemRepository).setTriage(item.id, "ignored", { verdict: "not_todo", method: "conversation", reason: "x" });
+      const db = yield* Database;
+      yield* db
+        .insert(gmailMessages)
+        .values({ accountId: "me", messageId: "a", threadId: "t1", senderKey: "news@shop.example", senderName: "Shop", subject: "x", receivedAt: 1, kind: "notification", inInbox: true, unread: true, trashed: false, actionChecked: true, actionProbability: 0, updatedAt: "2026-11-26T00:00:00.000Z" })
+        .pipe(Effect.orDie);
+      const h = harness({ decision: "create", title: "住所を確かめる", brief: "", reason: "x" });
+      yield* h.run;
+      const [row] = yield* db.select().from(gmailMessages).pipe(Effect.orDie);
+      assert.isFalse(row!.actionChecked);
+      assert.lengthOf(h.requests, 1);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("今の決め方で「やることはない」と決めたスレッドのメルマガ・お知らせは、送り主の Task に戻す", () =>
+    Effect.gen(function* () {
+      const item = yield* pendingThread("t1");
+      yield* (yield* SourceItemRepository).setTriage(item.id, "ignored", { verdict: "not_todo", method: "conversation", reason: "x", version: MAIL_TRIAGE_VERSION });
       const db = yield* Database;
       yield* db
         .insert(gmailMessages)
