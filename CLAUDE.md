@@ -60,6 +60,13 @@
 - `drizzle/` — drizzle-kit が生成するマイグレーション。手で編集せず、`src/core/task/schema.ts` を直して `pnpm db:generate` で作り直す
 - ローカル DB ファイル（場所は実装時に追記）— 実データが入っているため直接編集しない
 
+## 仕様（live-spec）
+
+- 振る舞いの仕様（どの状態で・誰が・何をできるか）は `specs/*.spec.ts` に、1 ファイル 1 ドメインオブジェクトで置く。書き方は live-spec-authoring skill、コードから書き起こすときは live-spec-from-code skill に従う（[ADR-0015](docs/decisions/0015-adopt-live-spec.md)）
+- 実装で振る舞いを変えたら `specs/` も直し、`pnpm spec:check` を通す。根拠（`// 根拠: path:line`）を足したり直したりしたら `pnpm exec live-spec evidence --update specs/` で `specs/live-spec.evidence.lock` を更新してコミットする
+- 生成した仕様書（HTML / Markdown）はコミットしない。正本は `*.spec.ts` と `live-spec.evidence.lock`
+- 人の判断が要ることは推測で埋めず、spec の `questions` に書く。決まった理由を残したいときは ADR に書く
+
 ## 開発環境
 
 - **ツールを追加するとき**: `flake.nix` の `devShells.default` の `packages` へ追加する。グローバルインストールはしない

@@ -1,0 +1,18 @@
+{
+  "task-status createByHand src/app/recurring-tasks.ts:153": "51705bb4145c2ff3",
+  "task-status createByHand src/core/board/board-service.ts:342-346": "574928e182d835f3",
+  "task-status createBySync src/core/sync/sync-source.ts:185-189": "31b52e8a7e337bd2",
+  "task-status createBySync src/core/sync/sync-source.ts:51-55": "2033b167e533f3eb",
+  "task-status finishAgent src/core/agent/next-action-runner.ts:136-152": "8da799725f71bb5e",
+  "task-status finishAllSteps src/core/task/task-repository.ts:105-108": "2d8d671ffe9710ef",
+  "task-status finishAllSteps src/core/task/task-repository.ts:28-35": "6c75cd82fe9adbfe",
+  "task-status move src/core/board/board-service.ts:224-228": "0575cad5f48ce322",
+  "task-status move src/main/ipc.ts:6-12": "6592e29e895bbf4f",
+  "task-status reconcile src/core/sync/sync-source.ts:196-204": "4025f47e83390d26",
+  "task-status reconcile src/core/task/task-status.ts:8": "57ed2d3286938d2a",
+  "task-status reopenSteps src/core/task/task-repository.ts:28-38": "e10ad13253174859",
+  "task-status startAgent src/core/agent/next-action-runner.ts:22-40": "c416a724af8f1ddb",
+  "task-status 未決事項 src/app/pull-request-fix-flow.ts:153": "1041306e1599c806",
+  "task-status 未決事項 src/core/board/board-service.ts:224-228": "0575cad5f48ce322",
+  "task-status 未決事項 src/core/task/task-status.ts:7-17": "e1f0ad09c70ed998"
+}
