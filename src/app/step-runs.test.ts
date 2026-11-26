@@ -94,6 +94,8 @@ describe("Claude Code に手順をやらせる", () => {
       yield* h.provide(runAutoSteps({ optionsFor: (taskId) => Effect.succeed(taskId === denied ? undefined : {}) }));
 
       assert.strictEqual(h.requests.length, 1);
+      // ユーザーが見ないまま動くので、読んだものを外へ送れる WebFetch を渡さない
+      assert.notInclude(h.requests[0]!.allowedTools ?? [], "WebFetch");
       assert.deepInclude((yield* loaded(allowed)).plan.steps[0], { status: "done" });
       assert.isUndefined(((yield* loaded(notYet)).plan.steps[1] as { run?: unknown }).run);
       assert.isUndefined(((yield* loaded(denied)).plan.steps[0] as { run?: unknown }).run);

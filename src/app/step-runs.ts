@@ -106,7 +106,13 @@ const finishAgentRun = Effect.fnUntraced(function* (taskId: number, stepId: stri
 });
 
 /** 頼んだ手順を Claude Code にやらせ、やり遂げたら済みに、できなければ済みにせず、どちらも報告を残す */
-export const runStep = Effect.fnUntraced(function* <R = never>(taskId: number, stepId: string, options: AnswerOptions<R>) {
+export const runStep = Effect.fnUntraced(function* <R = never>(
+  taskId: number,
+  stepId: string,
+  options: AnswerOptions<R>,
+  /** autonomous: ユーザーが押さずにアプリが動かす。WebFetch を渡さない（メールに仕込まれた指示で、読んだものを好きな URL へ送らせないため） */
+  mode: { autonomous?: boolean } = {},
+) {
   const claude = yield* ClaudeCode;
   const outcome = yield* Effect.gen(function* () {
     const { plan } = yield* planOf(taskId);
@@ -116,6 +122,7 @@ export const runStep = Effect.fnUntraced(function* <R = never>(taskId: number, s
     const result = yield* claude.run({
       prompt: stepPrompt({ step: step.title, contextDir: prepared.contextDir, repository: prepared.repository, gmail: prepared.access.gmail, github: prepared.access.github }),
       ...prepared.run,
+      allowedTools: mode.autonomous === true ? prepared.run.allowedTools.filter((tool) => tool !== "WebFetch") : prepared.run.allowedTools,
       jsonSchema: STEP_JSON_SCHEMA,
     });
     return yield* decodeReport(result.structured).pipe(Effect.mapError((error) => new StepRunError({ message: `報告の形が想定と違う: ${error.message}` })));
@@ -152,7 +159,7 @@ export const runAutoSteps = Effect.fnUntraced(function* <R, R2 = never>(input: {
     const begun = yield* startStepRun(row.id, step.id).pipe(Effect.result);
     if (begun._tag === "Failure") continue;
     started++;
-    yield* runStep(row.id, step.id, options);
+    yield* runStep(row.id, step.id, options, { autonomous: true });
   }
   return started;
 });
