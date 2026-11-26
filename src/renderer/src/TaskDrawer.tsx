@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ConflictResolutionView, GmailTrashTargetView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
+import type { ConflictResolutionView, GmailMailTargetView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
 import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber, tracksGmail, tracksSlackSaved } from "./task-text.js";
@@ -335,69 +335,92 @@ export function RecurrenceFields(props: {
 }
 
 const GMAIL_PREVIEW_LIMIT = 8;
+const GMAIL_ACTIONS = {
+  archive: { button: "確認済みにする", confirm: (count: number) => `次の ${count} 通を確認済みにします（Gmail でアーカイブし、既読にします）`, failed: "確認済みにできませんでした" },
+  trash: { button: "ゴミ箱に入れる", confirm: (count: number) => `次の ${count} 通を Gmail のゴミ箱に入れます`, failed: "ゴミ箱に入れられませんでした" },
+} as const;
 
-/** Gmail のメールを追う Task だけに出す。押すとゴミ箱に入れるメールを見せ、承認したものだけを Gmail に書き込む */
-export function GmailActions({ detail, onDone }: { detail: TaskDetail; onDone: () => Promise<void> }) {
-  const [target, setTarget] = useState<GmailTrashTargetView | null>(null);
+/** メールの一覧を見せ、承認したものだけを Gmail で確認済みにする（アーカイブ）かゴミ箱に入れる */
+export function GmailMailFlow({ taskId, onDone }: { taskId: number; onDone: () => Promise<void> }) {
+  const [pending, setPending] = useState<{ action: "archive" | "trash"; target: GmailMailTargetView } | null>(null);
   const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string }>({ kind: "idle" });
-  if (!tracksGmail(detail.items) || detail.status === "done" || detail.status === "dismissed") return null;
-  const open = async () => {
+  const open = async (action: "archive" | "trash") => {
     setState({ kind: "busy" });
-    const loaded = await api.gmailTrashTarget(detail.id);
+    const loaded = await api.gmailMailTarget(taskId);
     if ("error" in loaded) setState({ kind: "failed", message: loaded.error });
     else {
-      setTarget(loaded);
+      setPending({ action, target: loaded });
       setState({ kind: "idle" });
     }
   };
-  const run = async (messageIds: ReadonlyArray<string>) => {
+  const run = async (action: "archive" | "trash", messageIds: ReadonlyArray<string>) => {
     setState({ kind: "busy" });
-    const outcome = await api.gmailTrash(detail.id, messageIds);
+    const outcome = await api.gmailProcess(taskId, action, messageIds);
     if (outcome.ok) {
-      setTarget(null);
+      setPending(null);
       setState({ kind: "idle" });
       await onDone();
-    } else setState({ kind: "failed", message: outcome.message });
+    } else setState({ kind: "failed", message: `${GMAIL_ACTIONS[action].failed}: ${outcome.message}` });
   };
 
   return (
-    <section className="next-action" aria-labelledby="drawer-gmail">
-      <h3 id="drawer-gmail" className="drawer-section-title">
-        Gmail
-      </h3>
-      {target === null ? (
+    <>
+      {pending === null ? (
         <div className="step-actions">
-          <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void open()}>
-            メールをゴミ箱に入れる
+          <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void open("archive")}>
+            {GMAIL_ACTIONS.archive.button}
+          </button>
+          <button type="button" className="quiet-button" disabled={state.kind === "busy"} onClick={() => void open("trash")}>
+            {GMAIL_ACTIONS.trash.button}
           </button>
         </div>
-      ) : target.messages.length === 0 ? (
-        <p className="problem">ゴミ箱に入れるメールは残っていません。</p>
+      ) : pending.target.messages.length === 0 ? (
+        <p className="problem">受信トレイに残っているメールはありません。</p>
       ) : (
-        <div className="merge-confirm" role="alertdialog" aria-labelledby="gmail-confirm-title">
-          <p id="gmail-confirm-title" className="merge-confirm-title">
-            次の {target.messages.length} 通を Gmail のゴミ箱に入れます
+        <div className="merge-confirm" role="alertdialog" aria-labelledby={`gmail-confirm-${taskId}`}>
+          <p id={`gmail-confirm-${taskId}`} className="merge-confirm-title">
+            {GMAIL_ACTIONS[pending.action].confirm(pending.target.messages.length)}
           </p>
           <ul className="gmail-trash-list">
-            {target.messages.slice(0, GMAIL_PREVIEW_LIMIT).map((message) => (
+            {pending.target.messages.slice(0, GMAIL_PREVIEW_LIMIT).map((message) => (
               <li key={message.messageId}>
                 {message.subject === "" ? "（件名なし）" : message.subject}
                 <span className="gmail-trash-from">{message.senderName}</span>
               </li>
             ))}
-            {target.messages.length > GMAIL_PREVIEW_LIMIT && <li>ほか {target.messages.length - GMAIL_PREVIEW_LIMIT} 通</li>}
+            {pending.target.messages.length > GMAIL_PREVIEW_LIMIT && <li>ほか {pending.target.messages.length - GMAIL_PREVIEW_LIMIT} 通</li>}
           </ul>
           <div className="merge-confirm-actions">
-            <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void run(target.messages.map((message) => message.messageId))}>
-              ゴミ箱に入れる
+            <button
+              type="button"
+              className="primary-button"
+              disabled={state.kind === "busy"}
+              onClick={() => void run(pending.action, pending.target.messages.map((message) => message.messageId))}
+            >
+              {GMAIL_ACTIONS[pending.action].button}
             </button>
-            <button type="button" className="quiet-button" onClick={() => setTarget(null)}>
+            <button type="button" className="quiet-button" onClick={() => setPending(null)}>
               やめる
             </button>
           </div>
         </div>
       )}
-      {state.kind === "failed" && <p className="problem">Gmail に書き込めませんでした: {state.message}</p>}
+      {state.kind === "failed" && <p className="problem">{state.message}</p>}
+    </>
+  );
+}
+
+const hasMailStep = (detail: TaskDetail) => JSON.stringify(detail.nextActions ?? null).includes('"process_mail"');
+
+/** Gmail のメールを追う Task のうち、次にやることに片付ける手順がないものに出す（人からのメールのスレッドなど） */
+export function GmailActions({ detail, onDone }: { detail: TaskDetail; onDone: () => Promise<void> }) {
+  if (!tracksGmail(detail.items) || detail.status === "done" || detail.status === "dismissed" || hasMailStep(detail)) return null;
+  return (
+    <section className="next-action" aria-labelledby="drawer-gmail">
+      <h3 id="drawer-gmail" className="drawer-section-title">
+        Gmail
+      </h3>
+      <GmailMailFlow taskId={detail.id} onDone={onDone} />
     </section>
   );
 }
@@ -567,6 +590,7 @@ function StepItem(props: {
         </div>
       )}
       {isCurrent && step.kind === "push_conflict_resolution" && <ConflictPushFlow taskId={detail.id} onPushed={props.onChanged} />}
+      {isCurrent && step.kind === "process_mail" && <GmailMailFlow taskId={detail.id} onDone={props.onChanged} />}
       {isCurrent && step.kind === "decision" && (
         <div className="step-actions">
           {step.options.map((option) => (

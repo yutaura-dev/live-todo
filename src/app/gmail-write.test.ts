@@ -8,7 +8,7 @@ import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import { GmailRequestError } from "../sources/gmail/gmail-client.js";
 import { makeTestGmail } from "../sources/gmail/test-client.js";
-import { gmailTrash, gmailTrashTarget } from "./gmail-write.js";
+import { gmailMailTarget, gmailProcess } from "./gmail-write.js";
 
 const insertMail = (messageId: string, overrides: Partial<typeof gmailMessages.$inferInsert> = {}) =>
   Effect.gen(function* () {
@@ -48,7 +48,7 @@ const trashedIds = Effect.gen(function* () {
   return (yield* db.select().from(gmailMessages).where(eq(gmailMessages.trashed, true)).pipe(Effect.orDie)).map((row) => row.messageId).toSorted();
 });
 
-describe("gmailTrashTarget（ゴミ箱に入れるメールを、承認の前に見せる）", () => {
+describe("gmailMailTarget（ゴミ箱に入れるメールを、承認の前に見せる）", () => {
   it.effect("送り主の Task なら、受信トレイに残っているそのメールを返す", () =>
     Effect.gen(function* () {
       yield* insertMail("a", { subject: "セール 1" });
@@ -57,7 +57,7 @@ describe("gmailTrashTarget（ゴミ箱に入れるメールを、承認の前に
       yield* insertMail("other", { senderKey: "x@y.example" });
       const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
 
-      const target = yield* gmailTrashTarget(taskId);
+      const target = yield* gmailMailTarget(taskId);
 
       assert.deepStrictEqual(target.messages.map((message) => [message.messageId, message.subject]), [["a", "セール 1"], ["b", "セール 2"]]);
     }).pipe(Effect.provide(TestDatabase)));
@@ -69,11 +69,40 @@ describe("gmailTrashTarget（ゴミ箱に入れるメールを、承認の前に
       yield* insertMail("c", { kind: "personal", threadId: "t2" });
       const taskId = yield* linkedTask("gmail:me:threads", "t1");
 
-      assert.deepStrictEqual((yield* gmailTrashTarget(taskId)).messages.map((message) => message.messageId), ["a", "b"]);
+      assert.deepStrictEqual((yield* gmailMailTarget(taskId)).messages.map((message) => message.messageId), ["a", "b"]);
     }).pipe(Effect.provide(TestDatabase)));
 });
 
-describe("gmailTrash（承認したメールをゴミ箱に入れる）", () => {
+describe("gmailProcess（承認したメールを確認済みにする・ゴミ箱に入れる）", () => {
+  it.effect("確認済みにすると、アーカイブして既読にし（読んだメールとして数える）、残りがなければ Task を済みにする", () => {
+    const gmail = makeTestGmail();
+    return Effect.gen(function* () {
+      yield* insertMail("a");
+      const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
+
+      yield* gmailProcess(taskId, "archive", ["a"], () => Effect.succeed(gmail.client));
+
+      assert.deepStrictEqual(gmail.state.archived, ["a"]);
+      assert.deepStrictEqual(gmail.state.trashed, []);
+      const db = yield* Database;
+      const [row] = yield* db.select().from(gmailMessages).pipe(Effect.orDie);
+      assert.deepInclude(row, { inInbox: false, unread: false, trashed: false });
+      assert.deepInclude((yield* db.select().from(approvals).pipe(Effect.orDie))[0], { action: "gmail_archive", status: "executed" });
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "done");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("スレッドの Task は、受信トレイに残っているメールがなくなれば済みにする", () => {
+    const gmail = makeTestGmail();
+    return Effect.gen(function* () {
+      yield* insertMail("a", { kind: "personal", threadId: "t1" });
+      yield* insertMail("b", { kind: "mine", threadId: "t1", inInbox: false });
+      const taskId = yield* linkedTask("gmail:me:threads", "t1");
+      yield* gmailProcess(taskId, "archive", ["a", "b"], () => Effect.succeed(gmail.client));
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "done");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
   it.effect("承認したメールだけをゴミ箱に入れて記録し、残りがなければ Task を済みにする", () => {
     const gmail = makeTestGmail();
     return Effect.gen(function* () {
@@ -81,7 +110,7 @@ describe("gmailTrash（承認したメールをゴミ箱に入れる）", () => 
       yield* insertMail("b");
       const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
 
-      yield* gmailTrash(taskId, ["a", "b"], () => Effect.succeed(gmail.client));
+      yield* gmailProcess(taskId, "trash", ["a", "b"], () => Effect.succeed(gmail.client));
 
       assert.deepStrictEqual(gmail.state.trashed, ["a", "b"]);
       assert.deepStrictEqual(yield* trashedIds, ["a", "b"]);
@@ -100,7 +129,7 @@ describe("gmailTrash（承認したメールをゴミ箱に入れる）", () => 
       yield* insertMail("new");
       const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
 
-      yield* gmailTrash(taskId, ["a", "elsewhere"], () => Effect.succeed(gmail.client));
+      yield* gmailProcess(taskId, "trash", ["a", "elsewhere"], () => Effect.succeed(gmail.client));
 
       assert.deepStrictEqual(gmail.state.trashed, ["a"]);
       assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
@@ -116,7 +145,7 @@ describe("gmailTrash（承認したメールをゴミ箱に入れる）", () => 
       yield* insertMail("c");
       const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
 
-      const error = yield* gmailTrash(taskId, ["a", "b", "c"], () => Effect.succeed(client)).pipe(Effect.flip);
+      const error = yield* gmailProcess(taskId, "trash", ["a", "b", "c"], () => Effect.succeed(client)).pipe(Effect.flip);
 
       assert.include(error.message, "権限");
       assert.deepStrictEqual(yield* trashedIds, ["a"]);
@@ -128,7 +157,7 @@ describe("gmailTrash（承認したメールをゴミ箱に入れる）", () => 
   it.effect("Gmail の Task でなければエラーにする", () =>
     Effect.gen(function* () {
       const taskId = yield* linkedTask("slack:home", "C1:1.1");
-      const error = yield* gmailTrash(taskId, ["a"], () => Effect.succeed(makeTestGmail().client)).pipe(Effect.flip);
+      const error = yield* gmailProcess(taskId, "trash", ["a"], () => Effect.succeed(makeTestGmail().client)).pipe(Effect.flip);
       assert.include(error.message, "Gmail");
     }).pipe(Effect.provide(TestDatabase)));
 });

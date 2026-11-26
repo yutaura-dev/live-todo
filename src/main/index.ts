@@ -10,8 +10,7 @@ import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
-import { gmailTrash, gmailTrashTarget, GmailWriteError } from "../app/gmail-write.js";
-import { GmailClient } from "../sources/gmail/gmail-client.js";
+import { gmailMailTarget, gmailProcess, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
 import { releaseUntouchedInboxTasks, runSlackConversationTriage } from "../app/slack-conversations.js";
@@ -187,6 +186,8 @@ const startSync = Effect.gen(function* () {
   const planSources = [
     ...config.accounts.filter((account) => account.planNextActions).flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]),
     ...config.slackAccounts.filter((account) => account.planNextActions).flatMap((account) => [`slack:${account.id}`, `slack:${account.id}:inbox`]),
+    // 送り主の Task はアプリが手順を決めるので、Claude Code に考えさせるのは人からのメールのスレッドだけ
+    ...config.gmailAccounts.filter((account) => account.planNextActions).map((account) => `gmail:${account.id}:threads`),
   ];
   // Slack の会話から Task を決める（メッセージ本文を Claude に送るので、Claude Code で考えるのを有効にしたワークスペースだけ）
   const conversationAccounts = config.slackAccounts.filter((account) => account.planNextActions);
@@ -506,20 +507,22 @@ const gmailClientFor = (accountId: string) =>
 
 function registerGmailActions() {
   const TaskIdInput = Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)) });
-  ipcMain.handle(IPC_CHANNELS.gmailTrashTarget, (_event, input: unknown) =>
+  ipcMain.handle(IPC_CHANNELS.gmailMailTarget, (_event, input: unknown) =>
     runtime.runPromise(
       Schema.decodeUnknownEffect(TaskIdInput)(input).pipe(
-        Effect.flatMap((request) => gmailTrashTarget(request.taskId)),
+        Effect.flatMap((request) => gmailMailTarget(request.taskId)),
         Effect.catch((error) => Effect.succeed({ error: errorMessage(error) })),
       ),
     ),
   );
   // 外部への書き込み。renderer で一覧を見せて確認を出し、ユーザーが承認したメールだけを渡す
-  ipcMain.handle(IPC_CHANNELS.gmailTrash, (_event, input: unknown) =>
+  ipcMain.handle(IPC_CHANNELS.gmailProcess, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {
-        const request = yield* Schema.decodeUnknownEffect(Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), messageIds: Schema.Array(Schema.String) }))(input);
-        yield* gmailTrash(request.taskId, request.messageIds, gmailClientFor);
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), action: Schema.Literals(["archive", "trash"]), messageIds: Schema.Array(Schema.String) }),
+        )(input);
+        yield* gmailProcess(request.taskId, request.action, request.messageIds, gmailClientFor);
       }),
     ),
   );
@@ -664,8 +667,8 @@ function registerReplan() {
         const detail = yield* (yield* BoardService).taskDetail(taskId);
         // 次にやることを考える処理は、AI に考えさせる設定のアカウントでしか動かない（会社の情報を許可していない LLM に送らないため）
         const config = yield* loadAppConfigFile(configPath);
-        const accountIds = detail.items.filter((item) => item.role === "tracks").map((item) => /^(?:github|slack):([^:]+)/.exec(item.source)?.[1]);
-        const planning = [...config.accounts, ...config.slackAccounts].filter((account) => account.planNextActions).map((account) => account.id);
+        const accountIds = detail.items.filter((item) => item.role === "tracks").map((item) => /^(?:github|slack|gmail):([^:]+)/.exec(item.source)?.[1]);
+        const planning = [...config.accounts, ...config.slackAccounts, ...config.gmailAccounts].filter((account) => account.planNextActions).map((account) => account.id);
         const allowed = accountIds.length > 0 && accountIds.every((id) => id !== undefined && planning.includes(id));
         if (!allowed) return yield* new GitHubRequestError({ message: "このアカウントでは、次にやることを AI に考えさせない設定です" });
         yield* requestReplan(taskId);

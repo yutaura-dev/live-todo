@@ -100,6 +100,17 @@ describe("GmailClientLive（gws でGmail を読む）", () => {
       ),
     ));
 
+  it.effect("確認済みにするときは、受信トレイと未読のラベルを外す（アーカイブして既読にする）", () => {
+    const fake = fakeGws(() => ok({ id: "m1" }));
+    return Effect.gen(function* () {
+      yield* (yield* client).archive("m1");
+      const args = fake.calls[0]!;
+      assert.deepStrictEqual(args.slice(0, 4), ["gmail", "users", "messages", "modify"]);
+      assert.deepInclude(paramsOf(args), { userId: "me", id: "m1" });
+      assert.deepStrictEqual(JSON.parse(args[args.indexOf("--json") + 1]!), { removeLabelIds: ["INBOX", "UNREAD"] });
+    }).pipe(Effect.provide(fake.layer));
+  });
+
   it.effect("ゴミ箱に入れる", () => {
     const fake = fakeGws(() => ok({ id: "m1" }));
     return Effect.gen(function* () {

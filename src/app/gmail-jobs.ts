@@ -15,6 +15,7 @@ import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { ingestGmail } from "../sources/gmail/gmail-ingest.js";
 import type { ResolvedGmailAccount } from "./config/app-config.js";
 import { makeMailClassifier } from "./llm.js";
+import { applyGmailSenderPlans } from "./gmail-plans.js";
 
 export const GMAIL_SYNC_INTERVAL = "2 minutes";
 
@@ -26,6 +27,7 @@ export const runGmailSync = Effect.fnUntraced(function* (accountId: string) {
   yield* ingestGmail({ accountId });
   yield* syncSource(yield* makeGmailSendersBinding({ accountId }));
   yield* refreshSenderBriefs(accountId);
+  yield* applyGmailSenderPlans(accountId);
   yield* syncSource(yield* makeGmailThreadsBinding({ accountId }));
 });
 

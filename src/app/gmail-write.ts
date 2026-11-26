@@ -43,19 +43,29 @@ const candidates = Effect.fnUntraced(function* (group: { accountId: string; kind
   return group.kind === "senders" ? rows.filter((row) => row.inInbox) : rows;
 });
 
-/** 承認の確認に見せる、ゴミ箱に入れるメールの一覧 */
-export const gmailTrashTarget = Effect.fnUntraced(function* (taskId: number) {
+/** 承認の確認に見せる、確認済みにする・ゴミ箱に入れるメールの一覧 */
+export const gmailMailTarget = Effect.fnUntraced(function* (taskId: number) {
   const group = yield* trackedGroup(taskId);
   const messages = yield* candidates(group);
   return { kind: group.kind, messages: messages.map(({ messageId, subject, senderName, receivedAt }) => ({ messageId, subject, senderName, receivedAt })) };
 });
 
+/** archive: 確認済みにする（アーカイブして既読にする） / trash: ゴミ箱に入れる */
+export type GmailMailAction = "archive" | "trash";
+
+const ACTIONS: Record<GmailMailAction, { approval: string; label: string; applied: { inInbox: false; unread?: false; trashed?: true } }> = {
+  // 既読にもする理由: 送り主ごとの集計で「読まずにアーカイブした（片付けた）」に数えず、読んでいるメールとして扱うため
+  archive: { approval: "gmail_archive", label: "確認済みにした", applied: { inInbox: false, unread: false } },
+  trash: { approval: "gmail_trash", label: "ゴミ箱に入れた", applied: { inInbox: false, trashed: true } },
+};
+
 /**
- * 外部への書き込み。ユーザーが確認で承認したメール（approved）だけをゴミ箱に入れる。承認のあとに届いたものは入れない。
+ * 外部への書き込み。ユーザーが確認で承認したメール（approved）だけを確認済みにする・ゴミ箱に入れる。承認のあとに届いたものは扱わない。
  * 失敗したらそこで止め、やり直さない（書き込みは二重に効くおそれがあるため）
  */
-export const gmailTrash = Effect.fnUntraced(function* <E, R>(
+export const gmailProcess = Effect.fnUntraced(function* <E, R>(
   taskId: number,
+  action: GmailMailAction,
   approved: ReadonlyArray<string>,
   clientFor: (accountId: string) => Effect.Effect<GmailClient["Service"], E, R>,
 ) {
@@ -66,7 +76,7 @@ export const gmailTrash = Effect.fnUntraced(function* <E, R>(
   const client = yield* clientFor(group.accountId);
   const record = {
     taskId,
-    action: "gmail_trash",
+    action: ACTIONS[action].approval,
     target: `${group.source} ${group.externalId}`,
     payload: { messageIds: targets },
     approvedAt: DateTime.formatIso(yield* DateTime.now),
@@ -75,7 +85,7 @@ export const gmailTrash = Effect.fnUntraced(function* <E, R>(
   const done: string[] = [];
   let failure: string | undefined;
   for (const id of targets) {
-    const result = yield* client.trash(id).pipe(Effect.result);
+    const result = yield* (action === "archive" ? client.archive(id) : client.trash(id)).pipe(Effect.result);
     if (result._tag === "Failure") {
       failure = result.failure._tag === "GmailRequestError" ? result.failure.message : "Gmail に書き込めなかった";
       break;
@@ -86,15 +96,15 @@ export const gmailTrash = Effect.fnUntraced(function* <E, R>(
   if (done.length > 0) {
     yield* db
       .update(gmailMessages)
-      .set({ trashed: true, inInbox: false, updatedAt: executedAt })
+      .set({ ...ACTIONS[action].applied, updatedAt: executedAt })
       .where(and(eq(gmailMessages.accountId, group.accountId), inArray(gmailMessages.messageId, done)))
       .pipe(Effect.orDie);
   }
   if (failure !== undefined) {
     yield* db.insert(approvals).values({ ...record, status: "failed", error: failure, executedAt }).pipe(Effect.orDie);
-    return yield* new GmailWriteError({ message: `${done.length} 通をゴミ箱に入れたところで止めた: ${failure}` });
+    return yield* new GmailWriteError({ message: `${done.length} 通を${ACTIONS[action].label}ところで止めた: ${failure}` });
   }
   yield* db.insert(approvals).values({ ...record, status: "executed", executedAt }).pipe(Effect.orDie);
-  if ((yield* candidates(group)).length === 0) yield* applyItemState(group.source, group.externalId, "resolved");
-  return { trashed: done.length };
+  if ((yield* candidates(group)).every((row) => !row.inInbox)) yield* applyItemState(group.source, group.externalId, "resolved");
+  return { processed: done.length };
 });

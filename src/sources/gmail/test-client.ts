@@ -11,6 +11,7 @@ export function makeTestGmail(initial: ReadonlyArray<GmailMessage> = []) {
     queries: [] as string[],
     fetched: [] as string[],
     trashed: [] as string[],
+    archived: [] as string[],
   };
   const client = GmailClient.of({
     historyId: Effect.sync(() => state.historyId),
@@ -35,6 +36,12 @@ export function makeTestGmail(initial: ReadonlyArray<GmailMessage> = []) {
           .toSorted((a, b) => a.receivedAt - b.receivedAt)
           .map((message): GmailThreadMessage => ({ ...message, text: state.texts.get(message.id) ?? "" })),
       ),
+    archive: (id) =>
+      Effect.sync(() => {
+        state.archived.push(id);
+        const message = state.messages.get(id);
+        if (message !== undefined) state.messages.set(id, { ...message, labelIds: message.labelIds.filter((label) => label !== "INBOX" && label !== "UNREAD") });
+      }),
     trash: (id) =>
       Effect.sync(() => {
         state.trashed.push(id);

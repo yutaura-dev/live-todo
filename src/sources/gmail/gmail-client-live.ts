@@ -107,8 +107,8 @@ export const GmailClientLive = Layer.effect(
   GmailClient,
   Effect.gen(function* () {
     const gws = yield* Gws;
-    const call = Effect.fnUntraced(function* (path: ReadonlyArray<string>, params: Record<string, unknown>) {
-      const result = yield* gws.run(["gmail", "users", ...path, "--params", JSON.stringify({ userId: "me", ...params })]);
+    const call = Effect.fnUntraced(function* (path: ReadonlyArray<string>, params: Record<string, unknown>, body?: unknown) {
+      const result = yield* gws.run(["gmail", "users", ...path, "--params", JSON.stringify({ userId: "me", ...params }), ...(body === undefined ? [] : ["--json", JSON.stringify(body)])]);
       if (result.exitCode === 0) return result.stdout;
       const status = statusOf(result.stdout);
       return yield* new GmailRequestError({ message: `gws gmail ${path.join(" ")} が失敗した${status === undefined ? "" : `（${status}）`}`, ...(status === undefined ? {} : { status }) });
@@ -157,6 +157,7 @@ export const GmailClientLive = Layer.effect(
         const thread = yield* decodeJson(Thread, yield* call(["threads", "get"], { id: threadId, format: "full" }));
         return (thread.messages ?? []).map((entry): GmailThreadMessage => ({ ...toMessage(entry), text: textOf(entry.payload) }));
       }),
+      archive: (id: string) => call(["messages", "modify"], { id }, { removeLabelIds: ["INBOX", "UNREAD"] }).pipe(Effect.asVoid),
       trash: (id: string) => call(["messages", "trash"], { id }).pipe(Effect.asVoid),
     });
   }),

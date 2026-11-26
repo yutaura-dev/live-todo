@@ -22,10 +22,11 @@ export type WaitCondition =
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
 /** resolve_conflicts: アプリが Claude Code にコンフリクトを直させる / push_conflict_resolution: 直した内容を確かめて push する */
 export type ActionStep = StepBase & {
-  kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" | "resolve_conflicts" | "push_conflict_resolution";
+  kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" | "resolve_conflicts" | "push_conflict_resolution" | "process_mail";
   until?: WaitCondition;
 };
-export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push", "resolve_conflicts", "push_conflict_resolution"] as const;
+/** process_mail: アプリがメールの一覧を見せ、承認したものを Gmail で確認済みにする（アーカイブ）かゴミ箱に入れる */
+export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push", "resolve_conflicts", "push_conflict_resolution", "process_mail"] as const;
 export type DecisionStep = StepBase & {
   kind: "decision";
   options: ReadonlyArray<{ key: string; label: string; steps: ReadonlyArray<Step> }>;
@@ -314,3 +315,31 @@ const PlanSchema = Schema.Struct({ steps: Schema.Array(StepSchema) });
 
 /** DB に保存した次にやることを読む。形が違えば none（画面に出さない） */
 export const decodePlan = (value: unknown): Option.Option<NextActionPlan> => Schema.decodeUnknownOption(PlanSchema)(value);
+
+/**
+ * メルマガ・お知らせの送り主の Task の次にやること。アプリで決める（AI に考えさせるほどの中身がないため）。
+ * 片付ける手順は済みにしない: 新しいメールが届けば同じ手順でまた片付けるため
+ */
+export function senderPlan(group: { senderName: string; pending: number; suggestUnsubscribe: boolean }): NextActionPlan {
+  const trash: Step = { id: "process", kind: "process_mail", title: `受信トレイの ${group.pending} 通を確かめて、確認済みにするかゴミ箱に入れる`, effort: "easy", mode: "serial", status: "todo" };
+  if (!group.suggestUnsubscribe) return { steps: [trash] };
+  const manual = (id: string, title: string): Step => ({ id, kind: "manual", title, effort: "easy", mode: "serial", status: "todo" });
+  return {
+    steps: [
+      trash,
+      {
+        id: "subscription",
+        kind: "decision",
+        title: `${group.senderName} のメールはほとんど読まずに片付けている。配信を続けるか決める`,
+        effort: "easy",
+        mode: "parallel",
+        status: "todo",
+        options: [
+          { key: "unsubscribe", label: "配信を解除する", steps: [manual("unsubscribe", `${group.senderName} のメールにある配信停止のリンクから解除する`)] },
+          { key: "filter", label: "フィルタで受信トレイを飛ばす", steps: [manual("filter", `Gmail で ${group.senderName} のメールが受信トレイをスキップするフィルタを作る`)] },
+          { key: "keep", label: "このまま受け取る", steps: [] },
+        ],
+      },
+    ],
+  };
+}

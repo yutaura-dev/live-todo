@@ -7,7 +7,7 @@ import type { TaskDetail } from "../core/board/board-service.js";
 export type { AccountFilterPreview, TargetCheck } from "../app/settings/filter-preview.js";
 export type { FilterReason } from "../sources/github/repository-filter.js";
 
-export type GmailTrashTargetView = {
+export type GmailMailTargetView = {
   kind: "senders" | "threads";
   messages: ReadonlyArray<{ messageId: string; subject: string; senderName: string; receivedAt: number }>;
 };
@@ -143,10 +143,10 @@ export interface LiveTodoApi {
   recurringUpdate(input: { id: number; title?: string; note?: string; schedule?: RecurrenceScheduleView; active?: boolean }): Promise<Outcome>;
   /** Slack の To-do を完了にする・To-do から外す。外部への書き込み。確認で承認したあとにだけ呼ぶ */
   slackAction(taskId: number, action: "complete" | "remove"): Promise<Outcome>;
-  /** ゴミ箱に入れる候補のメール（確認に見せる） */
-  gmailTrashTarget(taskId: number): Promise<GmailTrashTargetView | { error: string }>;
-  /** 確認で見せたメールを Gmail のゴミ箱に入れる。外部への書き込み。承認したあとにだけ呼ぶ */
-  gmailTrash(taskId: number, messageIds: ReadonlyArray<string>): Promise<Outcome>;
+  /** 確認済みにする・ゴミ箱に入れる候補のメール（確認に見せる） */
+  gmailMailTarget(taskId: number): Promise<GmailMailTargetView | { error: string }>;
+  /** 確認で見せたメールを、Gmail で確認済みにする（アーカイブして既読）かゴミ箱に入れる。外部への書き込み。承認したあとにだけ呼ぶ */
+  gmailProcess(taskId: number, action: "archive" | "trash", messageIds: ReadonlyArray<string>): Promise<Outcome>;
   /** Slack のセッションでつながるかを確かめる（auth.test）。誰のどのワークスペースか */
   testSlack(accountId: string): Promise<{ user: string; team: string } | { error: string }>;
   /** Slack のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する。workspace が空ならログインしたワークスペースを使う */

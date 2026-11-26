@@ -58,6 +58,8 @@ export class GmailClient extends Context.Service<GmailClient, {
   history(startHistoryId: string): Effect.Effect<GmailHistory, GmailClientError>;
   /** スレッドのメール（古い順、本文つき） */
   thread(threadId: string): Effect.Effect<ReadonlyArray<GmailThreadMessage>, GmailClientError>;
+  /** 確認済みにする: 受信トレイから外して（アーカイブ）既読にする（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ） */
+  archive(id: string): Effect.Effect<void, GmailClientError>;
   /** ゴミ箱に入れる（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ） */
   trash(id: string): Effect.Effect<void, GmailClientError>;
 }>()("live-todo/sources/gmail/GmailClient") {}

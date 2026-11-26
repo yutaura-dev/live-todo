@@ -11,6 +11,7 @@ import {
   planFromDependencyReview,
   planFromProposedSteps,
   reopenStep,
+  senderPlan,
   taskEffort,
 } from "./next-actions.js";
 
@@ -238,5 +239,22 @@ describe("currentSteps", () => {
 
   it("すべて済んだら、着手できる手順はない", () => {
     assert.lengthOf(currentSteps(completeStep(completeStep(completeStep(plan, "a"), "b"), "c")), 0);
+  });
+});
+
+describe("senderPlan（メルマガ・お知らせの送り主の Task の次にやること）", () => {
+  it("受信トレイのメールを確かめて、確認済みにするかゴミ箱に入れる手順にする（アプリで Gmail に反映する）", () => {
+    const plan = senderPlan({ senderName: "Shop", pending: 3, suggestUnsubscribe: false });
+    assert.deepStrictEqual(plan.steps.map((step) => [step.kind, step.title]), [["process_mail", "受信トレイの 3 通を確かめて、確認済みにするかゴミ箱に入れる"]]);
+  });
+
+  it("配信の解除を勧める送り主には、配信を続けるかの分かれ道を並行して並べる", () => {
+    const plan = senderPlan({ senderName: "Shop", pending: 1, suggestUnsubscribe: true });
+    const decision = plan.steps[1]!;
+    assert.strictEqual(decision.kind, "decision");
+    assert.strictEqual(decision.mode, "parallel");
+    assert.include(decision.title, "Shop");
+    assert.deepStrictEqual(decision.kind === "decision" ? decision.options.map((option) => option.key) : [], ["unsubscribe", "filter", "keep"]);
+    assert.lengthOf(currentSteps(plan), 2);
   });
 });
