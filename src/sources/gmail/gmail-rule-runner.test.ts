@@ -114,11 +114,35 @@ describe("applyGmailRules（利用者が決めたルールをメールに当て�
       yield* insertMail("a", { receivedAt: Date.UTC(2026, 10, 22) });
       yield* insertMail("b", { receivedAt: Date.UTC(2026, 10, 22), inInbox: false });
 
-      const applied = yield* applyGmailRules("me", [rule], { includeExisting: rule.id });
+      const result = yield* applyGmailRules("me", [rule], { includeExisting: rule.id });
 
-      assert.strictEqual(applied, 1);
+      assert.strictEqual(result.applied, 1);
       assert.lengthOf(asked, 1);
       assert.deepStrictEqual(gmail.state.modified.map((entry) => entry.id), ["a"]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("ルールの中身（どういう時・操作）を書き換えたら、前に判定したメールも判定し直す", () => {
+    const { gmail, asked, layer } = setup();
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      yield* insertMail("a");
+      yield* applyGmailRules("me", [rule]);
+      const withArchive = { ...rule, then: "レシート ラベルをつけて既読にし、アーカイブする", interpretedFrom: "レシート ラベルをつけて既読にし、アーカイブする", actions: { gmail: { labels: ["レシート"], markRead: true, archive: true } } };
+      yield* applyGmailRules("me", [withArchive]);
+      assert.lengthOf(asked, 2);
+      assert.deepStrictEqual(gmail.state.modified.map((entry) => entry.remove), [["UNREAD"], ["UNREAD", "INBOX"]]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("当てた結果の内訳（新しく当てた・すでに当ててある・当てはまらなかった）を返す", () => {
+    const { layer } = setup();
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      yield* insertMail("a");
+      yield* insertMail("b", { subject: "新機能", topic: "product" });
+      assert.deepStrictEqual(yield* applyGmailRules("me", [rule], { includeExisting: rule.id }), { applied: 1, alreadyApplied: 0, notMatched: 1 });
+      assert.deepStrictEqual(yield* applyGmailRules("me", [rule], { includeExisting: rule.id }), { applied: 0, alreadyApplied: 1, notMatched: 1 });
     }).pipe(Effect.provide(layer));
   });
 

@@ -595,16 +595,19 @@ function registerTaskQuestions() {
         const config = yield* loadAppConfigFile(configPath);
         const rule = config.rules.find((candidate) => candidate.id === request.ruleId);
         if (rule === undefined) return { ok: false as const, reason: "保存したルールが見つかりません。設定を保存してから押してください" };
-        let applied = 0;
+        const total = { applied: 0, alreadyApplied: 0, notMatched: 0 };
         for (const account of config.gmailAccounts) {
           const client = yield* gmailClientFor(account.id);
           const classifier = yield* makeMailClassifier(account.resolvedLlmProfile);
-          applied += yield* applyGmailRules(account.id, [rule], { includeExisting: rule.id }).pipe(
+          const summary = yield* applyGmailRules(account.id, [rule], { includeExisting: rule.id }).pipe(
             Effect.provideService(GmailClient, client),
             Effect.provideService(MailClassifier, classifier),
           );
+          total.applied += summary.applied;
+          total.alreadyApplied += summary.alreadyApplied;
+          total.notMatched += summary.notMatched;
         }
-        return { ok: true as const, applied };
+        return { ok: true as const, ...total };
       }).pipe(Effect.catch((error) => Effect.succeed({ ok: false as const, reason: errorMessage(error) }))),
     ),
   );

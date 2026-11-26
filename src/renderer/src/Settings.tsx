@@ -773,13 +773,15 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
 
 /** ルールを作る前に届いた、今あるものにも当てる。外部への書き込みなので、確かめてから実行する */
 function ApplyToExisting({ rule }: { rule: RuleDraft }) {
-  const [state, setState] = useState<{ kind: "idle" } | { kind: "confirm" } | { kind: "busy" } | { kind: "done"; applied: number } | { kind: "failed"; reason: string }>({ kind: "idle" });
+  const [state, setState] = useState<
+    { kind: "idle" } | { kind: "confirm" } | { kind: "busy" } | { kind: "done"; applied: number; alreadyApplied: number; notMatched: number } | { kind: "failed"; reason: string }
+  >({ kind: "idle" });
   const targets = existingTargetsOf(rule.actions);
   if (!isInterpreted(rule) || targets.length === 0) return null;
   const run = async () => {
     setState({ kind: "busy" });
     const result = await api.applyRuleToExisting(rule.id);
-    setState(result.ok ? { kind: "done", applied: result.applied } : { kind: "failed", reason: result.reason });
+    setState(result.ok ? { kind: "done", applied: result.applied, alreadyApplied: result.alreadyApplied, notMatched: result.notMatched } : { kind: "failed", reason: result.reason });
   };
   return (
     <div className="step-actions">
@@ -800,7 +802,11 @@ function ApplyToExisting({ rule }: { rule: RuleDraft }) {
           {state.kind === "busy" ? "当てています…" : "今あるものにも当てる"}
         </button>
       )}
-      {state.kind === "done" && <span className="field-hint">{state.applied} 件に当てました</span>}
+      {state.kind === "done" && (
+        <span className="field-hint">
+          新しく当てたもの {state.applied} 件・すでに当ててあるもの {state.alreadyApplied} 件・当てはまらなかったもの {state.notMatched} 件
+        </span>
+      )}
       {state.kind === "failed" && <span className="problem">{state.reason}</span>}
     </div>
   );

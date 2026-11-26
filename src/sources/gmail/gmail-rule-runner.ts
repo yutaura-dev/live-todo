@@ -8,19 +8,25 @@ import { GmailClient } from "./gmail-client.js";
 
 const KIND_LABELS: Record<string, string> = { newsletter: "メルマガ", notification: "お知らせ", personal: "人からのメール" };
 
+/** ルールの中身（どういう時と操作）。これが変わったルールは、前に判定したメールも判定し直す */
+const fingerprintOf = (rule: Rule) => JSON.stringify([rule.when.trim(), rule.actions]);
+
+export type RuleRunSummary = { applied: number; alreadyApplied: number; notMatched: number };
+
 /**
  * 利用者が決めたルールを、条件に当てはまるメールに当てる（ADR-0014）。ルールを決めたことを、その範囲の書き込みの承認とみなす。
  * 条件は言葉で書かれているので、当てはまるかを Decisions で判定し、確率が高いときだけ当てる。判定するのはルールを作ったあとに
- * 届いたメールだけで、同じメールを同じルールで判定するのは一度だけ（当てはまらなくても、失敗してもやり直さない）
+ * 届いたメールだけで、同じ中身のルールで同じメールを判定するのは一度だけ（当てはまらなくても、失敗してもやり直さない）
  */
 export const applyGmailRules = Effect.fnUntraced(function* (
   accountId: string,
   rules: ReadonlyArray<Rule>,
   /** includeExisting: このルールだけは、作る前に届いたメールでも受信トレイに残っているものに当てる（利用者が押したときだけ） */
   options: { includeExisting?: string } = {},
-) {
+): Effect.fn.Return<RuleRunSummary, never, Database | GmailClient | MailClassifier> {
+  const summary: RuleRunSummary = { applied: 0, alreadyApplied: 0, notMatched: 0 };
   const active = rules.filter((rule) => rule.enabled && rule.actions.gmail !== undefined);
-  if (active.length === 0) return 0;
+  if (active.length === 0) return summary;
   const db = yield* Database;
   const client = yield* GmailClient;
   const classifier = yield* MailClassifier;
@@ -31,13 +37,13 @@ export const applyGmailRules = Effect.fnUntraced(function* (
     .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.trashed, false), gte(gmailMessages.receivedAt, since)))
     .pipe(Effect.orDie);
   const isTarget = (mail: (typeof mails)[number], rule: Rule) =>
-    options.includeExisting === rule.id
-      ? mail.inInbox && isRuleCandidate({ ...mail, receivedAt: Date.parse(rule.createdAt) }, rule)
-      : isRuleCandidate(mail, rule);
-  const done = new Set(
-    (yield* db.select({ messageId: gmailRuleRuns.messageId, ruleId: gmailRuleRuns.ruleId }).from(gmailRuleRuns).where(eq(gmailRuleRuns.accountId, accountId)).pipe(Effect.orDie)).map(
-      (run) => `${run.messageId} ${run.ruleId}`,
-    ),
+    options.includeExisting === rule.id ? mail.inInbox && isRuleCandidate({ ...mail, receivedAt: Date.parse(rule.createdAt) }, rule) : isRuleCandidate(mail, rule);
+  const previous = new Map(
+    (yield* db
+      .select({ messageId: gmailRuleRuns.messageId, ruleId: gmailRuleRuns.ruleId, fingerprint: gmailRuleRuns.ruleFingerprint, status: gmailRuleRuns.status })
+      .from(gmailRuleRuns)
+      .where(eq(gmailRuleRuns.accountId, accountId))
+      .pipe(Effect.orDie)).map((run) => [`${run.messageId} ${run.ruleId} ${run.fingerprint}`, run.status]),
   );
 
   const labelIds = new Map<string, string>();
@@ -52,33 +58,44 @@ export const applyGmailRules = Effect.fnUntraced(function* (
     }
   });
 
-  let applied = 0;
   for (const rule of active) {
+    const fingerprint = fingerprintOf(rule);
     for (const mail of mails) {
-      if (done.has(`${mail.messageId} ${rule.id}`) || !isTarget(mail, rule)) continue;
+      if (!isTarget(mail, rule)) continue;
+      const key = `${mail.messageId} ${rule.id} ${fingerprint}`;
+      const before = previous.get(key);
+      if (before !== undefined) {
+        if (before === "skipped") summary.notMatched++;
+        else summary.alreadyApplied++;
+        continue;
+      }
       const actions = rule.actions.gmail!;
-      const judged = yield* classifier.matchesCondition({
-        // 種類・用件はメールの中身から判定したもの（信頼できない）なので、アプリが書いた情報の側ではなく評価対象の側に入れる
-        input: [
-          `差出人: ${mail.senderName} <${mail.senderKey}>`,
-          `件名: ${mail.subject}`,
-          `種類（推定）: ${KIND_LABELS[mail.kind] ?? mail.kind}`,
-          ...(mail.topic === null ? [] : [`用件（推定）: ${MAIL_TOPIC_LABELS[mail.topic]}`]),
-        ].join("\n"),
-        context: "",
-        condition: rule.when,
-      });
-      const record = { accountId, messageId: mail.messageId, ruleId: rule.id, ruleName: rule.name, actions, probability: judged.probability ?? null };
-      done.add(`${mail.messageId} ${rule.id}`);
+      const judgedResult = yield* classifier
+        .matchesCondition({
+          // 種類・用件はメールの中身から判定したもの（信頼できない）なので、アプリが書いた情報の側ではなく評価対象の側に入れる
+          input: [
+            `差出人: ${mail.senderName} <${mail.senderKey}>`,
+            `件名: ${mail.subject}`,
+            `種類（推定）: ${KIND_LABELS[mail.kind] ?? mail.kind}`,
+            ...(mail.topic === null ? [] : [`用件（推定）: ${MAIL_TOPIC_LABELS[mail.topic]}`]),
+          ].join("\n"),
+          context: "",
+          condition: rule.when,
+        })
+        .pipe(Effect.result);
+      // Decisions を呼べなかったときは記録せず、次の回に判定し直す（呼べなかったのを「当てはまらない」と残さない）
+      if (judgedResult._tag === "Failure") continue;
+      const judged = judgedResult.success;
+      const record = { accountId, messageId: mail.messageId, ruleId: rule.id, ruleName: rule.name, ruleFingerprint: fingerprint, actions, probability: judged.probability ?? null };
+      previous.set(key, "skipped");
       if (judged.probability === undefined || judged.probability < RULE_MATCH_PROBABILITY) {
         yield* db.insert(gmailRuleRuns).values({ ...record, status: "skipped", executedAt: DateTime.formatIso(yield* DateTime.now) }).onConflictDoNothing().pipe(Effect.orDie);
+        summary.notMatched++;
         continue;
       }
       const outcome = yield* Effect.gen(function* () {
         yield* ensureLabels(actions.labels ?? []);
-        const change = gmailLabelChangesOf(actions, labelIds);
-        yield* client.modifyLabels(mail.messageId, change);
-        return change;
+        yield* client.modifyLabels(mail.messageId, gmailLabelChangesOf(actions, labelIds));
       }).pipe(Effect.result);
       const executedAt = DateTime.formatIso(yield* DateTime.now);
       if (outcome._tag === "Failure") {
@@ -93,8 +110,9 @@ export const applyGmailRules = Effect.fnUntraced(function* (
         .set({ ...(actions.markRead === true ? { unread: false } : {}), ...(actions.archive === true ? { inInbox: false } : {}), updatedAt: executedAt })
         .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.messageId, mail.messageId)))
         .pipe(Effect.orDie);
-      applied++;
+      previous.set(key, "executed");
+      summary.applied++;
     }
   }
-  return applied;
+  return summary;
 });

@@ -183,7 +183,7 @@ export interface LiveTodoApi {
   /** 手順の開く先（公式のサイトなど）を外部のブラウザで開く。開く先は main が Task の手順から取り出す */
   openStepLink(taskId: number, stepId: string): Promise<void>;
   /** 保存したルールを、今あるもの（今は Gmail の受信トレイに残っているメール）にも当てる（外部への書き込み。利用者が押したときだけ） */
-  applyRuleToExisting(ruleId: string): Promise<{ ok: true; applied: number } | { ok: false; reason: string }>;
+  applyRuleToExisting(ruleId: string): Promise<{ ok: true; applied: number; alreadyApplied: number; notMatched: number } | { ok: false; reason: string }>;
   /** ルールの「何をする」を、Decisions でアプリの操作に読み取る */
   interpretRule(then: string): Promise<{ ok: true; actions: RuleActions } | { ok: false; reason: string }>;
   /** Task についての質問と回答（古い順） */

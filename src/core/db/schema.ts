@@ -271,8 +271,10 @@ export const gmailRuleRuns = sqliteTable(
     status: text({ enum: GMAIL_RULE_RUN_STATUSES }).notNull(),
     /** 条件に当てはまる確率（Decisions の判定。答えが返らなければ null） */
     probability: real(),
+    /** 判定したときのルールの中身（どういう時と操作）。書き換えたルールは、前に判定したものも判定し直す */
+    ruleFingerprint: text("rule_fingerprint").notNull().default(""),
     error: text(),
     executedAt: text("executed_at").notNull(),
   },
-  (table) => [uniqueIndex("gmail_rule_runs_message_rule").on(table.accountId, table.messageId, table.ruleId)],
+  (table) => [uniqueIndex("gmail_rule_runs_message_rule").on(table.accountId, table.messageId, table.ruleId, table.ruleFingerprint)],
 );
