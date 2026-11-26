@@ -24,6 +24,10 @@ export class SlackClient extends Context.Service<SlackClient, {
   userName(userId: string): Effect.Effect<Option.Option<string>, SlackClientError>;
   /** チャンネルの名前と DM かどうか。見られないチャンネル（退出・アーカイブ・共有など）なら none */
   channel(channelId: string): Effect.Effect<Option.Option<{ name: string; isDirect: boolean }>, SlackClientError>;
+  /** To-do を完了にする（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ） */
+  completeSaved(channel: string, ts: string): Effect.Effect<void, SlackClientError>;
+  /** To-do・Saved から外す。メッセージは消えない（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ） */
+  removeSaved(channel: string, ts: string): Effect.Effect<void, SlackClientError>;
   /** セッションの持ち主（自分）とワークスペース */
   readonly authTest: Effect.Effect<{ userId: string; user: string; team: string }, SlackClientError>;
 }>()("live-todo/sources/slack/SlackClient") {}

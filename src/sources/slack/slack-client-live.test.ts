@@ -134,6 +134,30 @@ describe("SlackClientLive", () => {
       assert.deepStrictEqual(yield* withClient(missing.layer, (client) => client.channel("C1")), Option.none());
     }));
 
+  it.effect("To-do を完了にするときは、Web クライアントと同じ組み合わせ（mark・todo_state・date_due）で saved.update を送る", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeSlack(() => ({ body: { ok: true } }));
+
+      yield* withClient(layer, (client) => client.completeSaved("C1", "1.0"));
+
+      const form = requests[0]!.form;
+      assert.strictEqual(requests[0]?.url.pathname, "/api/saved.update");
+      assert.deepStrictEqual(
+        ["item_type", "item_id", "ts", "mark", "todo_state", "date_due", "_x_reason"].map((key) => form.get(key)),
+        ["message", "C1", "1.0", "completed", "completed", "0", "saved-api/updateSavedMessage"],
+      );
+    }));
+
+  it.effect("To-do・Saved から外すときは、対象を必ず 3 つとも指定して saved.delete を送る（省くとリスト全体に効くおそれがあるため）", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeSlack(() => ({ body: { ok: true } }));
+
+      yield* withClient(layer, (client) => client.removeSaved("C1", "1.0"));
+
+      assert.strictEqual(requests[0]?.url.pathname, "/api/saved.delete");
+      assert.deepStrictEqual(["item_type", "item_id", "ts"].map((key) => requests[0]!.form.get(key)), ["message", "C1", "1.0"]);
+    }));
+
   it.effect("セッションの持ち主（自分）とワークスペースを auth.test で確かめる", () =>
     Effect.gen(function* () {
       const { layer } = fakeSlack(() => ({ body: { ok: true, user_id: "U1", user: "me", team: "Acme", url: "https://acme.slack.com/" } }));

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { conclusionLabel, describeChange, effortLabel, judgmentText, statusLabel, taskNumber } from "./task-text.js";
+import { conclusionLabel, describeChange, effortLabel, judgmentText, openLabel, statusLabel, taskNumber } from "./task-text.js";
 
 const change = (overrides: Partial<Parameters<typeof describeChange>[0]>) => ({
   kind: "field_changed",
@@ -89,5 +89,13 @@ describe("statusLabel", () => {
   it("削除した Task と、元の項目が消えた Task も名前で返す", () => {
     assert.strictEqual(statusLabel("dismissed"), "削除済み");
     assert.strictEqual(statusLabel("archived"), "元の項目が消えた");
+  });
+});
+
+describe("openLabel", () => {
+  it("元の項目の URL に合わせて、どこで開くかを出す", () => {
+    assert.strictEqual(openLabel("https://github.com/acme/app/pull/1"), "GitHub で開く");
+    assert.strictEqual(openLabel("https://yutaura.slack.com/archives/C1/p1"), "Slack で開く");
+    assert.strictEqual(openLabel("https://example.com/x"), "開く");
   });
 });

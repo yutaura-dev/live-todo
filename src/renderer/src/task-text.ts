@@ -59,3 +59,12 @@ export function describeChange(change: TaskDetailChange): string {
   const field = change.field === null ? "項目" : (FIELD_LABELS[change.field] ?? change.field);
   return `${actor} ${field}を「${valueText(change.field, change.before)}」から「${valueText(change.field, change.after)}」に変えた`;
 }
+
+/** 元の項目をどこで開くか（カードのボタンの文言） */
+export function openLabel(url: string): string {
+  if (!URL.canParse(url)) return "開く";
+  const host = new URL(url).hostname;
+  if (host === "github.com") return "GitHub で開く";
+  if (host === "slack.com" || host.endsWith(".slack.com")) return "Slack で開く";
+  return "開く";
+}

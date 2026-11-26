@@ -42,6 +42,7 @@ const ChannelBody = Schema.Struct({
 });
 // 見られないものは失敗ではなく「なし」として扱う
 const NOT_VISIBLE = new Set(["channel_not_found", "user_not_found", "not_in_channel", "missing_scope"]);
+const OkBody = Schema.Struct({ ok: Schema.Boolean });
 const AuthTestBody = Schema.Struct({ user_id: Schema.String, user: Schema.String, team: Schema.String });
 
 export const isSlackWorkspace = (domain: string) => /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(domain);
@@ -121,6 +122,15 @@ export const SlackClientLive = (options: SlackClientLiveOptions) =>
         );
 
       return SlackClient.of({
+        // 仕様書のとおり、Web クライアントが実際に送っていた組み合わせだけを送る（ほかの組み合わせは動作が確かめられていない）
+        completeSaved: (channel, ts) =>
+          call(
+            "saved.update",
+            { item_type: "message", item_id: channel, ts, mark: "completed", todo_state: "completed", date_due: "0" },
+            OkBody,
+            "saved-api/updateSavedMessage",
+          ).pipe(Effect.asVoid),
+        removeSaved: (channel, ts) => call("saved.delete", { item_type: "message", item_id: channel, ts }, OkBody).pipe(Effect.asVoid),
         userName: (userId) =>
           orNone(call("users.info", { user: userId }, UserBody)).pipe(
             Effect.map(Option.map((body) => body.user.profile?.display_name || body.user.real_name || body.user.name)),

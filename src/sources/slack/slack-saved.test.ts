@@ -3,6 +3,7 @@ import { Effect, Option } from "effect";
 import completed from "./__fixtures__/saved-list-completed.json" with { type: "json" };
 import open from "./__fixtures__/saved-list-open.json" with { type: "json" };
 import { SlackClient } from "./slack-client.js";
+import { slackClientStub } from "./test-client.js";
 import { makeSlackSavedBinding, type SlackSavedCursor } from "./slack-saved.js";
 
 const page = (body: { saved_items: unknown[]; counts: { total_count: number }; response_metadata: { next_cursor: string } }) => ({
@@ -13,7 +14,7 @@ const page = (body: { saved_items: unknown[]; counts: { total_count: number }; r
 
 const stub = (options: { open?: unknown; completed?: unknown; texts?: Record<string, string> } = {}) => {
   const calls: string[] = [];
-  const client = SlackClient.of({
+  const client = slackClientStub({
     savedList: ({ filter, cursor }) =>
       Effect.sync(() => {
         calls.push(`saved.list:${filter ?? "-"}:${cursor ?? "-"}`);
