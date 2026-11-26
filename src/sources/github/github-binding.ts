@@ -71,7 +71,20 @@ function describeGitHubItem(item: GitHubItem, context: Context): JudgeInput {
       onSome: ({ author, body }) => [`最新のコメント（@${author}）:`, body],
     }),
   ];
-  return { context: trusted.join("\n"), input: untrusted.join("\n") };
+  return { context: withOwnershipNote(trusted.join("\n")), input: untrusted.join("\n") };
+}
+
+/**
+ * 自分のアカウントで作った PR なら、本人が merge まで進める PR だと信頼できる情報に書き足す。
+ * 足す理由: 理由が author の通知（自分の PR への bot のコメントなど）は、作成者が自分だと分かっても対応が要るかを決めきれず、
+ * judge:eval で 6 件中 5 件が要確認になっていた（実際にはどれもユーザーが片付けた）。保存してある判定の入力にも同じように当てられるよう、
+ * 信頼できる情報の文から決める
+ */
+export function withOwnershipNote(trusted: string): string {
+  const viewer = /^あなた（ユーザー本人）の GitHub アカウント: @(\S+)$/m.exec(trusted)?.[1];
+  const author = /^作成者: @(\S+)$/m.exec(trusted)?.[1];
+  if (viewer === undefined || viewer !== author || !/^種類: GitHub の PullRequest$/m.test(trusted)) return trusted;
+  return `${trusted}\nこれはユーザー本人が作った PR。merge するか閉じるまで、レビューや CI・コメントへの対応は本人の作業として残る`;
 }
 
 export const makeGitHubBinding = Effect.fnUntraced(function* (options: GitHubBindingOptions) {

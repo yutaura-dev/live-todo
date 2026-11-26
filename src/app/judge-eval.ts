@@ -8,6 +8,7 @@ import { Database } from "../core/db/database.js";
 import { sourceItems, taskChanges, taskLinks } from "../core/db/schema.js";
 import { type DatasetEntry, type EvalCase, type EvalPrediction, evaluate, labelFromUserActions, mergeDataset } from "../core/judge/evaluation.js";
 import { DecisionsProvider, makeTodoJudge, StructuredClassifier } from "../core/judge/todo-judge.js";
+import { withOwnershipNote } from "../sources/github/github-binding.js";
 import { loadAppConfigFile } from "./config/app-config.js";
 import { judgeThresholdsFor, makeDecisionsProvider, makeStructuredClassifier } from "./llm.js";
 
@@ -76,7 +77,8 @@ const runEvaluation = Effect.gen(function* () {
   const predict = Effect.fnUntraced(function* (evalCase: EvalCase, useDecisions: boolean) {
     const judge = yield* makeTodoJudge({
       rules: [],
-      describe: () => Effect.succeed({ input: evalCase.request.input, ...(evalCase.request.context === undefined ? {} : { context: evalCase.request.context }) }),
+      // 保存したときより後に足した信頼できる情報（自分の PR であること）も、本番と同じように足して判定する
+      describe: () => Effect.succeed({ input: evalCase.request.input, ...(evalCase.request.context === undefined ? {} : { context: withOwnershipNote(evalCase.request.context) }) }),
       question: evalCase.request.question,
       thresholds,
     });

@@ -10,7 +10,7 @@ import notifications from "./__fixtures__/notifications.json" with { type: "json
 import mergedPull from "./__fixtures__/pull-42-merged.json" with { type: "json" };
 import closedIssue from "./__fixtures__/issue-7-closed.json" with { type: "json" };
 import { GitHubClient, type GitHubItem, GitHubRequestError } from "./github-adapter.js";
-import { githubItemDraft, makeGitHubBinding } from "./github-binding.js";
+import { githubItemDraft, makeGitHubBinding, withOwnershipNote } from "./github-binding.js";
 import { gitHubClientStub } from "./test-client.js";
 
 const PULL_URL = "https://api.github.com/repos/acme/app/pulls/42";
@@ -230,4 +230,18 @@ describe("GitHub の通知から Task まで", () => {
 
       assert.strictEqual((yield* tasksByUrl)[PULL_URL], "done");
     }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("ownershipNote（自分の PR であることを信頼できる情報に足す）", () => {
+  it("自分のアカウントで作った PR なら、本人が merge まで進める PR だと書き足す", () => {
+    const trusted = "あなた（ユーザー本人）の GitHub アカウント: @me\n種類: GitHub の PullRequest\nリポジトリ: acme/app\n通知の理由: author\n作成者: @me";
+    assert.include(withOwnershipNote(trusted), "ユーザー本人が作った PR");
+  });
+
+  it("ほかの人の PR や issue には足さない", () => {
+    const others = "あなた（ユーザー本人）の GitHub アカウント: @me\n種類: GitHub の PullRequest\n通知の理由: mention\n作成者: @alice";
+    const issue = "あなた（ユーザー本人）の GitHub アカウント: @me\n種類: GitHub の Issue\n通知の理由: author\n作成者: @me";
+    assert.strictEqual(withOwnershipNote(others), others);
+    assert.strictEqual(withOwnershipNote(issue), issue);
+  });
 });
