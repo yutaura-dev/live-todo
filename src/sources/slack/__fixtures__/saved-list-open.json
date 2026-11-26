@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "saved_items": [
+    {
+      "item_id": "C0123ABCD",
+      "item_type": "message",
+      "ts": "1764000000.123456",
+      "todo_state": "to_do",
+      "date_due": 1764064800,
+      "date_created": 1764000100,
+      "date_completed": 0,
+      "date_updated": 1764000100,
+      "date_snoozed_until": 0,
+      "is_archived": false,
+      "state": "in_progress"
+    },
+    {
+      "item_id": "D0456EFGH",
+      "item_type": "message",
+      "ts": "1764000500.000100",
+      "todo_state": "saved",
+      "date_due": 0,
+      "date_created": 1764000600,
+      "date_completed": 0,
+      "date_updated": 1764000600,
+      "date_snoozed_until": 0,
+      "is_archived": false,
+      "state": "in_progress"
+    },
+    {
+      "item_id": "F0789FILE",
+      "item_type": "file",
+      "ts": "1764000700.000000",
+      "todo_state": "saved",
+      "date_due": 0
+    }
+  ],
+  "counts": {
+    "total_count": 4,
+    "uncompleted_count": 3,
+    "completed_count": 1,
+    "archived_count": 0,
+    "uncompleted_overdue_count": 0
+  },
+  "response_metadata": {
+    "next_cursor": ""
+  }
+}

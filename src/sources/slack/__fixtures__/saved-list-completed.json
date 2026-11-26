@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "saved_items": [
+    {
+      "item_id": "C0123ABCD",
+      "item_type": "message",
+      "ts": "1763900000.000001",
+      "todo_state": "completed",
+      "date_due": 0,
+      "date_completed": 1763990000
+    }
+  ],
+  "counts": {
+    "total_count": 4,
+    "uncompleted_count": 3,
+    "completed_count": 1,
+    "archived_count": 0,
+    "uncompleted_overdue_count": 0
+  },
+  "response_metadata": {
+    "next_cursor": ""
+  }
+}
