@@ -72,13 +72,21 @@ export const NEXT_ACTION_PLAN_JSON_SCHEMA = {
 /** AI が返した手順を、手順の並びに変える */
 export const planFromProposal = (proposal: ProposedPlan, now?: string): NextActionPlan => planFromProposedSteps(proposal.steps, now);
 
-export function nextActionPrompt(subject: { title: string; contextDir: string }): string {
+export function nextActionPrompt(subject: { title: string; contextDir: string; repository?: string | undefined }): string {
   return [
     "次の Task について、自分（ユーザー本人）が次にやることを手順として整理してください。",
     "",
     `Task: ${subject.title}`,
     `${subject.contextDir}/task.json に、元の項目（GitHub の PR・issue など）と、通知を判定したときに集めた内容がある。`,
     `PR の Task なら、${subject.contextDir}/pr-state.json に PR の今の状態（作成者・自分のアカウント・draft か・CI・レビュー・merge できるか）がある。`,
+    ...(subject.repository === undefined
+      ? []
+      : [
+          `${subject.repository} にこの PR のリポジトリ（既定のブランチ）がある。CLAUDE.md・AGENTS.md・README・docs・.github/workflows を読み、` +
+            "merge したあとにこのプロジェクトで要る手順（deploy の PR を merge する、deploy が終わるのを待つ、など）があれば手順に入れる。" +
+            "deploy の PR に入るのを待つなら included_in_pull_request、ワークフローの完了を待つなら workflow_succeeded にする。" +
+            "読み取れなかった手順は推測で足さない",
+        ]),
     "",
     "手順の書き方:",
     "- 実際に手を動かす単位に分ける。順番が要るものは serial、前の手順と並行してできるものは parallel にする",

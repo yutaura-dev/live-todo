@@ -70,6 +70,16 @@ describe("nextActionPrompt", () => {
     assert.include(prompt, "/work/task-1/context/task.json");
   });
 
+  it("リポジトリがあれば、CLAUDE.md・docs・ワークフローから merge 後の手順（deploy など）を読み取らせる。読み取れないことは足させない", () => {
+    const withRepository = nextActionPrompt({ title: "x", contextDir: "/work/task-1/context", repository: "/work/task-1/repo/acme/app" });
+
+    assert.include(withRepository, "/work/task-1/repo/acme/app");
+    assert.include(withRepository, ".github/workflows");
+    assert.include(withRepository, "included_in_pull_request");
+    assert.include(withRepository, "推測");
+    assert.notInclude(prompt, ".github/workflows");
+  });
+
   it("Task が追う PR を merge する手順は、アプリから merge できる手順にさせる", () => {
     assert.include(prompt, "merge_pull_request");
   });

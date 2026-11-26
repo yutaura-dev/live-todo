@@ -40,6 +40,7 @@ const withAgent = (options: { fail?: string } = {}) => {
   const requests: ClaudeRequest[] = [];
   const contexts: Record<string, string>[] = [];
   const statusesDuringRun: TaskStatus[][] = [];
+  const prepared: Array<{ repository: string; pullUrl: string }> = [];
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       const tasks = yield* TaskRepository;
@@ -59,7 +60,11 @@ const withAgent = (options: { fail?: string } = {}) => {
         Effect.provideService(
           AgentWorkspace,
           AgentWorkspace.of({
-            prepare: () => Effect.die(new Error("リポジトリは要らない")),
+            prepare: (repository, taskId, pullUrl) =>
+              Effect.sync(() => {
+                prepared.push({ repository, pullUrl });
+                return { cwd: `/work/task-${taskId}/repo/${repository}`, contextDir: `/work/task-${taskId}/context`, headSha: "h" };
+              }),
             pullRequestState: (url) => Effect.succeed(JSON.stringify({ url, author: "me", reviewDecision: "REVIEW_REQUIRED" })),
             writeContext: (taskId, files) =>
               Effect.sync(() => {
@@ -70,7 +75,7 @@ const withAgent = (options: { fail?: string } = {}) => {
         ),
       );
     });
-  return { requests, contexts, statusesDuringRun, provide };
+  return { requests, contexts, statusesDuringRun, prepared, provide };
 };
 
 const run = runNextActionPlanning({ sources: ["github:personal", "github:personal:watch"], concurrency: 2 });
@@ -90,9 +95,33 @@ describe("runNextActionPlanning（PR の Task）", () => {
 
       assert.deepInclude(JSON.parse(agent.contexts[0]!["pr-state.json"]!), { url: "https://github.com/acme/app/pull/713", reviewDecision: "REVIEW_REQUIRED" });
     }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("PR のリポジトリを用意して作業ディレクトリにし、そのプロジェクトの手順（deploy など）を読み取れるようにする", () =>
+    Effect.gen(function* () {
+      yield* task({ url: "https://github.com/acme/app/pull/713" });
+      const agent = withAgent();
+
+      yield* agent.provide(run);
+
+      assert.deepStrictEqual(agent.prepared, [{ repository: "acme/app", pullUrl: "https://github.com/acme/app/pull/713" }]);
+      assert.match(agent.requests[0]?.cwd ?? "", /\/repo\/acme\/app$/);
+      assert.include([...(agent.requests[0]?.addDirs ?? [])], agent.requests[0]?.cwd.replace(/\/repo\/acme\/app$/, "/context"));
+      assert.include(agent.requests[0]?.prompt ?? "", ".github/workflows");
+    }).pipe(Effect.provide(TestDatabase)));
 });
 
 describe("runNextActionPlanning", () => {
+  it.effect("PR でない Task では、リポジトリを用意しない", () =>
+    Effect.gen(function* () {
+      yield* task();
+      const agent = withAgent();
+
+      yield* agent.provide(run);
+
+      assert.lengthOf(agent.prepared, 0);
+      assert.strictEqual(agent.requests[0]?.cwd, agent.requests[0]?.cwd.replace(/\/repo\/.*$/, ""));
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("次にやることがない Task を調査中のレーンに入れて claude に考えさせ、手順を保存して元のレーンに戻す", () =>
     Effect.gen(function* () {
       const taskId = yield* task({ status: "needs_review" });

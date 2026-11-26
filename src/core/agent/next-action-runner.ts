@@ -113,13 +113,20 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
       const pull = items.find((item) => item.role === "tracks" && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(item.url));
       const prState =
         pull === undefined ? undefined : yield* workspace.pullRequestState(pull.url).pipe(Effect.orElseSucceed(() => "（取得できなかった）"));
+      // リポジトリの手順（deploy など）を読ませるため。用意できなくても、集めた情報だけで考えさせる
+      const repository = pull === undefined ? undefined : /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pull.url)?.[1];
+      const prepared =
+        pull === undefined || repository === undefined
+          ? undefined
+          : Option.getOrUndefined(yield* workspace.prepare(repository, run.taskId, pull.url).pipe(Effect.option));
       const contextDir = yield* workspace.writeContext(run.taskId, {
         "task.json": JSON.stringify(context, null, 2),
         ...(prState === undefined ? {} : { "pr-state.json": prState }),
       });
       const result = yield* claude.run({
-        prompt: nextActionPrompt({ title: task.value.title, contextDir }),
-        cwd: contextDir,
+        prompt: nextActionPrompt({ title: task.value.title, contextDir, repository: prepared?.cwd }),
+        cwd: prepared?.cwd ?? contextDir,
+        ...(prepared === undefined ? {} : { addDirs: [contextDir] }),
         jsonSchema: NEXT_ACTION_PLAN_JSON_SCHEMA,
         allowedTools: PLANNING_TOOLS,
         model: options.model,
