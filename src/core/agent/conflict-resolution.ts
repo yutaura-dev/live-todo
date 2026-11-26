@@ -76,6 +76,30 @@ export const HARDENED_GIT_ARGS = [
   "http.proxy=",
 ] as const;
 
+/**
+ * AI（Bash を使える）に修正させたあとの commit のコマンド。AI は作業ディレクトリの外の git のデータも書き換えられるので、
+ * AI が触れていない git のデータを取り直し、AI の作業ツリーのファイルをそのデータで読み込んで commit する
+ */
+export function trustedCommitCommands(options: { repository: string; trustedGitDir: string; workTree: string; headRef: string; headSha: string; message: string }) {
+  const trusted = (args: ReadonlyArray<string>) => trustedGitArgs(options.trustedGitDir, options.workTree, args);
+  return {
+    clone: ["gh", ["repo", "clone", options.repository, options.trustedGitDir, "--", "--bare", "--filter=blob:none", "--single-branch", "--branch", options.headRef]] as const,
+    readTree: ["git", trusted(["read-tree", options.headSha])] as const,
+    add: ["git", trusted(["add", "-A"])] as const,
+    commit: ["git", trusted(["-c", "user.name=live-todo", "-c", "user.email=live-todo@localhost", "commit", "--no-verify", "-m", options.message])] as const,
+  };
+}
+
+/** アプリが git を動かす環境。PATH と HOME（gh の認証に要る）だけを引き継ぎ、秘密情報やトークンは渡さない */
+export function gitEnv(env: Record<string, string | undefined>): Record<string, string> {
+  return {
+    ...(env["PATH"] === undefined ? {} : { PATH: env["PATH"] }),
+    ...(env["HOME"] === undefined ? {} : { HOME: env["HOME"] }),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}
+
 /** push に使うトークンを、引数ではなく環境変数の git 設定で渡す（プロセスの一覧に出さない） */
 export function gitPushEnv(token: string): Record<string, string> {
   return {

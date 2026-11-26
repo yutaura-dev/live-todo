@@ -44,7 +44,7 @@ const fixTask = Effect.gen(function* () {
 const doubles = () => {
   const requests: ClaudeRequest[] = [];
   const prepared: Array<{ purpose: string }> = [];
-  const commits: Array<{ anyChanges: boolean | undefined; message: string | undefined }> = [];
+  const commits: Array<{ anyChanges: boolean | undefined; message: string | undefined; headSha: string | undefined }> = [];
   const pushes: string[] = [];
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -68,7 +68,7 @@ const doubles = () => {
             }),
           commit: (_cwd, _conflicted, options) =>
             Effect.sync(() => {
-              commits.push({ anyChanges: options?.anyChanges, message: options?.message });
+              commits.push({ anyChanges: options?.anyChanges, message: options?.message, headSha: options?.headSha });
               return { commitSha: "b".repeat(40), diff: "diff --git a/package.json b/package.json" };
             }),
           push: (_cwd, _repository, headRef, _expected, commitSha) =>
@@ -100,7 +100,7 @@ describe("Claude Code に PR を修正させる", () => {
       assert.include([...request.allowedTools], "Bash");
       assert.include([...(request.disallowedTools ?? [])], "Bash(git push:*)");
       assert.deepStrictEqual(request.withoutCredentials, { ghConfigDir: `/w/task-${taskId}/no-credentials` });
-      assert.deepStrictEqual(h.commits, [{ anyChanges: true, message: "CLI v3 への更新をまとめて push する" }]);
+      assert.deepStrictEqual(h.commits, [{ anyChanges: true, message: "CLI v3 への更新をまとめて push する", headSha: "a".repeat(40) }]);
       assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
       const [run] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.kind, "fix_pull_request"));
       assert.deepInclude(run?.result as object, { summary: "CLI を 3.x にした", diff: "diff --git a/package.json b/package.json" });

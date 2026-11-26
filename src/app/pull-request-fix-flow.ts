@@ -98,7 +98,13 @@ const fix = Effect.fnUntraced(function* (runId: number, options: { model?: strin
     maxBudgetUsd: options.maxBudgetUsd,
   });
   const answer = yield* decodePullRequestFix(result.structured).pipe(Effect.mapError(() => failure("AI の回答の形が違う")));
-  const committed = yield* workspace.commit(prepared.cwd, [], { anyChanges: true, message: step.title });
+  const committed = yield* workspace.commit(prepared.cwd, [], {
+    anyChanges: true,
+    message: step.title,
+    repository: prepared.repository,
+    headRef: prepared.headRef,
+    headSha: prepared.headSha,
+  });
   const stored: PullRequestFixResult = { ...answer, repository: prepared.repository, headRef: prepared.headRef, commitSha: committed.commitSha, diff: committed.diff, cwd: prepared.cwd, step: step.title };
   return { run, stored, headSha: prepared.headSha, sessionId: result.sessionId, costUsd: result.costUsd };
 });

@@ -4,7 +4,9 @@ import {
   CONFLICT_RESOLUTION_TOOLS,
   conflictResolutionPrompt,
   conflictWorkspaceCommands,
+  gitEnv,
   gitPushEnv,
+  trustedCommitCommands,
   HARDENED_GIT_ARGS,
   hasConflictMarkers,
   isSafeRef,
@@ -29,6 +31,33 @@ describe("conflictWorkspaceCommands", () => {
     assert.deepStrictEqual(trustedGitArgs(options.gitDir, options.dir, ["status"]).slice(0, 2), ["--git-dir=/w/task-1/conflict.git", "--work-tree=/w/task-1/conflict"]);
     assert.deepStrictEqual(commands.merge[1].slice(-4), ["merge", "--no-ff", "--no-commit", "origin/main"]);
     assert.include(commands.merge[1].join(" "), "core.hooksPath=/dev/null");
+  });
+});
+
+describe("trustedCommitCommands（AI に修正させたあとの commit）", () => {
+  const options = { repository: "acme/app", trustedGitDir: "/w/task-1/fix-trusted.git", workTree: "/w/task-1/fix", headRef: "feature/x", headSha: "a".repeat(40), message: "直す" };
+
+  it("AI が触れていない git のデータを取り直し、AI の作業ツリーのファイルをそのデータで commit する（AI が書き換えた設定を使わない）", () => {
+    const commands = trustedCommitCommands(options);
+
+    assert.deepStrictEqual(commands.clone, ["gh", ["repo", "clone", "acme/app", "/w/task-1/fix-trusted.git", "--", "--bare", "--filter=blob:none", "--single-branch", "--branch", "feature/x"]]);
+    for (const [command, args] of [commands.readTree, commands.add, commands.commit]) {
+      assert.strictEqual(command, "git");
+      assert.deepStrictEqual(args.slice(0, 2), ["--git-dir=/w/task-1/fix-trusted.git", "--work-tree=/w/task-1/fix"]);
+      assert.include(args.join(" "), "core.hooksPath=/dev/null");
+    }
+    assert.deepStrictEqual(commands.readTree[1].slice(-2), ["read-tree", "a".repeat(40)]);
+  });
+});
+
+describe("gitEnv（アプリが git を動かす環境）", () => {
+  it("PATH と HOME だけを引き継ぎ、アプリの秘密情報やトークンは渡さない", () => {
+    assert.deepStrictEqual(gitEnv({ PATH: "/usr/bin", HOME: "/Users/me", GH_TOKEN: "x", LIVE_TODO_SECRET_GITHUB_PERSONAL_TOKEN: "y", OTHER: "z" }), {
+      PATH: "/usr/bin",
+      HOME: "/Users/me",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+    });
   });
 });
 

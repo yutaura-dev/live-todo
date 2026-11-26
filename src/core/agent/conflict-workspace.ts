@@ -3,7 +3,9 @@ import { FileSystem } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
   conflictWorkspaceCommands,
+  gitEnv,
   gitPushEnv,
+  trustedCommitCommands,
   hasConflictMarkers,
   isSafeRef,
   trustedGitArgs,
@@ -43,7 +45,7 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
   commit(
     cwd: string,
     conflicted: ReadonlyArray<string>,
-    options?: { anyChanges?: boolean; message?: string },
+    options?: { anyChanges?: boolean; message?: string; repository?: string; headRef?: string; headSha?: string },
   ): Effect.Effect<{ commitSha: string; diff: string }, ConflictWorkspaceError>;
   /** ユーザーが承認したあとだけ呼ぶ。PR のブランチが直し始めたときから動いていたら push しない（force はしない） */
   /** commitSha: 承認画面で見せた commit。その commit を名指しで push する */
@@ -57,15 +59,19 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
         const fs = yield* FileSystem.FileSystem;
         const fail = (message: string) => () => new ConflictWorkspaceError({ message });
         const text = (command: string, args: ReadonlyArray<string>, message: string, env?: Record<string, string>) =>
-          spawner.string(ChildProcess.make(command, [...args], env === undefined ? {} : { env, extendEnv: true })).pipe(Effect.mapError(fail(message)));
+          spawner.string(ChildProcess.make(command, [...args], env === undefined ? {} : { env, extendEnv: false })).pipe(Effect.mapError(fail(message)));
+        // アプリが git を動かす環境。秘密情報やトークンを渡さない
+        const baseEnv = gitEnv(process.env);
         const exitCode = (command: string, args: ReadonlyArray<string>, message: string) =>
-          spawner.exitCode(ChildProcess.make(command, [...args])).pipe(Effect.mapError(fail(message)));
+          spawner.exitCode(ChildProcess.make(command, [...args], { env: gitEnv(process.env), extendEnv: false })).pipe(Effect.mapError(fail(message)));
 
         // git のデータは作業ディレクトリの外に置く（AI は作業ディレクトリの中しか触れない）
         const gitDirOf = (cwd: string) => `${cwd}.git`;
-        const safeGitEnv = { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
-        const git = (cwd: string, args: ReadonlyArray<string>, message: string, env: Record<string, string> = safeGitEnv) =>
-          text("git", trustedGitArgs(gitDirOf(cwd), cwd, args), message, env);
+        // AI（Bash を使える）に修正させたあとは、AI が触れていない取り直した git のデータを使う
+        const trustedGitDirOf = (cwd: string) => `${cwd}-trusted.git`;
+        const gitDirFor = (cwd: string) => fs.exists(trustedGitDirOf(cwd)).pipe(Effect.orElseSucceed(() => false), Effect.map((trusted) => (trusted ? trustedGitDirOf(cwd) : gitDirOf(cwd))));
+        const git = (cwd: string, args: ReadonlyArray<string>, message: string, env: Record<string, string> = baseEnv) =>
+          Effect.flatMap(gitDirFor(cwd), (gitDir) => text("git", trustedGitArgs(gitDir, cwd, args), message, env));
 
         const prepare = Effect.fn("ConflictWorkspace.prepare")(function* (taskId: number, pullUrl: string, options?: { purpose?: "conflict" | "fix" }) {
           const purpose = options?.purpose ?? "conflict";
@@ -85,6 +91,7 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
           yield* fs.makeDirectory(isolationDir, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
           yield* fs.remove(dir, { recursive: true }).pipe(Effect.ignore);
           yield* fs.remove(gitDirOf(dir), { recursive: true }).pipe(Effect.ignore);
+          yield* fs.remove(trustedGitDirOf(dir), { recursive: true }).pipe(Effect.ignore);
           const commands = conflictWorkspaceCommands({ repository, dir, gitDir: gitDirOf(dir), headRef: info.headRefName, baseRef: info.baseRefName });
           for (const [command, args] of [commands.clone, commands.checkout]) {
             const code = yield* exitCode(command, args, `${repository} を用意できない`);
@@ -107,13 +114,28 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
         const commit = Effect.fn("ConflictWorkspace.commit")(function* (
           cwd: string,
           conflicted: ReadonlyArray<string>,
-          options?: { anyChanges?: boolean; message?: string },
+          options?: { anyChanges?: boolean; message?: string; repository?: string; headRef?: string; headSha?: string },
         ) {
           if (options?.anyChanges === true) {
-            yield* git(cwd, ["add", "-A"], "変更を登録できない");
+            if (options.repository === undefined || options.headRef === undefined || options.headSha === undefined) {
+              return yield* new ConflictWorkspaceError({ message: "commit する PR のブランチが分からない" });
+            }
+            const trustedGitDir = trustedGitDirOf(cwd);
+            yield* fs.remove(trustedGitDir, { recursive: true }).pipe(Effect.ignore);
+            const commands = trustedCommitCommands({
+              repository: options.repository,
+              trustedGitDir,
+              workTree: cwd,
+              headRef: options.headRef,
+              headSha: options.headSha,
+              message: options.message ?? "修正",
+            });
+            yield* text(commands.clone[0], commands.clone[1], "PR のブランチを取り直せない", baseEnv);
+            yield* text(commands.readTree[0], commands.readTree[1], "PR のブランチを読み込めない", baseEnv);
+            yield* text(commands.add[0], commands.add[1], "変更を登録できない", baseEnv);
             const staged = yield* git(cwd, ["diff", "--cached", "--name-only"], "変更を読めない");
             if (staged.trim() === "") return yield* new ConflictWorkspaceError({ message: "AI が何も変更しなかった" });
-            yield* git(cwd, ["-c", "user.name=live-todo", "-c", "user.email=live-todo@localhost", "commit", "--no-verify", "-m", options.message ?? "修正"], "commit できない");
+            yield* text(commands.commit[0], commands.commit[1], "commit できない", baseEnv);
             const commitSha = (yield* git(cwd, ["rev-parse", "HEAD"], "commit を読めない")).trim();
             const diff = yield* git(cwd, ["diff", "--no-ext-diff", "--no-textconv", "HEAD^1", "HEAD"], "差分を読めない");
             return { commitSha, diff: truncateDiff(diff) };
@@ -139,13 +161,13 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
           if (parent !== expectedHeadSha) return yield* new ConflictWorkspaceError({ message: "承認した commit が、直し始めたときの PR のブランチから作られていない" });
           // origin ではなく URL を指す（設定の書き換えで、トークンを別の宛先に送らせない）
           const url = `https://github.com/${repository}.git`;
-          const env = gitPushEnv(token);
+          const env = { ...baseEnv, ...gitPushEnv(token) };
           const remote = (yield* git(cwd, ["ls-remote", url, `refs/heads/${headRef}`], "PR のブランチを確かめられない", env)).split(/\s/)[0];
           if (remote !== expectedHeadSha) {
             return yield* new ConflictWorkspaceError({ message: "直し始めたあとに PR のブランチへ commit が足された。もう一度直してください" });
           }
           const code = yield* spawner
-            .exitCode(ChildProcess.make("git", trustedGitArgs(gitDirOf(cwd), cwd, ["push", "--no-verify", url, `${commitSha}:refs/heads/${headRef}`]), { env, extendEnv: true }))
+            .exitCode(ChildProcess.make("git", trustedGitArgs(yield* gitDirFor(cwd), cwd, ["push", "--no-verify", url, `${commitSha}:refs/heads/${headRef}`]), { env, extendEnv: false }))
             .pipe(Effect.mapError(fail("push できない")));
           if (code !== 0) return yield* new ConflictWorkspaceError({ message: `push できない（終了コード ${code}）。トークンに PR のブランチへ書き込む権限があるか確かめてください` });
         });
