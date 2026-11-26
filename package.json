@@ -20,6 +20,7 @@
     "@vitejs/plugin-react": "6.3.0",
     "drizzle-kit": "1.0.0-rc.6",
     "electron": "45.4.1",
+    "electron-builder": "^26.18.0",
     "electron-vite": "6.0.0",
     "happy-dom": "^21.0.4",
     "tsx": "4.23.15",

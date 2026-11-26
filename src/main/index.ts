@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+// まとめた入口（"@effect/platform-node"）から読まない理由: 使わない NodeRedis まで読み込み、配る版に入らない redis（省略できる依存）を探して起動に失敗するため
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Redacted, Schema } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
@@ -36,6 +37,7 @@ import { captureNotionSession } from "./notion-connect.js";
 import { withNotionSession } from "../app/notion-session.js";
 import { makeNotionJobs, notionTokenKey } from "../app/notion-jobs.js";
 import { makeCalendarJobs } from "../app/calendar-jobs.js";
+import { loginShellPath, mergePath } from "../app/login-shell-path.js";
 import { graphClientFor, makeMicrosoftJobs, microsoftAppOf, microsoftRefreshTokenKey } from "../app/microsoft-jobs.js";
 import { type DeviceCode, type MicrosoftApp, pollDeviceToken, requestDeviceCode } from "../sources/microsoft/microsoft-auth.js";
 import { NotionClient, NotionRequestError } from "../sources/notion/notion-client.js";
@@ -1334,7 +1336,15 @@ void app.whenReady().then(() => {
   registerGmailActions();
   registerTaskQuestions();
   createWindow();
-  if (!smokeTest && screenshotPath === undefined) void restartSync();
+  if (smokeTest || screenshotPath !== undefined) return;
+  void (async () => {
+    // 配る版は Finder から起動され、PATH が狭くて gws・claude・gh を見つけられないので、同期の前にログインシェルの PATH を読む
+    if (app.isPackaged && process.platform === "darwin") {
+      const path = await runtime.runPromise(loginShellPath(process.env["SHELL"] ?? "/bin/zsh"));
+      if (Option.isSome(path)) process.env["PATH"] = mergePath(process.env["PATH"], path.value);
+    }
+    await restartSync();
+  })();
 });
 
 app.on("window-all-closed", () => {
