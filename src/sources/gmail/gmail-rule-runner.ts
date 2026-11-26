@@ -49,8 +49,14 @@ export const applyGmailRules = Effect.fnUntraced(function* (accountId: string, r
       if (done.has(`${mail.messageId} ${rule.id}`) || !isRuleCandidate(mail, rule)) continue;
       const actions = rule.then.gmail!;
       const judged = yield* classifier.matchesCondition({
-        input: [`差出人: ${mail.senderName} <${mail.senderKey}>`, `件名: ${mail.subject}`].join("\n"),
-        context: [`種類: ${KIND_LABELS[mail.kind] ?? mail.kind}`, ...(mail.topic === null ? [] : [`用件: ${MAIL_TOPIC_LABELS[mail.topic]}`])].join("\n"),
+        // 種類・用件はメールの中身から判定したもの（信頼できない）なので、アプリが書いた情報の側ではなく評価対象の側に入れる
+        input: [
+          `差出人: ${mail.senderName} <${mail.senderKey}>`,
+          `件名: ${mail.subject}`,
+          `種類（推定）: ${KIND_LABELS[mail.kind] ?? mail.kind}`,
+          ...(mail.topic === null ? [] : [`用件（推定）: ${MAIL_TOPIC_LABELS[mail.topic]}`]),
+        ].join("\n"),
+        context: "",
         condition: rule.when,
       });
       const record = { accountId, messageId: mail.messageId, ruleId: rule.id, ruleName: rule.name, actions, probability: judged.probability ?? null };

@@ -84,7 +84,7 @@ describe("applyGmailRules（利用者が決めたルールをメールに当て�
     return Effect.gen(function* () {
       yield* TestClock.setTime(NOW);
       yield* insertMail("a");
-      yield* insertMail("b", { subject: "新機能" });
+      yield* insertMail("b", { subject: "新機能", topic: "product" });
       yield* applyGmailRules("me", [rule]);
       yield* applyGmailRules("me", [rule]);
       assert.lengthOf(asked, 2);
