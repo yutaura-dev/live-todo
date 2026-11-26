@@ -136,6 +136,8 @@ describe("GmailClientLive（gws でGmail を読む）", () => {
       yield* (yield* client).trash("m1");
       assert.deepStrictEqual(fake.calls[0]!.slice(0, 4), ["gmail", "users", "messages", "trash"]);
       assert.deepInclude(paramsOf(fake.calls[0]!), { userId: "me", id: "m1" });
+      // 本文のない POST は Gmail が 411（Length Required）で断るので、空の本文を付ける
+      assert.strictEqual(fake.calls[0]![fake.calls[0]!.indexOf("--json") + 1], "{}");
     }).pipe(Effect.provide(fake.layer));
   });
 

@@ -179,7 +179,8 @@ export const GmailClientLive = Layer.effect(
         return (thread.messages ?? []).map((entry): GmailThreadMessage => ({ ...toMessage(entry), text: textOf(entry.payload) }));
       }),
       archive: (id: string) => call(["messages", "modify"], { id }, { removeLabelIds: ["INBOX", "UNREAD"] }).pipe(Effect.asVoid),
-      trash: (id: string) => call(["messages", "trash"], { id }).pipe(Effect.asVoid),
+      // 空の本文を付ける理由: 本文のない POST を gws が Content-Length なしで送り、Gmail が 411 で断るため
+      trash: (id: string) => call(["messages", "trash"], { id }, {}).pipe(Effect.asVoid),
     });
   }),
 );
