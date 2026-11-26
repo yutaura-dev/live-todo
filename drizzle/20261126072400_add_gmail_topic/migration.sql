@@ -1,0 +1,1 @@
+ALTER TABLE `gmail_messages` ADD `topic` text;

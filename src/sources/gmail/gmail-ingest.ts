@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../../core/db/database.js";
 import { gmailMessages } from "../../core/db/schema.js";
@@ -110,9 +110,23 @@ const checkActions = Effect.fnUntraced(function* (accountId: string, now: string
   const classifier = yield* MailClassifier;
   const db = yield* Database;
   const rows = yield* db
-    .select({ messageId: gmailMessages.messageId, senderName: gmailMessages.senderName, senderKey: gmailMessages.senderKey, subject: gmailMessages.subject, listUnsubscribe: gmailMessages.listUnsubscribe })
+    .select({
+      messageId: gmailMessages.messageId,
+      senderName: gmailMessages.senderName,
+      senderKey: gmailMessages.senderKey,
+      subject: gmailMessages.subject,
+      listUnsubscribe: gmailMessages.listUnsubscribe,
+      actionChecked: gmailMessages.actionChecked,
+    })
     .from(gmailMessages)
-    .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.actionChecked, false), eq(gmailMessages.inInbox, true), inArray(gmailMessages.kind, ["newsletter", "notification"])))
+    .where(
+      and(
+        eq(gmailMessages.accountId, accountId),
+        or(eq(gmailMessages.actionChecked, false), isNull(gmailMessages.topic)),
+        eq(gmailMessages.inInbox, true),
+        inArray(gmailMessages.kind, ["newsletter", "notification"]),
+      ),
+    )
     .pipe(Effect.orDie);
   yield* Effect.forEach(
     rows,
@@ -124,7 +138,8 @@ const checkActions = Effect.fnUntraced(function* (accountId: string, now: string
         });
         yield* db
           .update(gmailMessages)
-          .set({ actionChecked: true, actionProbability: answer.probability ?? null, updatedAt: now })
+          // 判定済みのメールは用件だけを足す（対応が要るかは、スレッドを読んで決め直したものを上書きしない）
+          .set(row.actionChecked ? { topic: answer.topic, updatedAt: now } : { actionChecked: true, actionProbability: answer.probability ?? null, topic: answer.topic, updatedAt: now })
           .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.messageId, row.messageId)))
           .pipe(Effect.orDie);
       }),

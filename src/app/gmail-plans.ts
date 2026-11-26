@@ -28,13 +28,20 @@ export const applyGmailSenderPlans = Effect.fnUntraced(function* (accountId: str
     .where(and(eq(sourceItems.source, gmailSendersSource(accountId)), inArray(tasks.status, [...OPEN])))
     .pipe(Effect.orDie);
   if (rows.length === 0) return 0;
-  const groups = new Map(senderGroups(yield* loadMails(accountId), DateTime.toEpochMillis(yield* DateTime.now)).map((group) => [group.senderKey, group]));
+  const groups = new Map(senderGroups(yield* loadMails(accountId), DateTime.toEpochMillis(yield* DateTime.now)).map((group) => [group.groupKey, group]));
 
   let applied = 0;
   for (const row of rows) {
     const group = groups.get(row.senderKey);
     if (group === undefined || group.pending.length === 0) continue;
-    const desired = senderPlan({ senderName: group.senderName, pending: group.pending.length, pastInvites: group.pastInvites.length, suggestUnsubscribe: group.suggestUnsubscribe });
+    // 配信の解除を勧めるのは宣伝・読み物の Task にだけ（同じ送り主の請求やアカウントの Task に、同じ分かれ道を重ねない）
+    const unsubscribable = group.topic === "promotion" || group.topic === "news" || (group.topic === "other" && group.kind === "newsletter");
+    const desired = senderPlan({
+      senderName: group.senderName,
+      pending: group.pending.length,
+      pastInvites: group.pastInvites.length,
+      suggestUnsubscribe: group.suggestUnsubscribe && unsubscribable,
+    });
     const current = decodePlan(row.nextActions);
     let next: NextActionPlan | undefined;
     if (Option.isNone(current)) next = desired;

@@ -24,7 +24,7 @@ describe("runGmailSync", () => {
       yield* runGmailSync("me");
 
       const items = yield* SourceItemRepository;
-      assert.strictEqual(Option.getOrThrow(yield* items.findItem(gmailSendersSource("me"), "news@shop.example")).triage, "linked");
+      assert.strictEqual(Option.getOrThrow(yield* items.findItem(gmailSendersSource("me"), "news@shop.example#other")).triage, "linked");
       assert.strictEqual(Option.getOrThrow(yield* items.findItem(gmailThreadsSource("me"), "t1")).triage, "pending");
     }).pipe(Effect.provide(Layer.mergeAll(TestDatabase, Layer.succeed(GmailClient, gmail.client), Layer.succeed(MailClassifier, classifier))));
   });

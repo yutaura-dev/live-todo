@@ -26,6 +26,12 @@ const trackedGroup = Effect.fnUntraced(function* (taskId: number) {
   return yield* new GmailWriteError({ message: "Gmail のメールを追う Task ではない" });
 });
 
+/** 送り主のまとまりの鍵（送り主#用件）を分ける。用件のない古い鍵は「その他」として扱う */
+const senderOfGroup = (externalId: string) => {
+  const index = externalId.lastIndexOf("#");
+  return index === -1 ? { senderKey: externalId, topic: "other" } : { senderKey: externalId.slice(0, index), topic: externalId.slice(index + 1) };
+};
+
 /** ゴミ箱に入れる候補。送り主なら受信トレイに残っているもの、スレッドならゴミ箱に入っていないもの */
 const candidates = Effect.fnUntraced(function* (group: { accountId: string; kind: "senders" | "threads"; externalId: string }) {
   const db = yield* Database;
@@ -41,19 +47,22 @@ const candidates = Effect.fnUntraced(function* (group: { accountId: string; kind
       kind: gmailMessages.kind,
       actionChecked: gmailMessages.actionChecked,
       actionProbability: gmailMessages.actionProbability,
+      topic: gmailMessages.topic,
     })
     .from(gmailMessages)
     .where(
       and(
         eq(gmailMessages.accountId, group.accountId),
         eq(gmailMessages.trashed, false),
-        group.kind === "senders" ? eq(gmailMessages.senderKey, group.externalId) : eq(gmailMessages.threadId, group.externalId),
+        group.kind === "senders" ? eq(gmailMessages.senderKey, senderOfGroup(group.externalId).senderKey) : eq(gmailMessages.threadId, group.externalId),
       ),
     )
     .orderBy(asc(gmailMessages.receivedAt), asc(gmailMessages.messageId))
     .pipe(Effect.orDie);
   // 対応を求めるメールは人からのメールとして別の Task にしているので、送り主の Task からは片付けない
-  return group.kind === "senders" ? rows.filter((row) => row.inInbox && effectiveKind(row) !== "personal") : rows;
+  if (group.kind !== "senders") return rows;
+  const { topic } = senderOfGroup(group.externalId);
+  return rows.filter((row) => row.inInbox && effectiveKind(row) !== "personal" && (row.topic ?? "other") === topic);
 });
 
 /** 承認の確認に見せる、確認済みにする・ゴミ箱に入れるメールの一覧 */

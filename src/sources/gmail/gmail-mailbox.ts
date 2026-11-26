@@ -1,4 +1,4 @@
-import type { MailKind } from "../../core/judge/mail-classifier.js";
+import type { MailKind, MailTopic } from "../../core/judge/mail-classifier.js";
 import type { MailHeader } from "./gmail-client.js";
 
 /** 保存したメール 1 通。kind の mine は自分が送ったもの（仕分けない） */
@@ -17,6 +17,8 @@ export type StoredMail = {
   pastInvite: boolean;
   /** メルマガ・お知らせとして届いた（kind が personal でも、対応が要るとして移したもの） */
   bulk?: boolean;
+  /** メルマガ・お知らせの用件。判定していなければ null（「その他」にまとめる） */
+  topic?: MailTopic | null;
 };
 
 type Headers = Partial<Record<MailHeader, string>>;
@@ -43,6 +45,9 @@ const MIN_RECEIVED_FOR_SUGGESTION = 5;
 const DISCARD_RATIO_FOR_SUGGESTION = 0.8;
 
 export type SenderGroup = {
+  /** まとまりの鍵（送り主と用件）。Source Item の externalId にする */
+  groupKey: string;
+  topic: MailTopic;
   senderKey: string;
   senderName: string;
   kind: "newsletter" | "notification";
@@ -54,7 +59,7 @@ export type SenderGroup = {
   pendingReceivedAt: ReadonlyArray<number>;
   /** 未処理のうち、日程が過ぎた招待 */
   pastInvites: ReadonlyArray<string>;
-  /** 直近 60 日に届いた数 */
+  /** 送り主の全体で、直近 60 日に届いた数（用件ではなく送り主で数える。配信の解除は送り主の単位なので） */
   received: number;
   /** そのうち、削除した（ゴミ箱）か、読まずにアーカイブした数 */
   discarded: number;
@@ -65,20 +70,36 @@ const isPending = (mail: StoredMail) => mail.inInbox && !mail.trashed;
 const isDiscarded = (mail: StoredMail) => mail.trashed || (!mail.inInbox && mail.unread);
 const byReceived = (a: StoredMail, b: StoredMail) => a.receivedAt - b.receivedAt;
 
+export const groupKeyOf = (senderKey: string, topic: MailTopic) => `${senderKey}#${topic}`;
+const isBulk = (mail: StoredMail) => mail.kind === "newsletter" || mail.kind === "notification";
+
 export function senderGroups(mails: ReadonlyArray<StoredMail>, now: number): SenderGroup[] {
   const bySender = new Map<string, StoredMail[]>();
+  const byGroup = new Map<string, { senderKey: string; topic: MailTopic; mails: StoredMail[] }>();
   for (const mail of mails) {
-    if (mail.kind !== "newsletter" && mail.kind !== "notification" && mail.bulk !== true) continue;
+    if (!isBulk(mail) && mail.bulk !== true) continue;
     bySender.set(mail.senderKey, [...(bySender.get(mail.senderKey) ?? []), mail]);
+    const topic = mail.topic ?? "other";
+    const key = groupKeyOf(mail.senderKey, topic);
+    const entry = byGroup.get(key) ?? { senderKey: mail.senderKey, topic, mails: [] };
+    entry.mails.push(mail);
+    byGroup.set(key, entry);
   }
-  return [...bySender].map(([senderKey, all]) => {
+  const statsOf = (senderKey: string) => {
+    const all = bySender.get(senderKey) ?? [];
+    const bulk = all.filter(isBulk);
+    const recent = (bulk.length === 0 ? all : bulk).filter((mail) => now - mail.receivedAt <= STATS_DAYS * DAY_MS);
+    return { received: recent.length, discarded: recent.filter(isDiscarded).length };
+  };
+  return [...byGroup].map(([groupKey, { senderKey, topic, mails: all }]) => {
     // 人からのメールの側に移したものは、まとまりを残すためだけに数え、未処理や名前・種類には使わない
-    const group = all.filter((mail) => mail.kind === "newsletter" || mail.kind === "notification");
+    const group = all.filter(isBulk);
     const sorted = (group.length === 0 ? all : group).toSorted(byReceived);
-    const recent = sorted.filter((mail) => now - mail.receivedAt <= STATS_DAYS * DAY_MS);
-    const discarded = recent.filter(isDiscarded).length;
+    const { received, discarded } = statsOf(senderKey);
     const notifications = group.filter((mail) => mail.kind === "notification").length;
     return {
+      groupKey,
+      topic,
       senderKey,
       senderName: sorted.at(-1)!.senderName,
       kind: notifications * 2 > group.length ? "notification" : "newsletter",
@@ -86,9 +107,9 @@ export function senderGroups(mails: ReadonlyArray<StoredMail>, now: number): Sen
       pendingSubjects: group.toSorted(byReceived).filter(isPending).map((mail) => mail.subject).toReversed(),
       pendingReceivedAt: group.toSorted(byReceived).filter(isPending).map((mail) => mail.receivedAt).toReversed(),
       pastInvites: group.toSorted(byReceived).filter((mail) => isPending(mail) && mail.pastInvite).map((mail) => mail.messageId),
-      received: recent.length,
+      received,
       discarded,
-      suggestUnsubscribe: recent.length >= MIN_RECEIVED_FOR_SUGGESTION && discarded >= recent.length * DISCARD_RATIO_FOR_SUGGESTION,
+      suggestUnsubscribe: received >= MIN_RECEIVED_FOR_SUGGESTION && discarded >= received * DISCARD_RATIO_FOR_SUGGESTION,
     };
   });
 }

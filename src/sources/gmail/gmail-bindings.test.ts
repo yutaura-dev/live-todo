@@ -63,8 +63,20 @@ describe("makeGmailSendersBinding（メルマガ・お知らせを送り主ご�
 
       yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
 
-      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")), { title: "Shop のメルマガ: 新商品のご案内（ほか 1 通）", status: "todo" });
-      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "info@bank.example")), { title: "銀行 のお知らせ: お取引のお知らせ", status: "todo" });
+      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example#other")), { title: "Shop のメルマガ: 新商品のご案内（ほか 1 通）", status: "todo" });
+      assert.deepStrictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "info@bank.example#other")), { title: "銀行 のお知らせ: お取引のお知らせ", status: "todo" });
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("用件の分かったメールは、送り主と用件ごとの Task にし、タイトルに用件を出す", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      yield* insertMail({ messageId: "a", senderName: "Cloudflare", senderKey: "noreply@notify.cloudflare.com", kind: "notification", topic: "billing", subject: "Your invoice" });
+      yield* insertMail({ messageId: "b", senderName: "Cloudflare", senderKey: "noreply@notify.cloudflare.com", kind: "notification", topic: "product", subject: "Pricing changes" });
+
+      yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
+
+      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "noreply@notify.cloudflare.com#billing")).title, "Cloudflare の請求・支払い: Your invoice");
+      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "noreply@notify.cloudflare.com#product")).title, "Cloudflare の製品・サービスの変更: Pricing changes");
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("長い件名は切り詰める", () =>
@@ -72,7 +84,7 @@ describe("makeGmailSendersBinding（メルマガ・お知らせを送り主ご�
       yield* TestClock.setTime(NOW);
       yield* insertMail({ messageId: "a", subject: "あ".repeat(100) });
       yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
-      const title = Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")).title;
+      const title = Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example#other")).title;
       assert.isAtMost(title.length, 80);
       assert.isTrue(title.endsWith("…"));
     }).pipe(Effect.provide(TestDatabase)));
@@ -106,11 +118,11 @@ describe("makeGmailSendersBinding（メルマガ・お知らせを送り主ご�
 
       yield* setTrashed("a");
       yield* syncSource(binding);
-      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")).title, "Shop のメルマガ: 件名");
+      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example#other")).title, "Shop のメルマガ: 件名");
 
       yield* setTrashed("b");
       yield* syncSource(binding);
-      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example")).status, "done");
+      assert.strictEqual(Option.getOrThrow(yield* taskOf(gmailSendersSource("me"), "news@shop.example#other")).status, "done");
     }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("人からのメールや、ほかのアカウントのメールはまとめない", () =>
@@ -120,7 +132,7 @@ describe("makeGmailSendersBinding（メルマガ・お知らせを送り主ご�
       yield* insertMail({ messageId: "b", accountId: "other" });
       yield* syncSource(yield* makeGmailSendersBinding({ accountId: "me" }));
       const items = yield* SourceItemRepository;
-      assert.isTrue(Option.isNone(yield* items.findItem(gmailSendersSource("me"), "news@shop.example")));
+      assert.isTrue(Option.isNone(yield* items.findItem(gmailSendersSource("me"), "news@shop.example#other")));
     }).pipe(Effect.provide(TestDatabase)));
 });
 

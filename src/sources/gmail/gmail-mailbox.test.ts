@@ -32,7 +32,24 @@ describe("senderKeyOf / senderNameOf（送り主の見分け方）", () => {
   });
 });
 
-describe("senderGroups（メルマガ・お知らせを送り主ごとにまとめる）", () => {
+describe("senderGroups（メルマガ・お知らせを送り主と用件ごとにまとめる）", () => {
+  it("同じ送り主でも、用件が違えば別のまとまりにする（判定していない用件は「その他」）", () => {
+    const groups = senderGroups([mail({ messageId: "a", topic: "billing" }), mail({ messageId: "b", topic: "product" }), mail({ messageId: "c", topic: "billing" }), mail({ messageId: "d" })], NOW);
+    assert.sameDeepMembers(
+      groups.map((group) => [group.groupKey, group.topic, group.pending]),
+      [
+        ["news@shop.example#billing", "billing", ["a", "c"]],
+        ["news@shop.example#product", "product", ["b"]],
+        ["news@shop.example#other", "other", ["d"]],
+      ],
+    );
+  });
+
+  it("配信の解除を勧めるかは、用件ではなく送り主の全体で数える", () => {
+    const mails = Array.from({ length: 5 }, (_, index) => mail({ messageId: String(index), topic: index === 0 ? "promotion" : "news", trashed: index < 4, inInbox: index >= 4 }));
+    assert.isTrue(senderGroups(mails, NOW).every((group) => group.received === 5 && group.suggestUnsubscribe));
+  });
+
   it("受信トレイに残っていてゴミ箱に入っていないものを、未処理として数える", () => {
     const [group] = senderGroups(
       [mail({ messageId: "a" }), mail({ messageId: "b", inInbox: false, unread: false }), mail({ messageId: "c", trashed: true })],

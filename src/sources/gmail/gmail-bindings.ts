@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { DateTime, Effect, Schema } from "effect";
 import { Database } from "../../core/db/database.js";
 import { gmailMessages, sourceItems, taskLinks, tasks } from "../../core/db/schema.js";
+import { MAIL_TOPIC_LABELS } from "../../core/judge/mail-classifier.js";
 import { TaskRepository } from "../../core/task/task-repository.js";
 import type { TodoJudgment } from "../../core/judge/todo-judge.js";
 import type { SourceAdapter } from "../../core/sync/source-adapter.js";
@@ -32,6 +33,7 @@ export const loadMails = Effect.fnUntraced(function* (accountId: string) {
       receivedAt: row.receivedAt,
       kind: effectiveKind(row),
       bulk: row.kind === "newsletter" || row.kind === "notification",
+      topic: row.topic,
       inInbox: row.inInbox,
       unread: row.unread,
       trashed: row.trashed,
@@ -57,7 +59,7 @@ const subjectText = (subject: string) => (subject.trim() === "" ? "（件名な�
 
 // 最新の件名を入れる理由: 送り主の名前と通数だけでは、何のお知らせか開くまで分からないため
 const senderTitle = (group: SenderGroup) => {
-  const label = `${group.senderName} の${group.kind === "newsletter" ? "メルマガ" : "お知らせ"}`;
+  const label = `${group.senderName} の${group.topic === "other" ? (group.kind === "newsletter" ? "メルマガ" : "お知らせ") : MAIL_TOPIC_LABELS[group.topic]}`;
   const [latest] = group.pendingSubjects;
   if (latest === undefined) return label;
   const others = group.pendingSubjects.length - 1;
@@ -87,7 +89,7 @@ export const refreshSenderBriefs = Effect.fnUntraced(function* (accountId: strin
     .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
     .where(eq(sourceItems.source, gmailSendersSource(accountId)))
     .pipe(Effect.orDie);
-  const bySender = new Map(groups.map((group) => [group.senderKey, group]));
+  const bySender = new Map(groups.map((group) => [group.groupKey, group]));
   const taskRepository = yield* TaskRepository;
   for (const row of linked) {
     const group = bySender.get(row.externalId);
@@ -107,13 +109,13 @@ export const makeGmailSendersBinding = Effect.fnUntraced(function* (options: { a
     const now = DateTime.toEpochMillis(yield* DateTime.now);
     return senderGroups(yield* loadMails(options.accountId), now).map((group): SenderItem => ({ ...group, title: senderTitle(group) }));
   }).pipe(Effect.provideService(Database, db));
-  const identify = (item: SenderItem) => ({ externalId: item.senderKey, fingerprint: senderFingerprint(item) });
+  const identify = (item: SenderItem) => ({ externalId: item.groupKey, fingerprint: senderFingerprint(item) });
 
   return {
     source: gmailSendersSource(options.accountId),
     adapter: snapshotAdapter(snapshot, identify),
     cursorSchema: SnapshotCursor,
-    externalIdOf: (item: SenderItem) => item.senderKey,
+    externalIdOf: (item: SenderItem) => item.groupKey,
     toItemDraft: (item: SenderItem) => ({
       title: item.title,
       url: `${GMAIL_URL}#search/${encodeURIComponent(`in:inbox ${senderSearch(item.senderKey)}`)}`,

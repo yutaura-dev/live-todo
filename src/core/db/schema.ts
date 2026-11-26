@@ -212,6 +212,8 @@ export const gmailMessages = sqliteTable(
     /** メルマガ・お知らせが、受け取った本人に対応を求めているか（確率。判定できなければ null）。求めていれば送り主にまとめない */
     actionChecked: integer("action_checked", { mode: "boolean" }).notNull().default(false),
     actionProbability: real("action_probability"),
+    /** メルマガ・お知らせの用件（請求・配送・宣伝など）。送り主を用件ごとに分けてまとめる。判定していなければ null */
+    topic: text({ enum: ["billing", "account", "product", "contract", "shipping", "promotion", "news", "other"] }),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [
