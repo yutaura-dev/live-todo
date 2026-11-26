@@ -164,6 +164,21 @@ describe("requestReplan（次にやることを考え直す）", () => {
       assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("ユーザーの希望（こうしたい）を伝えると、今の残りの手順と希望を AI に渡して、それに合わせて書き換えさせる", () =>
+    Effect.gen(function* () {
+      const taskId = yield* task({
+        nextActions: { steps: [{ id: "s1", kind: "manual", title: "請求書を確かめる", effort: "easy", mode: "serial", status: "todo" }] },
+      });
+      const agent = withAgent();
+
+      yield* requestReplan(taskId, "  このメールはアーカイブして終わりにしたい ");
+      yield* agent.provide(run);
+
+      const context = JSON.parse(agent.contexts[0]!["task.json"]!);
+      assert.deepInclude(context, { remainingSteps: ["請求書を確かめる"], request: "このメールはアーカイブして終わりにしたい" });
+      assert.include(agent.requests[0]?.prompt ?? "", "このメールはアーカイブして終わりにしたい");
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("処理中の Task は考え直さない", () =>
     Effect.gen(function* () {
       const taskId = yield* task({ status: "agent_running", nextActions: { steps: [] } });

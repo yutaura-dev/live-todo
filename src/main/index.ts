@@ -856,7 +856,10 @@ function registerReplan() {
   ipcMain.handle(IPC_CHANNELS.replanNextActions, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {
-        const taskId = yield* decodeTaskId(input);
+        // 前の形（Task の id だけ）も受け付ける。request はユーザーの希望（こうしたい）
+        const { taskId, request } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), request: Schema.optional(Schema.String.check(Schema.isMaxLength(2000))) }),
+        )(typeof input === "number" ? { taskId: input } : input);
         const detail = yield* (yield* BoardService).taskDetail(taskId);
         // 次にやることを考える処理は、AI に考えさせる設定のアカウントでしか動かない（会社の情報を許可していない LLM に送らないため）
         const config = yield* loadAppConfigFile(configPath);
@@ -864,7 +867,7 @@ function registerReplan() {
         const planning = [...config.accounts, ...config.slackAccounts, ...config.gmailAccounts].filter((account) => account.planNextActions).map((account) => account.id);
         const allowed = accountIds.length > 0 && accountIds.every((id) => id !== undefined && planning.includes(id));
         if (!allowed) return yield* new GitHubRequestError({ message: "このアカウントでは、次にやることを AI に考えさせない設定です" });
-        yield* requestReplan(taskId);
+        yield* requestReplan(taskId, request);
       }),
     ),
   );

@@ -3,7 +3,7 @@ import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns, sourceItems, taskLinks, tasks } from "../db/schema.js";
 import { TaskRepository } from "../task/task-repository.js";
-import { decodePlan, doneHistory } from "../task/next-actions.js";
+import { currentSteps, decodePlan, doneHistory } from "../task/next-actions.js";
 import type { TaskStatus } from "../task/task.js";
 import { AgentWorkspace } from "./agent-workspace.js";
 import { ClaudeCode } from "./claude-code.js";
@@ -15,8 +15,11 @@ const KIND = "next_actions";
 
 export class ReplanError extends Schema.TaggedError<ReplanError>()("ReplanError", { message: Schema.String }) {}
 
-/** 次にやることを考え直す。済んだ手順は残し、残りだけを AI に考えさせる（調査待ちに入れ、次の定期の処理で考える） */
-export const requestReplan = Effect.fnUntraced(function* (taskId: number) {
+/**
+ * 次にやることを考え直す。済んだ手順は残し、残りだけを AI に考えさせる（調査待ちに入れ、次の定期の処理で考える）。
+ * request はユーザーの希望（こうしたい）。あれば、それに合わせて残りの手順を書き換えさせる
+ */
+export const requestReplan = Effect.fnUntraced(function* (taskId: number, request?: string) {
   const db = yield* Database;
   const taskRepository = yield* TaskRepository;
   const task = yield* taskRepository.findTask(taskId);
@@ -30,19 +33,29 @@ export const requestReplan = Effect.fnUntraced(function* (taskId: number) {
       status: "queued",
       subjectFingerprint: "",
       previousStatus: task.value.status,
-      result: { replanFrom: task.value.nextActions },
+      result: { replanFrom: task.value.nextActions, ...(request === undefined || request.trim() === "" ? {} : { request: request.trim().slice(0, MAX_REQUEST) }) },
       startedAt: yield* nowIso,
     })
     .pipe(Effect.orDie);
   yield* moveTask(taskId, task.value.status, "agent_running");
 });
 
-const ReplanRequest = Schema.Struct({ replanFrom: Schema.Unknown });
+const MAX_REQUEST = 2000;
+const ReplanRequest = Schema.Struct({ replanFrom: Schema.Unknown, request: Schema.optionalKey(Schema.String) });
 const historyOf = (result: unknown) =>
   Option.match(
     Option.flatMap(Schema.decodeUnknownOption(ReplanRequest)(result), (request) => decodePlan(request.replanFrom)),
     { onNone: () => undefined, onSome: doneHistory },
   );
+/** 考え直す前の、まだ済んでいない手順のタイトル（希望に合わせて書き換えるときに、何を書き換えるかを伝える） */
+const remainingOf = (result: unknown) =>
+  Option.getOrUndefined(
+    Option.map(
+      Option.flatMap(Schema.decodeUnknownOption(ReplanRequest)(result), (request) => decodePlan(request.replanFrom)),
+      (plan) => currentSteps(plan).map((step) => step.title),
+    ),
+  );
+const userRequestOf = (result: unknown) => Option.getOrUndefined(Option.flatMap(Schema.decodeUnknownOption(ReplanRequest)(result), (request) => Option.fromNullishOr(request.request)));
 // 進行中も含める理由: すべての Task に次にやることを入れるため
 const ELIGIBLE_STATUSES: ReadonlyArray<TaskStatus> = ["needs_review", "todo", "in_progress"];
 // 集めた情報とリポジトリを読ませる。手順の開く先（公式のサイト）を確かめるために Web の検索も許す（ADR-0013）
@@ -130,8 +143,11 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
       .pipe(Effect.orDie);
     // 考え直しなら、済んだ手順を残して AI に伝える
     const history = historyOf(run.result);
+    const userRequest = userRequestOf(run.result);
+    const remaining = remainingOf(run.result);
     const context = {
       ...(history === undefined ? {} : { doneSteps: history.map((step) => step.title) }),
+      ...(userRequest === undefined ? {} : { request: userRequest, ...(remaining === undefined ? {} : { remainingSteps: remaining }) }),
       title: task.value.title,
       brief: task.value.brief,
       items: items.map((item) => ({
@@ -159,7 +175,7 @@ const planQueued = (runId: number, options: NextActionPlanningOptions) =>
         ...(prState === undefined ? {} : { "pr-state.json": prState }),
       });
       const result = yield* claude.run({
-        prompt: nextActionPrompt({ title: task.value.title, contextDir, repository: prepared?.cwd, replanning: history !== undefined }),
+        prompt: nextActionPrompt({ title: task.value.title, contextDir, repository: prepared?.cwd, replanning: history !== undefined, request: userRequest }),
         cwd: prepared?.cwd ?? contextDir,
         ...(prepared === undefined ? {} : { addDirs: [contextDir] }),
         jsonSchema: NEXT_ACTION_PLAN_JSON_SCHEMA,

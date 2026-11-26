@@ -125,7 +125,7 @@ describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
       "workflow_succeeded",
       "none",
     ]);
-    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait", "merge_pull_request"]);
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait", "merge_pull_request", "process_mail"]);
   });
 });
 
@@ -152,4 +152,17 @@ describe("手順のリンク", () => {
         assert.notProperty(plan.steps[1]!, "link");
       }),
     ));
+});
+
+describe("ユーザーの希望で書き換える", () => {
+  it("希望があれば、プロンプトに希望と、それに合わせて手順を書き換えることを書く（指示として扱うのは希望だけ）", () => {
+    const prompt = nextActionPrompt({ title: "x", contextDir: "/work/x", replanning: true, request: "アーカイブして終わりにしたい" });
+    assert.include(prompt, "アーカイブして終わりにしたい");
+    assert.include(prompt, "希望");
+  });
+
+  it("Gmail のメールを確認済みにする・ゴミ箱に入れる手順（process_mail）を選べる", () => {
+    assert.include(JSON.stringify(NEXT_ACTION_PLAN_JSON_SCHEMA), "process_mail");
+    assert.include(nextActionPrompt({ title: "x", contextDir: "/work/x" }), "process_mail");
+  });
 });

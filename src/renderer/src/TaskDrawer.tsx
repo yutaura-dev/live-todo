@@ -584,21 +584,40 @@ export function SlackActions({ detail, onDone }: { detail: TaskDetail; onDone: (
 /** 依存更新の PR は「もう一度調べる」で次にやることも作り直すので、それ以外の Task にだけ出す */
 function ReplanButton({ taskId, onStarted }: { taskId: number; onStarted: () => Promise<void> }) {
   const [problem, setProblem] = useState<string | null>(null);
+  const [request, setRequest] = useState("");
+  const send = (text: string | undefined) =>
+    void api.replanNextActions(taskId, text).then(async (outcome) => {
+      if (outcome.ok) {
+        setRequest("");
+        await onStarted();
+      } else setProblem(outcome.message);
+    });
   return (
     <div className="request-review">
-      <button
-        type="button"
-        className="quiet-button"
-        onClick={() =>
-          void api.replanNextActions(taskId).then(async (outcome) => {
-            if (outcome.ok) await onStarted();
-            else setProblem(outcome.message);
-          })
-        }
+      <form
+        className="task-question-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (request.trim() !== "") send(request.trim());
+        }}
       >
-        次にやることを考え直す
-      </button>
-      <span className="field-hint">済んだ手順は残して、残りを AI が考え直します</span>
+        <textarea
+          aria-label="次にやることへの希望"
+          rows={2}
+          value={request}
+          placeholder="こうしたい（例: このメールはアーカイブして終わりにしたい / 先に佐藤さんに確認してから進めたい）"
+          onChange={(event) => setRequest(event.target.value)}
+        />
+        <div className="step-actions">
+          <button type="submit" className="primary-button" disabled={request.trim() === ""}>
+            希望に合わせて書き換える
+          </button>
+          <button type="button" className="quiet-button" onClick={() => send(undefined)}>
+            次にやることを考え直す
+          </button>
+        </div>
+      </form>
+      <span className="field-hint">済んだ手順は残して、残りを AI が書き換えます</span>
       {problem && <p className="problem">{problem}</p>}
     </div>
   );

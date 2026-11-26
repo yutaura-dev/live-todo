@@ -156,7 +156,8 @@ export interface LiveTodoApi {
   /** 済んだにした手順・選んだ分かれ道を戻す */
   reopenStep(taskId: number, stepId: string): Promise<Outcome>;
   /** 次にやることを考え直させる。済んだ手順は残し、残りだけを AI が考える */
-  replanNextActions(taskId: number): Promise<Outcome>;
+  /** 次にやることを考え直す。request はユーザーの希望（こうしたい）で、あればそれに合わせて書き換える */
+  replanNextActions(taskId: number, request?: string): Promise<Outcome>;
   /** Claude Code に PR を修正させる（コマンドも使うが、push はしない）。裏で進み、Task は処理中のレーンに移る */
   fixPullRequest(taskId: number): Promise<Outcome>;
   pullRequestFix(taskId: number): Promise<PullRequestFixView | { error: string }>;
