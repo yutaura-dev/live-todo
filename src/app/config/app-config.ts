@@ -64,8 +64,11 @@ const AppConfigFile = Schema.Struct({
 
 export type ResolvedAccount = GitHubAccount & { resolvedLlmProfile: LlmProfile };
 
-export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts"> & {
+export type ResolvedSlackAccount = SlackAccount & { resolvedLlmProfile: LlmProfile };
+
+export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts"> & {
   accounts: ReadonlyArray<ResolvedAccount>;
+  slackAccounts: ReadonlyArray<ResolvedSlackAccount>;
 };
 
 const decodeFile = Schema.decodeUnknownEffect(AppConfigFile);
@@ -106,18 +109,22 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
     accounts.push({ ...account, resolvedLlmProfile });
   });
 
+  const slackAccounts: ResolvedSlackAccount[] = [];
   file.slackAccounts.forEach((account, index) => {
     if (seenIds.has(account.id)) issues.push(`slackAccounts[${index}].id: "${account.id}" が重複している`);
     seenIds.add(account.id);
-    if (account.llmProfile !== undefined && profileOf(account.llmProfile) === undefined) {
-      issues.push(`slackAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
+    const resolvedLlmProfile = profileOf(account.llmProfile ?? file.defaultLlmProfile);
+    if (resolvedLlmProfile === undefined) {
+      if (account.llmProfile !== undefined) issues.push(`slackAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
+      return;
     }
+    slackAccounts.push({ ...account, resolvedLlmProfile });
   });
 
   if (issues.length > 0) {
     return yield* new InvalidAppConfigError({ message: issues.join("\n") });
   }
-  return { ...file, accounts };
+  return { ...file, accounts, slackAccounts };
 });
 
 /** 設定画面に出すための、検証前の設定。ファイルがなければ none */

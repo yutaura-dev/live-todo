@@ -24,7 +24,13 @@ Web クライアントが使う内部 API `saved.*`（`saved.list` / `add` / `up
   - メッセージの本文は `conversations.history` / `conversations.replies` で、初めて見たときだけ取る
 - リクエストは 1 本ずつ間隔を空けて送る（公式の Tier 2 相当、毎分 20 回程度に収める）。`ratelimited` / 429 は `Retry-After` まで休む
 - 書き込み（`saved.update` で完了にするなど）は、GitHub と同じく承認（Approval）を経てからだけ行う。読み取りを先に作り、書き込みはそのあとに足す
-- メンション・DM・スレッドの返信など、To-do・Saved 以外の Slack の todo は、同じセッションで別の Source として足す（あとで決める）
+- メンション・DM・スレッドの返信は、同じセッションで公開の検索 API（`search.messages`）を使い、別の Source（`slack:<id>:inbox`）にする
+  - 自分へのメンション（`<@自分>`）、自分が入っているユーザーグループへのメンション（`<!subteam^ID>`）、自分宛ての DM（`to:me`）、自分が書いたスレッドへのそのあとの返信（`from:me` と `is:thread` から求める）。`@channel`・`@here` は取らない
+  - 2026-11-26 に、私用のワークスペースで `<@自分>`・`to:me`・`is:thread`・`from:me` が期待どおりに当たることを、件数と項目だけで確かめた。ユーザーグループへのメンションは、そのワークスペースにグループがなく確かめていない
+  - ユーザーグループは増えたり減ったりするので、取り込みのたびに取り直す（覚えておかない）
+  - 自分があとから同じスレッド（DM なら同じ DM）で書いたら、または To-do・Saved にしたら（To-do の Task に任せる）、済んだことにする
+  - todo かどうかは、GitHub の通知と同じく、そのアカウントの LLM Profile で判定する
+  - 探すのは直近 14 日。最初の取り込みでは直近 3 日分だけを Task にし、それより前は見たことだけ覚える
 
 ## Alternatives Considered
 

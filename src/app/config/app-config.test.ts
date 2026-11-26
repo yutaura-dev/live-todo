@@ -105,6 +105,14 @@ describe("Slack のアカウント", () => {
       assert.deepInclude(config.slackAccounts[0], { id: "home", workspace: "yutaura.slack.com", planNextActions: false });
     }));
 
+  it.effect("Slack のアカウントにも、判定に使う LLM Profile を結び付ける（指定がなければ既定のもの）", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig({ ...validConfig, slackAccounts: [slack, { ...slack, id: "other", llmProfile: "personal" }] });
+
+      assert.strictEqual(config.slackAccounts[0]?.resolvedLlmProfile.provider, "azure-openai");
+      assert.strictEqual(config.slackAccounts[1]?.resolvedLlmProfile.provider, "anthropic");
+    }));
+
   it.effect("Slack のドメインでないワークスペースと、空の User-Agent はエラーにする", () =>
     Effect.gen(function* () {
       yield* invalidReason({ ...validConfig, slackAccounts: [{ ...slack, workspace: "evil.example.com" }] });

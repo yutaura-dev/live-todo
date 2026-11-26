@@ -43,6 +43,27 @@ const ChannelBody = Schema.Struct({
 // 見られないものは失敗ではなく「なし」として扱う
 const NOT_VISIBLE = new Set(["channel_not_found", "user_not_found", "not_in_channel", "missing_scope"]);
 const OkBody = Schema.Struct({ ok: Schema.Boolean });
+const UserGroupsBody = Schema.Struct({
+  usergroups: Schema.Array(Schema.Struct({ id: Schema.String, handle: Schema.String, users: Schema.optional(Schema.Array(Schema.String)) })),
+});
+const SearchBody = Schema.Struct({
+  messages: Schema.Struct({
+    total: Schema.Number,
+    paging: Schema.optional(Schema.Struct({ pages: Schema.optional(Schema.Number) })),
+    matches: Schema.Array(
+      Schema.Struct({
+        channel: Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.String), is_im: Schema.optional(Schema.Boolean), is_mpim: Schema.optional(Schema.Boolean) }),
+        ts: Schema.String,
+        text: Schema.optional(Schema.String),
+        user: Schema.optional(Schema.String),
+        permalink: Schema.optional(Schema.String),
+      }),
+    ),
+  }),
+});
+// 検索の結果には thread_ts がないので、permalink の thread_ts から読む
+const threadTsOf = (permalink: string | undefined) =>
+  permalink !== undefined && URL.canParse(permalink) ? (new URL(permalink).searchParams.get("thread_ts") ?? undefined) : undefined;
 const AuthTestBody = Schema.Struct({ user_id: Schema.String, user: Schema.String, team: Schema.String });
 
 export const isSlackWorkspace = (domain: string) => /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(domain);
@@ -131,6 +152,26 @@ export const SlackClientLive = (options: SlackClientLiveOptions) =>
             "saved-api/updateSavedMessage",
           ).pipe(Effect.asVoid),
         removeSaved: (channel, ts) => call("saved.delete", { item_type: "message", item_id: channel, ts }, OkBody).pipe(Effect.asVoid),
+        searchMessages: (query, page = 1) =>
+          call("search.messages", { query, sort: "timestamp", sort_dir: "desc", count: "100", page: String(page) }, SearchBody).pipe(
+            Effect.map((body) => ({
+              total: body.messages.total,
+              pages: body.messages.paging?.pages ?? 1,
+              matches: body.messages.matches.map((match) => ({
+                channel: match.channel.id,
+                channelName: match.channel.name ?? "",
+                isDirect: match.channel.is_im === true || match.channel.is_mpim === true,
+                ts: match.ts,
+                threadTs: threadTsOf(match.permalink),
+                user: match.user,
+                text: match.text ?? "",
+              })),
+            })),
+          ),
+        myUserGroups: (userId) =>
+          call("usergroups.list", { include_users: "true" }, UserGroupsBody).pipe(
+            Effect.map((body) => body.usergroups.filter((group) => group.users?.includes(userId) === true).map((group) => ({ id: group.id, handle: group.handle }))),
+          ),
         userName: (userId) =>
           orNone(call("users.info", { user: userId }, UserBody)).pipe(
             Effect.map(Option.map((body) => body.user.profile?.display_name || body.user.real_name || body.user.name)),

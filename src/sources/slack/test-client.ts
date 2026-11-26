@@ -9,6 +9,8 @@ export const slackClientStub = (overrides: Partial<SlackClient["Service"]> = {})
     userName: () => Effect.succeed(Option.none()),
     channel: () => Effect.succeed(Option.none()),
     completeSaved: () => Effect.void,
+    searchMessages: () => Effect.succeed({ total: 0, pages: 1, matches: [] }),
+    myUserGroups: () => Effect.succeed([]),
     removeSaved: () => Effect.void,
     authTest: Effect.succeed({ userId: "U1", user: "me", team: "Acme" }),
     ...overrides,

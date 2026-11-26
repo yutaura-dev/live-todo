@@ -158,6 +158,48 @@ describe("SlackClientLive", () => {
       assert.deepStrictEqual(["item_type", "item_id", "ts"].map((key) => requests[0]!.form.get(key)), ["message", "C1", "1.0"]);
     }));
 
+  it.effect("メッセージを検索し、チャンネル・時刻・スレッド・送り主つきで、新しい順に返す", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeSlack(() => ({
+        body: {
+          ok: true,
+          messages: {
+            total: 1,
+            paging: { page: 1, pages: 1 },
+            matches: [{ channel: { id: "C1", name: "general", is_im: false }, ts: "2.0", text: "本文", user: "U2", permalink: "https://acme.slack.com/archives/C1/p20?thread_ts=1.0" }],
+          },
+        },
+      }));
+
+      const result = yield* withClient(layer, (client) => client.searchMessages("<@U1> after:2026-11-20"));
+
+      assert.deepStrictEqual(result, {
+        total: 1,
+        pages: 1,
+        matches: [{ channel: "C1", channelName: "general", isDirect: false, ts: "2.0", threadTs: "1.0", user: "U2", text: "本文" }],
+      });
+      assert.deepStrictEqual(
+        ["query", "sort", "sort_dir", "count"].map((key) => requests[0]?.form.get(key)),
+        ["<@U1> after:2026-11-20", "timestamp", "desc", "100"],
+      );
+    }));
+
+  it.effect("自分が入っているユーザーグループを、ハンドルつきで返す", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeSlack(() => ({
+        body: {
+          ok: true,
+          usergroups: [
+            { id: "S1", handle: "dev", users: ["U1", "U2"] },
+            { id: "S2", handle: "sales", users: ["U3"] },
+          ],
+        },
+      }));
+
+      assert.deepStrictEqual(yield* withClient(layer, (client) => client.myUserGroups("U1")), [{ id: "S1", handle: "dev" }]);
+      assert.strictEqual(requests[0]?.form.get("include_users"), "true");
+    }));
+
   it.effect("セッションの持ち主（自分）とワークスペースを auth.test で確かめる", () =>
     Effect.gen(function* () {
       const { layer } = fakeSlack(() => ({ body: { ok: true, user_id: "U1", user: "me", team: "Acme", url: "https://acme.slack.com/" } }));

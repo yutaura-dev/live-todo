@@ -26,11 +26,14 @@ const withEnv = (env: Record<string, string>) =>
     effect.pipe(Effect.provide(EnvSecretStore), Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env })));
 
 describe("makeSlackJobs", () => {
-  it.effect("ワークスペースごとに To-do・Saved の同期のジョブを作る（Slack の制限に合わせて 2 分おき）", () =>
+  it.effect("ワークスペースごとに、To-do・Saved（2 分おき）と、メンション・DM・スレッドの返信（5 分おき）の同期のジョブを作る", () =>
     Effect.gen(function* () {
       const jobs = yield* makeSlackJobs(yield* account);
 
-      assert.deepStrictEqual(jobs.map((job) => [job.name, Duration.toMillis(job.interval)]), [["slack:home", Duration.toMillis("2 minutes")]]);
+      assert.deepStrictEqual(jobs.map((job) => [job.name, Duration.toMillis(job.interval)]), [
+        ["slack:home", Duration.toMillis("2 minutes")],
+        ["slack:home:inbox", Duration.toMillis("5 minutes")],
+      ]);
     }).pipe(withEnv({ LIVE_TODO_SECRET_SLACK_HOME_TOKEN: "xoxc-test", LIVE_TODO_SECRET_SLACK_HOME_COOKIE: "xoxd-test" }), Effect.provide(http)));
 
   it.effect("トークンか Cookie がなければ、どのキーがないかを示すエラーにする", () =>
