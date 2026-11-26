@@ -66,6 +66,7 @@ import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
 import { backfillNextActions, recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
 import { requestReplan, runNextActionPlanning } from "../core/agent/next-action-runner.js";
+import { recoverInterruptedStepRuns, runAutoSteps, runStep, StepRunError, startStepRun } from "../app/step-runs.js";
 import { BoardService } from "../core/board/board-service.js";
 import { encryptedFileSecretStore, type SecretCipher, SecretVault } from "../core/config/encrypted-secret-store.js";
 import { SecretStore } from "../core/config/secret-store.js";
@@ -197,6 +198,8 @@ const startSync = Effect.gen(function* () {
   yield* upgradeMergeSteps;
   const interruptedQuestions = yield* recoverInterruptedQuestions;
   if (interruptedQuestions > 0) yield* Effect.log(`途中で止まった質問を ${interruptedQuestions} 件、失敗として残した`);
+  const interruptedSteps = yield* recoverInterruptedStepRuns;
+  if (interruptedSteps > 0) yield* Effect.log(`途中で止まった Claude Code の手順を ${interruptedSteps} 件、できなかったとして残した`);
   const recovered = yield* recoverInterruptedAgentRuns;
   if (recovered > 0) yield* Effect.log(`途中で止まった AI の調査を ${recovered} 件戻した`);
   const reviewSources = config.accounts
@@ -278,6 +281,16 @@ const startSync = Effect.gen(function* () {
     run: applyConflictPlans,
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
+  // 番が来た「Claude Code が自動でやる」手順を動かす（Claude Code を使ってよい Task だけ）
+  const autoStepJob = {
+    name: "agent:auto-steps",
+    interval: AGENT_JOB_INTERVAL,
+    run: runAutoSteps({ optionsFor: claudeOptionsForTask }).pipe(
+      Effect.asVoid,
+      Effect.catch((error) => Effect.logWarning("Claude Code に手順をやらせられなかった").pipe(Effect.annotateLogs({ reason: errorMessage(error) }))),
+    ),
+    backoffUntil: () => Option.none<DateTime.Utc>(),
+  };
   // 日付が変わったら作るものなので、1 時間おきで足りる
   const recurringJob: SyncJob<never, Database | TaskRepository> = {
     name: "app:recurring",
@@ -285,9 +298,9 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs)], {
-    concurrency: 7,
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
+    concurrency: 8,
     discard: true,
   });
 }).pipe(
@@ -577,6 +590,47 @@ const questionContextFor = (taskId: number) =>
     };
   });
 
+/** Claude Code に Task のことをさせるときの設定（読ませてよいもの・費用の上限） */
+const claudeTaskOptionsOf = Effect.gen(function* () {
+  const config = yield* loadAppConfigFile(configPath);
+  // 読むことは広く許し、書き込みだけを止める（ADR-0013）。Google（gws）と GitHub（gh）は、そのアカウントで Claude Code で考えるのを
+  // 有効にしているときに、どの Task の質問でも読ませる
+  const google = config.gmailAccounts.some((account) => account.planNextActions);
+  const github = config.accounts.some((account) => account.planNextActions || account.reviewDependencyPrs);
+  const readAccess =
+    google || github
+      ? {
+          gmail: google,
+          github,
+          denyRead: [
+            secretsPath,
+            tokenInfoPath,
+            ...[dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`],
+            configPath,
+            app.getAppPath(),
+            process.cwd(),
+            agentWorkspaceRoot,
+            // gh の認証（~/.config/gh）は、gh で読ませるときだけ読める場所に残す
+            ...[".ssh", ".aws", ...(github ? [] : [".config/gh"]), ".npmrc", ".netrc", ".git-credentials", ".docker", ".kube", ".gnupg", ".claude", ".claude.json"].map((path) =>
+              join(app.getPath("home"), path),
+            ),
+          ],
+        }
+      : undefined;
+  return {
+    model: DEPENDENCY_REVIEW_MODEL,
+    maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD,
+    extraContext: questionContextFor,
+    ...(readAccess === undefined ? {} : { readAccess }),
+  };
+});
+/** Claude Code を使ってよい Task なら、その設定。使わない設定のアカウントの Task なら undefined */
+const claudeOptionsForTask = (taskId: number) =>
+  questionAllowedFor(taskId).pipe(
+    Effect.flatMap((allowed) => (allowed ? claudeTaskOptionsOf : Effect.succeed(undefined))),
+    Effect.orElseSucceed(() => undefined),
+  );
+
 /** ルールの「何をする」を、Decisions でアプリの操作に読み取る（ADR-0014）。ラベルの名前は、文の中の名前と Gmail にあるラベルから選ばせる */
 const interpretRuleActions = (then: string) =>
   Effect.gen(function* () {
@@ -669,6 +723,21 @@ function registerTaskQuestions() {
   ipcMain.handle(IPC_CHANNELS.dismissSuggestion, (_event, input: unknown) =>
     outcomeOf(Schema.decodeUnknownEffect(SuggestionInput)(input).pipe(Effect.flatMap((request) => dismissSuggestion(request.questionId, request.index)))),
   );
+  ipcMain.handle(IPC_CHANNELS.runStepWithClaude, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), stepId: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(100)) }),
+        )(input);
+        const options = yield* claudeOptionsForTask(request.taskId);
+        if (options === undefined) {
+          return yield* new StepRunError({ message: "この Task の元の項目のアカウントでは Claude Code を使わない設定です。設定で Claude Code で考えるのを有効にしてから頼んでください" });
+        }
+        yield* startStepRun(request.taskId, request.stepId);
+        runtime.runFork(runStep(request.taskId, request.stepId, options));
+      }),
+    ),
+  );
   ipcMain.handle(IPC_CHANNELS.askTask, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {
@@ -677,39 +746,7 @@ function registerTaskQuestions() {
           return yield* new TaskQuestionError({ message: "この Task の元の項目のアカウントでは Claude Code を使わない設定です。設定で Claude Code で考えるのを有効にしてから質問してください" });
         }
         const id = yield* askQuestion(request.taskId, request.question);
-        const config = yield* loadAppConfigFile(configPath);
-        // 読むことは広く許し、書き込みだけを止める（ADR-0013）。Google（gws）と GitHub（gh）は、そのアカウントで Claude Code で考えるのを
-        // 有効にしているときに、どの Task の質問でも読ませる
-        const google = config.gmailAccounts.some((account) => account.planNextActions);
-        const github = config.accounts.some((account) => account.planNextActions || account.reviewDependencyPrs);
-        const readAccess =
-          google || github
-            ? {
-                gmail: google,
-                github,
-                denyRead: [
-                  secretsPath,
-                  tokenInfoPath,
-                  ...[dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`],
-                  configPath,
-                  app.getAppPath(),
-                  process.cwd(),
-                  agentWorkspaceRoot,
-                  // gh の認証（~/.config/gh）は、gh で読ませるときだけ読める場所に残す
-                  ...[".ssh", ".aws", ...(github ? [] : [".config/gh"]), ".npmrc", ".netrc", ".git-credentials", ".docker", ".kube", ".gnupg", ".claude", ".claude.json"].map((path) =>
-                    join(app.getPath("home"), path),
-                  ),
-                ],
-              }
-            : undefined;
-        runtime.runFork(
-          answerQuestion(id, {
-            model: DEPENDENCY_REVIEW_MODEL,
-            maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD,
-            extraContext: questionContextFor,
-            ...(readAccess === undefined ? {} : { readAccess }),
-          }),
-        );
+        runtime.runFork(answerQuestion(id, yield* claudeTaskOptionsOf));
       }),
     ),
   );

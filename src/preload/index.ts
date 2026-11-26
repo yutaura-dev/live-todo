@@ -39,6 +39,7 @@ const api: LiveTodoApi = {
   openStepLink: (taskId, stepId) => ipcRenderer.invoke(IPC_CHANNELS.openStepLink, { taskId, stepId }),
   applyRuleToExisting: (ruleId) => ipcRenderer.invoke(IPC_CHANNELS.applyRuleToExisting, { ruleId }),
   askTask: (taskId, question) => ipcRenderer.invoke(IPC_CHANNELS.askTask, { taskId, question }),
+  runStepWithClaude: (taskId, stepId) => ipcRenderer.invoke(IPC_CHANNELS.runStepWithClaude, { taskId, stepId }),
   acceptSuggestion: (questionId, index) => ipcRenderer.invoke(IPC_CHANNELS.acceptSuggestion, { questionId, index }),
   dismissSuggestion: (questionId, index) => ipcRenderer.invoke(IPC_CHANNELS.dismissSuggestion, { questionId, index }),
   gmailProcess: (taskId, action, messageIds) => ipcRenderer.invoke(IPC_CHANNELS.gmailProcess, { taskId, action, messageIds }),

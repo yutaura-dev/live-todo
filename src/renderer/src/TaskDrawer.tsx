@@ -737,6 +737,22 @@ function waitHint(until: WaitCondition): string {
   }
 }
 
+const ACTOR_LABELS = { human: "人がやる", claude_auto: "Claude Code が自動でやる", claude_on_request: "Claude Code に頼める" } as const;
+
+/** Claude Code に手順をやらせた結果。やり遂げたら ✓、できなかったら ✗ を付けて報告を出す */
+function StepRunReport(props: { run: { state: "running" | "done" | "failed"; summary?: string; at: string } }) {
+  if (props.run.state === "running") return <p className="field-hint">Claude Code がやっています…</p>;
+  return (
+    <div className={`step-report step-report--${props.run.state}`}>
+      <p className="step-report-title">
+        {props.run.state === "done" ? "✓ Claude Code がやりました" : "✗ Claude Code はやり遂げられませんでした"}
+        <span className="field-hint">（{dateTimeOf(props.run.at)}）</span>
+      </p>
+      {props.run.summary !== undefined && <Markdown text={props.run.summary} onOpenLink={(url) => void api.openExternal(url)} />}
+    </div>
+  );
+}
+
 function StepItem(props: {
   step: Step;
   parallel: boolean;
@@ -765,6 +781,7 @@ function StepItem(props: {
           <span className={`effort effort--${step.effort}`}>{effortLabel(step.effort)}</span>
         )}
         <span className="step-title">{step.title}</span>
+        {step.kind === "manual" && <span className={`step-actor step-actor--${step.actor ?? "human"}`}>{ACTOR_LABELS[step.actor ?? "human"]}</span>}
         {props.parallel && <span className="field-hint">前と並行してできる</span>}
         {step.status === "done" && (
           <>
@@ -775,6 +792,15 @@ function StepItem(props: {
           </>
         )}
       </div>
+      {step.kind === "manual" && step.run !== undefined && <StepRunReport run={step.run} />}
+      {isCurrent && step.kind === "manual" && step.status === "todo" && step.actor !== undefined && step.actor !== "human" && step.run?.state !== "running" && (
+        <div className="step-actions">
+          <button type="button" className="primary-button" onClick={() => void run(api.runStepWithClaude(detail.id, step.id))}>
+            {step.run === undefined ? "Claude Code で実施する" : "Claude Code にもう一度頼む"}
+          </button>
+          <span className="field-hint">調べて報告するだけで、送る・承認するなど外への書き込みはしません</span>
+        </div>
+      )}
       {isCurrent && step.kind === "merge_pull_request" && <MergeFlow detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />}
       {isCurrent && step.kind === "resolve_conflicts" && (
         <div className="step-actions">

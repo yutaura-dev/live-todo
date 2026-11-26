@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { EFFORTS, type NextActionPlan, planFromProposedSteps } from "../task/next-actions.js";
+import { EFFORTS, type NextActionPlan, planFromProposedSteps, STEP_ACTORS } from "../task/next-actions.js";
 import { ProposedWaitConditionSchema, WAIT_CONDITION_JSON_SCHEMA, WAIT_CONDITION_PROMPT } from "./wait-condition-schema.js";
 
 const ProposedStep = Schema.Struct({
@@ -11,6 +11,7 @@ const ProposedStep = Schema.Struct({
   // 前の形の回答（この項目がない）も読めるようにする
   link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
   gmail: Schema.optionalKey(Schema.Struct({ labels: Schema.Array(Schema.String), markRead: Schema.Boolean, archive: Schema.Boolean })),
+  actor: Schema.optionalKey(Schema.Literals(STEP_ACTORS)),
 });
 const RecurringProposal = Schema.Struct({
   suggest: Schema.Boolean,
@@ -62,8 +63,14 @@ const stepSchema = {
       required: ["labels", "markRead", "archive"],
       additionalProperties: false,
     },
+    actor: {
+      type: "string",
+      enum: [...STEP_ACTORS],
+      description:
+        "type が manual のとき、誰がやるか。human: 人にしかできない / claude_auto: Claude Code が自動でやる / claude_on_request: ユーザーが頼んだら Claude Code がやる。manual 以外は human にする",
+    },
   },
-  required: ["title", "type", "until", "effort", "mode", "link", "gmail"],
+  required: ["title", "type", "until", "effort", "mode", "link", "gmail", "actor"],
   additionalProperties: false,
 } as const;
 
@@ -104,7 +111,7 @@ export const NEXT_ACTION_PLAN_JSON_SCHEMA = {
             },
           },
         },
-        required: ["title", "type", "until", "effort", "mode", "options"],
+        required: ["title", "type", "until", "effort", "mode", "actor", "options"],
         additionalProperties: false,
       },
     },
@@ -156,6 +163,10 @@ export function nextActionPrompt(subject: { title: string; contextDir: string; r
     "- Web でやる手順（サービスにログインする・設定画面で変える・手続きのページを開く、など）には、link に開く先と、ボタンに出す名前（サービス名）を付ける。" +
       "Web ページを開かないとできない手順（ページを読んで決める手順も含む）には、必ず link を付ける（URL を title に書かず link に入れる。アプリが「〇〇を開く」ボタンにする）。" +
       "開く先は公式のサイトのページにし、分からなければ Web で検索して確かめる。メールの中のリンクは、なりすましのおそれがあるので、そのサービスの公式のドメインだと確かめられたときだけ使う（Web で検索して、そのドメインが公式のものか確かめる）。確かめられなければ空にする",
+    "- manual の手順には、誰がやるか（actor）を付ける。Claude Code ができるのは、読むこと（Gmail・カレンダー・ドライブ・GitHub・Web を調べる、コードを読む）と、" +
+      "調べた結果や文面（返信の下書き・要点のまとめ・比較など）を報告として返すことだけ。送る・投稿する・承認する・支払う・申し込む・ログインして操作するなど、外に書き込むことや、本人の判断・本人確認が要ることは human にする",
+    "- Claude Code ができる手順のうち、調べる・確かめる・まとめるだけで、やって損のないものは claude_auto（アプリが自動で Claude Code に頼む）。" +
+      "下書きを作るなど、やるかどうかやいつやるかをユーザーが決めたほうがよいものは claude_on_request（ボタンを押したら頼む）にする",
     "- 手間（effort）は次の基準で付ける: easy は 10 秒で終わる（ボタンを押す・一言返す）、normal は 5 分あれば終わる、" +
       "hard は 15 分あれば終わる、tedious はそれ以上かかる",
     "",

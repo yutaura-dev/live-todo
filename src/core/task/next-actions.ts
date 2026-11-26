@@ -40,7 +40,16 @@ export type ActionStep = StepBase & {
   until?: WaitCondition;
   link?: StepLink;
   gmail?: GmailStepActions;
+  /** 手作業の手順を誰がやるか。なければ人 */
+  actor?: StepActor;
+  /** Claude Code に手順をやらせた結果 */
+  run?: StepRun;
 };
+/** human: 人がやる / claude_auto: Claude Code が自動でやる / claude_on_request: ボタンを押したら Claude Code がやる */
+export type StepActor = "human" | "claude_auto" | "claude_on_request";
+export const STEP_ACTORS = ["human", "claude_auto", "claude_on_request"] as const;
+/** running: やっている途中 / done: やり遂げた（手順は済みになる） / failed: できなかった（手順は済みにしない） */
+export type StepRun = { state: "running" | "done" | "failed"; summary?: string; at: string };
 /** process_mail: アプリがメールの一覧を見せ、承認したものを Gmail で確認済みにする（アーカイブ）かゴミ箱に入れる */
 /** archive_past_invites: 日程が過ぎた招待のメールを見せ、承認したら Gmail で確認済みにする */
 /** gmail_action: アプリが Gmail でラベルを付ける・既読にする・アーカイブする（押したときに） */
@@ -176,6 +185,7 @@ export type ProposedStep = {
   until?: ProposedWaitCondition | undefined;
   link?: { url: string; label: string } | undefined;
   gmail?: { labels: ReadonlyArray<string>; markRead: boolean; archive: boolean } | undefined;
+  actor?: StepActor | undefined;
   options?: ReadonlyArray<{ label: string; steps: ReadonlyArray<Omit<ProposedStep, "options">> }> | undefined;
 };
 
@@ -243,6 +253,7 @@ function actionStepOf(
     until?: ProposedWaitCondition | undefined;
     link?: { url: string; label: string } | undefined;
     gmail?: { labels: ReadonlyArray<string>; markRead: boolean; archive: boolean } | undefined;
+    actor?: StepActor | undefined;
   },
   now: string | undefined,
 ): ActionStep {
@@ -251,7 +262,16 @@ function actionStepOf(
   const kind = step.type === "gmail_action" && gmail === undefined ? "manual" : (step.type ?? "manual");
   const until = kind === "wait" ? waitConditionOf(step.until, now) : undefined;
   const link = linkOf(step.link);
-  return { ...base, kind, ...(until === undefined ? {} : { until }), ...(link === undefined ? {} : { link }), ...(kind === "gmail_action" && gmail !== undefined ? { gmail } : {}) };
+  // 担当を付けるのは手作業の手順だけ（ほかはアプリのボタンや見張りで済ませる）
+  const actor = kind === "manual" && step.actor !== undefined ? step.actor : undefined;
+  return {
+    ...base,
+    kind,
+    ...(until === undefined ? {} : { until }),
+    ...(link === undefined ? {} : { link }),
+    ...(kind === "gmail_action" && gmail !== undefined ? { gmail } : {}),
+    ...(actor === undefined ? {} : { actor }),
+  };
 }
 
 const gmailActionsOf = (gmail: { labels: ReadonlyArray<string>; markRead: boolean; archive: boolean } | undefined): GmailStepActions | undefined => {
@@ -389,6 +409,8 @@ const ActionStepSchema = Schema.Struct({
   gmail: Schema.optionalKey(
     Schema.Struct({ labels: Schema.optionalKey(Schema.Array(Schema.String)), markRead: Schema.optionalKey(Schema.Boolean), archive: Schema.optionalKey(Schema.Boolean) }),
   ),
+  actor: Schema.optionalKey(Schema.Literals(STEP_ACTORS)),
+  run: Schema.optionalKey(Schema.Struct({ state: Schema.Literals(["running", "done", "failed"]), summary: Schema.optionalKey(Schema.String), at: Schema.String })),
 });
 interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchema> {
   readonly kind: "decision";
@@ -450,4 +472,15 @@ export function senderPlan(group: { senderName: string; pending: number; pastInv
       },
     ],
   };
+}
+
+/** Claude Code に手順をやらせた結果を残す。やり遂げたら手順を済みにする */
+export function withStepRun(plan: NextActionPlan, stepId: string, run: StepRun): NextActionPlan {
+  const recorded = { steps: mapSteps(plan.steps, (step) => (step.id === stepId && step.kind !== "decision" ? { ...step, run } : step)) };
+  return run.state === "done" ? completeStep(recorded, stepId) : recorded;
+}
+
+/** いま着手できる、Claude Code が自動でやる手順のうち、まだ動かしていないもの */
+export function autoRunnableSteps(plan: NextActionPlan): ActionStep[] {
+  return currentSteps(plan).flatMap((step) => (step.kind === "manual" && step.actor === "claude_auto" && step.run === undefined && step.status === "todo" ? [step] : []));
 }

@@ -116,7 +116,7 @@ describe("nextActionPrompt", () => {
 describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
   it("手順は 1 つ以上で、内容・種類（手作業か待つか）・手間・直列か並列か・選択肢を持つ", () => {
     assert.strictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.minItems, 1);
-    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.required, ["title", "type", "until", "effort", "mode", "options"]);
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.required, ["title", "type", "until", "effort", "mode", "actor", "options"]);
     assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.until.properties.kind.enum, [
       "pull_request_opened",
       "review_submitted",

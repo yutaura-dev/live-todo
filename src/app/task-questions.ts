@@ -189,66 +189,54 @@ export type AnswerOptions<R = never> = {
 
 const PULL_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/\d+/;
 
-/** 質問を Claude Code に調べさせ、回答を残す。失敗も残す（画面に出す） */
-export const answerQuestion = Effect.fnUntraced(function* <R = never>(questionId: number, options: AnswerOptions<R>) {
+/**
+ * Claude Code に Task のことをさせる用意。Task の情報を作業場所に書き、読んでよいもの（Gmail・GitHub）に合わせて道具と sandbox を決める。
+ * 書き込める道具は渡さない（ADR-0013）
+ */
+export const prepareTaskRun = Effect.fnUntraced(function* <R = never>(taskId: number, options: AnswerOptions<R>, extraFiles: Readonly<Record<string, string>> = {}) {
   const db = yield* Database;
   const taskRepository = yield* TaskRepository;
-  const claude = yield* ClaudeCode;
   const workspace = yield* AgentWorkspace;
-  const [row] = yield* db.select().from(taskQuestions).where(eq(taskQuestions.id, questionId)).pipe(Effect.orDie);
-  if (row === undefined || row.status !== "running") return;
+  const task = Option.getOrThrow(yield* taskRepository.findTask(taskId));
+  const items = yield* db
+    .select({ role: taskLinks.role, source: sourceItems.source, title: sourceItems.title, url: sourceItems.url, state: sourceItems.state, judgment: sourceItems.judgment })
+    .from(taskLinks)
+    .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+    .where(eq(taskLinks.taskId, taskId))
+    .pipe(Effect.orDie);
+  const changes = yield* db
+    .select({ field: taskChanges.field, kind: taskChanges.kind, before: taskChanges.before, after: taskChanges.after, actor: taskChanges.actor, at: taskChanges.occurredAt })
+    .from(taskChanges)
+    .where(eq(taskChanges.taskId, taskId))
+    .orderBy(desc(taskChanges.id))
+    .limit(RECENT_CHANGES)
+    .pipe(Effect.orDie);
+  const plan = decodePlan(task.nextActions);
+  const context = {
+    title: task.title,
+    brief: task.brief,
+    status: task.status,
+    nextActions: Option.match(plan, { onNone: () => null, onSome: (value) => ({ current: currentSteps(value).map((step) => step.title), done: doneHistory(value).map((step) => step.title) }) }),
+    items: items.map((item) => ({ role: item.role, source: item.source, title: item.title, url: item.url, state: item.state, collected: collectedOf(item.judgment) })),
+    recentChanges: changes,
+  };
+  const extra = options.extraContext === undefined ? {} : yield* options.extraContext(taskId).pipe(Effect.orElseSucceed(() => ({})));
+  const contextDir = yield* workspace.writeContext(taskId, { "task.json": JSON.stringify(context, null, 2), ...extraFiles, ...extra });
 
-  const outcome = yield* Effect.gen(function* () {
-    const task = Option.getOrThrow(yield* taskRepository.findTask(row.taskId));
-    const items = yield* db
-      .select({ role: taskLinks.role, source: sourceItems.source, title: sourceItems.title, url: sourceItems.url, state: sourceItems.state, judgment: sourceItems.judgment })
-      .from(taskLinks)
-      .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
-      .where(eq(taskLinks.taskId, row.taskId))
-      .pipe(Effect.orDie);
-    const changes = yield* db
-      .select({ field: taskChanges.field, kind: taskChanges.kind, before: taskChanges.before, after: taskChanges.after, actor: taskChanges.actor, at: taskChanges.occurredAt })
-      .from(taskChanges)
-      .where(eq(taskChanges.taskId, row.taskId))
-      .orderBy(desc(taskChanges.id))
-      .limit(RECENT_CHANGES)
-      .pipe(Effect.orDie);
-    const previous = (yield* listQuestions(row.taskId)).filter((entry) => entry.id < questionId && entry.status === "answered");
-    const plan = decodePlan(task.nextActions);
-    const context = {
-      title: task.title,
-      brief: task.brief,
-      status: task.status,
-      nextActions: Option.match(plan, { onNone: () => null, onSome: (value) => ({ current: currentSteps(value).map((step) => step.title), done: doneHistory(value).map((step) => step.title) }) }),
-      items: items.map((item) => ({ role: item.role, source: item.source, title: item.title, url: item.url, state: item.state, collected: collectedOf(item.judgment) })),
-      recentChanges: changes,
-    };
-    const extra = options.extraContext === undefined ? {} : yield* options.extraContext(row.taskId).pipe(Effect.orElseSucceed(() => ({})));
-    const contextDir = yield* workspace.writeContext(row.taskId, {
-      "task.json": JSON.stringify(context, null, 2),
-      "questions.json": JSON.stringify(previous.map((entry) => ({ question: entry.question, answer: entry.answer })), null, 2),
-      ...extra,
-    });
-
-    const pull = items.find((item) => item.role === "tracks" && PULL_URL.test(item.url));
-    const repository = pull === undefined ? undefined : PULL_URL.exec(pull.url)?.[1];
-    // リポジトリを用意できなくても、集めた情報だけで答えさせる
-    const prepared = pull === undefined || repository === undefined ? undefined : Option.getOrUndefined(yield* workspace.prepare(repository, row.taskId, pull.url).pipe(Effect.option));
-    const cwd = prepared?.cwd ?? contextDir;
-    const access = { gmail: options.readAccess?.gmail === true, github: options.readAccess?.github === true };
-    const last = previous.findLast((entry) => entry.sessionId !== null && entry.workspace === cwd);
-
-    const result = yield* claude.run({
-      prompt: questionPrompt({
-        question: row.question,
-        contextDir,
-        repository: prepared === undefined ? undefined : repository,
-        gmail: options.readAccess?.gmail === true,
-        github: options.readAccess?.github === true,
-      }),
+  const pull = items.find((item) => item.role === "tracks" && PULL_URL.test(item.url));
+  const repository = pull === undefined ? undefined : PULL_URL.exec(pull.url)?.[1];
+  // リポジトリを用意できなくても、集めた情報だけでやらせる
+  const prepared = pull === undefined || repository === undefined ? undefined : Option.getOrUndefined(yield* workspace.prepare(repository, taskId, pull.url).pipe(Effect.option));
+  const cwd = prepared?.cwd ?? contextDir;
+  const access = { gmail: options.readAccess?.gmail === true, github: options.readAccess?.github === true };
+  return {
+    contextDir,
+    cwd,
+    repository: prepared === undefined ? undefined : repository,
+    access,
+    run: {
       cwd,
       ...(prepared === undefined ? {} : { addDirs: [contextDir] }),
-      jsonSchema: QUESTION_JSON_SCHEMA,
       allowedTools: [...QUESTION_TOOLS, ...(access.gmail ? GMAIL_READ_TOOLS : []), ...(access.github ? GITHUB_READ_TOOLS : [])],
       ...(!access.gmail && !access.github
         ? {}
@@ -263,8 +251,30 @@ export const answerQuestion = Effect.fnUntraced(function* <R = never>(questionId
           }),
       model: options.model,
       maxBudgetUsd: options.maxBudgetUsd,
+    },
+  };
+});
+
+/** 質問を Claude Code に調べさせ、回答を残す。失敗も残す（画面に出す） */
+export const answerQuestion = Effect.fnUntraced(function* <R = never>(questionId: number, options: AnswerOptions<R>) {
+  const db = yield* Database;
+  const claude = yield* ClaudeCode;
+  const [row] = yield* db.select().from(taskQuestions).where(eq(taskQuestions.id, questionId)).pipe(Effect.orDie);
+  if (row === undefined || row.status !== "running") return;
+
+  const outcome = yield* Effect.gen(function* () {
+    const previous = (yield* listQuestions(row.taskId)).filter((entry) => entry.id < questionId && entry.status === "answered");
+    const prepared = yield* prepareTaskRun(row.taskId, options, {
+      "questions.json": JSON.stringify(previous.map((entry) => ({ question: entry.question, answer: entry.answer })), null, 2),
+    });
+    const last = previous.findLast((entry) => entry.sessionId !== null && entry.workspace === prepared.cwd);
+    const result = yield* claude.run({
+      prompt: questionPrompt({ question: row.question, contextDir: prepared.contextDir, repository: prepared.repository, gmail: prepared.access.gmail, github: prepared.access.github }),
+      ...prepared.run,
+      jsonSchema: QUESTION_JSON_SCHEMA,
       resumeSessionId: last?.sessionId ?? undefined,
     });
+    const cwd = prepared.cwd;
     const answer = yield* decodeAnswer(result.structured).pipe(Effect.mapError((error) => new TaskQuestionError({ message: `回答の形が想定と違う: ${error.message}` })));
     return { answer, result, cwd };
   }).pipe(Effect.result);

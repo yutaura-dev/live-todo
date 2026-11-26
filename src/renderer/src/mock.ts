@@ -69,6 +69,7 @@ export const mockApi: LiveTodoApi = {
   applyRuleToExisting: async () => ({ ok: true, applied: 0, alreadyApplied: 0, notMatched: 0 }),
   interpretRule: async () => ({ ok: true, actions: { gmail: { labels: ["レシート"], markRead: true } } }),
   askTask: async () => ({ ok: true }),
+  runStepWithClaude: async () => ({ ok: true }),
   acceptSuggestion: async () => ({ ok: true }),
   dismissSuggestion: async () => ({ ok: true }),
   gmailProcess: async () => ({ ok: true }),

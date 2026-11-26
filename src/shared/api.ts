@@ -191,6 +191,8 @@ export interface LiveTodoApi {
   interpretRule(then: string): Promise<{ ok: true; actions: RuleActions } | { ok: false; reason: string }>;
   /** Task についての質問と回答（古い順） */
   taskQuestions(taskId: number): Promise<TaskQuestionView[]>;
+  /** 手順を Claude Code に頼む（調べて報告するだけ。外への書き込みはさせない） */
+  runStepWithClaude(taskId: number, stepId: string): Promise<Outcome>;
   /** 質問の回答で提案された Task を作る（OK を押したとき） */
   acceptSuggestion(questionId: number, index: number): Promise<Outcome>;
   dismissSuggestion(questionId: number, index: number): Promise<Outcome>;

@@ -1554,3 +1554,27 @@ button:disabled {
   border: 1px dashed color-mix(in srgb, currentColor 30%, transparent);
   border-radius: 6px;
 }
+
+.step-actor {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  white-space: nowrap;
+}
+.step-actor--claude_auto,
+.step-actor--claude_on_request {
+  border-style: dashed;
+}
+.step-report {
+  margin: 0.4rem 0;
+  padding: 0.4rem 0.75rem;
+  border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+}
+.step-report--failed {
+  border-left-color: #b45309;
+}
+.step-report-title {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+}

@@ -13,7 +13,7 @@ import {
   reopenStep,
   senderPlan,
   stepLinkOf,
-  taskEffort, linkOfStep } from "./next-actions.js";
+  taskEffort, linkOfStep, autoRunnableSteps, withStepRun } from "./next-actions.js";
 
 const review = (overrides: Record<string, unknown> = {}) => ({
   conclusion: "mergeable" as const,
@@ -332,5 +332,39 @@ describe("Web ページを開く手順のボタン", () => {
   it("http や javascript: の URL は開く先にしない", () => {
     const step = { id: "s1", kind: "manual", title: "http://example.com を開く javascript:alert(1)", effort: "easy", mode: "serial", status: "todo" } as const;
     assert.isUndefined(linkOfStep(step));
+  });
+});
+
+describe("手順の担当（人 / Claude Code が自動で / Claude Code に頼める）", () => {
+  const proposed = [
+    { title: "経緯を調べてまとめる", effort: "normal", mode: "serial", type: "manual", actor: "claude_auto" },
+    { title: "返信の下書きを作る", effort: "normal", mode: "parallel", type: "manual", actor: "claude_on_request" },
+    { title: "承認する", effort: "easy", mode: "serial", type: "manual", actor: "human" },
+    { title: "merge する", effort: "easy", mode: "serial", type: "merge_pull_request", actor: "claude_auto" },
+  ] as const;
+
+  it("手作業の手順に担当を付ける。アプリのボタンでやる手順には付けない", () => {
+    const plan = planFromProposedSteps(proposed);
+    assert.deepStrictEqual(plan.steps.map((step) => (step.kind === "decision" ? undefined : step.actor)), ["claude_auto", "claude_on_request", "human", undefined]);
+  });
+
+  it("いま着手できる手順のうち、Claude Code が自動でやる手順で、まだ動かしていないものだけを自動で動かす", () => {
+    const plan = planFromProposedSteps(proposed);
+    assert.deepStrictEqual(autoRunnableSteps(plan).map((step) => step.id), ["s1"]);
+    const started = withStepRun(plan, "s1", { state: "running", at: "2026-11-26T00:00:00.000Z" });
+    assert.deepStrictEqual(autoRunnableSteps(started), []);
+  });
+
+  it("Claude Code がやり遂げたら報告を残して済みにし、できなかったら済みにせず報告だけ残す", () => {
+    const plan = planFromProposedSteps(proposed);
+    const done = withStepRun(plan, "s1", { state: "done", summary: "経緯は〜", at: "2026-11-26T00:00:00.000Z" });
+    assert.deepInclude(done.steps[0], { status: "done", run: { state: "done", summary: "経緯は〜", at: "2026-11-26T00:00:00.000Z" } });
+    const failed = withStepRun(plan, "s2", { state: "failed", summary: "下書きに要る情報がなかった", at: "2026-11-26T00:00:00.000Z" });
+    assert.deepInclude(failed.steps[1], { status: "todo", run: { state: "failed", summary: "下書きに要る情報がなかった", at: "2026-11-26T00:00:00.000Z" } });
+  });
+
+  it("担当と報告は保存したものから読める", () => {
+    const plan = withStepRun(planFromProposedSteps(proposed), "s1", { state: "done", summary: "x", at: "2026-11-26T00:00:00.000Z" });
+    assert.deepStrictEqual(Option.getOrThrow(decodePlan(JSON.parse(JSON.stringify(plan)))), plan);
   });
 });
