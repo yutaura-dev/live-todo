@@ -106,6 +106,7 @@ export function TaskDrawer(props: {
             {detail.brief && <p className="drawer-brief">{detail.brief}</p>}
 
             <NextAction detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />
+            <SlackActions detail={detail} onDone={props.onChanged} />
             {detail.agentRun && <AgentRunSection run={detail.agentRun} problem={detail.agentRunProblem} taskId={detail.id} onRequested={props.onChanged} />}
 
             <section className="drawer-section" aria-labelledby="drawer-items">
@@ -231,6 +232,60 @@ function NextAction({ detail, onMerged, onStarted }: { detail: TaskDetail; onMer
       </h3>
       <StepList steps={plan.steps} current={current} detail={detail} onChanged={onMerged} onStarted={onStarted} />
       {detail.agentRun?.kind !== "dependency_review" && <ReplanButton taskId={detail.id} onStarted={onStarted} />}
+    </section>
+  );
+}
+
+/** Slack の To-do・Saved を追う Task だけに出す。押すと確認を出し、承認したときだけ Slack に書き込む */
+export function SlackActions({ detail, onDone }: { detail: TaskDetail; onDone: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState<"complete" | "remove" | null>(null);
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string }>({ kind: "idle" });
+  const tracksSlack = detail.items.some((item) => item.role === "tracks" && item.source.startsWith("slack:"));
+  if (!tracksSlack || detail.status === "done" || detail.status === "dismissed") return null;
+  const run = async (action: "complete" | "remove") => {
+    setState({ kind: "busy" });
+    const outcome = await api.slackAction(detail.id, action);
+    if (outcome.ok) {
+      setConfirming(null);
+      setState({ kind: "idle" });
+      await onDone();
+    } else setState({ kind: "failed", message: outcome.message });
+  };
+  const LABELS = {
+    complete: { button: "Slack でも完了にする", confirm: "Slack の To-do を完了にし、この Task も完了にします" },
+    remove: { button: "Slack の To-do から外す", confirm: "Slack の To-do・Saved から外し、この Task を片付けます（メッセージは消えません）" },
+  } as const;
+
+  return (
+    <section className="next-action" aria-labelledby="drawer-slack">
+      <h3 id="drawer-slack" className="drawer-section-title">
+        Slack
+      </h3>
+      {confirming === null ? (
+        <div className="step-actions">
+          <button type="button" className="primary-button" onClick={() => setConfirming("complete")}>
+            {LABELS.complete.button}
+          </button>
+          <button type="button" className="quiet-button" onClick={() => setConfirming("remove")}>
+            {LABELS.remove.button}
+          </button>
+        </div>
+      ) : (
+        <div className="merge-confirm" role="alertdialog" aria-labelledby="slack-confirm-title">
+          <p id="slack-confirm-title" className="merge-confirm-title">
+            {LABELS[confirming].confirm}
+          </p>
+          <div className="merge-confirm-actions">
+            <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void run(confirming)}>
+              実行する
+            </button>
+            <button type="button" className="quiet-button" onClick={() => setConfirming(null)}>
+              やめる
+            </button>
+          </div>
+        </div>
+      )}
+      {state.kind === "failed" && <p className="problem">Slack に書き込めませんでした: {state.message}</p>}
     </section>
   );
 }

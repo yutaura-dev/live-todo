@@ -22,6 +22,7 @@ const api: LiveTodoApi = {
   saveConfig: (config) => ipcRenderer.invoke(IPC_CHANNELS.saveConfig, config),
   setSecret: (key, value) => ipcRenderer.invoke(IPC_CHANNELS.setSecret, { key, value }),
   removeSecret: (key) => ipcRenderer.invoke(IPC_CHANNELS.removeSecret, key),
+  slackAction: (taskId, action) => ipcRenderer.invoke(IPC_CHANNELS.slackAction, { taskId, action }),
   connectSlack: (accountId, workspace) => ipcRenderer.invoke(IPC_CHANNELS.connectSlack, { accountId, workspace }),
   testSlack: (accountId) => ipcRenderer.invoke(IPC_CHANNELS.testSlack, accountId),
   previewFilter: (request) => ipcRenderer.invoke(IPC_CHANNELS.previewFilter, request),

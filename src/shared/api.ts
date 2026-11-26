@@ -110,6 +110,8 @@ export interface LiveTodoApi {
   conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;
   /** 直した内容を PR のブランチに push する。外部への書き込み。差分を確かめて承認したあとにだけ呼ぶ */
   pushConflictResolution(taskId: number, commitSha: string): Promise<Outcome>;
+  /** Slack の To-do を完了にする・To-do から外す。外部への書き込み。確認で承認したあとにだけ呼ぶ */
+  slackAction(taskId: number, action: "complete" | "remove"): Promise<Outcome>;
   /** Slack のセッションでつながるかを確かめる（auth.test）。誰のどのワークスペースか */
   testSlack(accountId: string): Promise<{ user: string; team: string } | { error: string }>;
   /** Slack のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する。workspace が空ならログインしたワークスペースを使う */

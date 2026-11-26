@@ -11,6 +11,7 @@ export const IPC_CHANNELS = {
   previewFilter: "settings:preview-filter",
   testSlack: "settings:test-slack",
   connectSlack: "settings:connect-slack",
+  slackAction: "board:slack-action",
   taskDetail: "board:task-detail",
   mergePlan: "board:merge-plan",
   merge: "board:merge",

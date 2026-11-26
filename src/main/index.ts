@@ -10,7 +10,8 @@ import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
 import { withSlackSession } from "../app/slack-session.js";
 import { captureSlackSession } from "./slack-connect.js";
-import { SlackClient } from "../sources/slack/slack-client.js";
+import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js";
+import { slackWrite } from "../app/slack-write.js";
 import { SlackClientLive } from "../sources/slack/slack-client-live.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { finishMerge, mergePlan, startMerge } from "../app/merge-approval.js";
@@ -406,7 +407,36 @@ const claudeAllowedFor = (accountId: string) =>
     return account !== undefined && (account.reviewDependencyPrs || account.planNextActions);
   });
 
+/** 保存した設定と秘密情報で、Slack のクライアントを作る（承認した書き込みと、接続の確認のため） */
+const slackClientFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const account = config.slackAccounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) return yield* new SlackRequestError({ message: `設定に Slack のワークスペース「${accountId}」がない` });
+    const secrets = yield* SecretStore;
+    const token = yield* secrets.require(`slack.${accountId}.token`);
+    const cookie = yield* secrets.require(`slack.${accountId}.cookie`);
+    const http = yield* HttpClient.HttpClient;
+    return yield* Effect.gen(function* () {
+      return yield* SlackClient;
+    }).pipe(
+      Effect.provide(SlackClientLive({ workspace: account.workspace, token, cookie, userAgent: account.userAgent })),
+      Effect.provideService(HttpClient.HttpClient, http),
+    );
+  });
+
 function registerSlackSettings() {
+  // 外部への書き込み。renderer で確認を出し、ユーザーが承認したときだけ呼ばれる
+  ipcMain.handle(IPC_CHANNELS.slackAction, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), action: Schema.Literals(["complete", "remove"]) }),
+        )(input);
+        yield* slackWrite(request.taskId, request.action, slackClientFor);
+      }),
+    ),
+  );
   // 外部への書き込みではない（自分のセッションを読み取るだけ）。読み取った値は暗号化して保存し、ログに出さない
   ipcMain.handle(IPC_CHANNELS.connectSlack, async (_event, input: unknown) => {
     const request = await runtime
@@ -440,19 +470,7 @@ function registerSlackSettings() {
     runtime.runPromise(
       Effect.gen(function* () {
         const accountId = yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)))(input);
-        const config = yield* loadAppConfigFile(configPath);
-        const account = config.slackAccounts.find((candidate) => candidate.id === accountId);
-        if (account === undefined) return { error: "保存した設定に、この Slack のワークスペースがない。先に設定を保存してください" };
-        const secrets = yield* SecretStore;
-        const token = yield* secrets.require(`slack.${accountId}.token`);
-        const cookie = yield* secrets.require(`slack.${accountId}.cookie`);
-        const http = yield* HttpClient.HttpClient;
-        const me = yield* Effect.gen(function* () {
-          return yield* (yield* SlackClient).authTest;
-        }).pipe(
-          Effect.provide(SlackClientLive({ workspace: account.workspace, token, cookie, userAgent: account.userAgent })),
-          Effect.provideService(HttpClient.HttpClient, http),
-        );
+        const me = yield* (yield* slackClientFor(accountId)).authTest;
         return { user: me.user, team: me.team };
       }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
     ),
