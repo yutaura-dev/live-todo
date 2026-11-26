@@ -405,7 +405,7 @@ function SlackAccountEditor(props: {
   const [connecting, setConnecting] = useState(false);
   const connect = async () => {
     setConnecting(true);
-    setCheck("開いたウィンドウで Slack にログインしてください。ログインが済むと自動で閉じます");
+    setCheck("開いたウィンドウで Slack にログインしてください（Google ではなく、メールアドレスと確認コードで）。ログインが済むと自動で閉じます");
     const result = await api.connectSlack(account.id, account.workspace);
     setConnecting(false);
     if ("error" in result) {
@@ -444,7 +444,8 @@ function SlackAccountEditor(props: {
             ブラウザでログインして取り込む
           </button>
           <span className="field-hint">
-            {check ?? "Slack のログイン画面を開き、ログインが済んだらセッションを読み取って保存します。このアプリ専用のログインになり、ほかのブラウザのログインには影響しません"}
+            {check ??
+              "Slack のログイン画面を開き、ログインが済んだらセッションを読み取って保存します。このアプリ専用のログインになり、ほかのブラウザのログインには影響しません。Google でのログインはアプリの中では使えないので、メールアドレスと確認コードでログインしてください"}
           </span>
         </div>
         <details className="manual-secrets">
