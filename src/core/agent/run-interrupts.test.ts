@@ -1,4 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
+import { specOf } from "@yutaura/live-spec/testing";
+import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns } from "../db/schema.js";
@@ -113,19 +115,21 @@ describe("RunInterrupts.trackedClosed", () => {
       }),
     ));
 
-  it.effect("聞き終わった処理には知らせない", () =>
-    run(
-      Effect.gen(function* () {
-        const task = yield* trackedTask("agent_running", "resolved");
-        yield* insertRun(task.id, "running", "merge_pull_request");
-        const interrupts = yield* RunInterrupts;
-        yield* interrupts.listen(task.id, Effect.void);
+  describe(specOf(TaskStatusSpec.stopAgent, "処理中のときだけ"), () => {
+    it.effect("聞き終わった処理には知らせない", () =>
+      run(
+        Effect.gen(function* () {
+          const task = yield* trackedTask("agent_running", "resolved");
+          yield* insertRun(task.id, "running", "merge_pull_request");
+          const interrupts = yield* RunInterrupts;
+          yield* interrupts.listen(task.id, Effect.void);
 
-        const handled = yield* interrupts.trackedClosed(task.id, ["resolved"]);
+          const handled = yield* interrupts.trackedClosed(task.id, ["resolved"]);
 
-        assert.isFalse(handled);
-      }),
-    ));
+          assert.isFalse(handled);
+        }),
+      ));
+  });
 });
 
 describe("statusAfterRun", () => {

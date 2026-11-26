@@ -1,4 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
+import { specOf } from "@yutaura/live-spec/testing";
+import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
 import { Effect, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { eq } from "drizzle-orm";
@@ -261,19 +263,21 @@ describe("runDependencyReviews", () => {
       assert.strictEqual(yield* statusOf(taskId), "done");
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("調べている間に同期が状態を変えたら（merge されて完了など）、そちらを優先する", () =>
-    Effect.gen(function* () {
-      const { taskId } = yield* dependencyTask();
-      const agent = withAgent({
-        onRun: Effect.gen(function* () {
-          yield* (yield* TaskRepository).updateTask(taskId, { status: "done" });
-        }),
-      });
+  describe(specOf(TaskStatusSpec.finishAgent, "処理中のときだけ"), () => {
+    it.effect("調べている間に同期が状態を変えたら（merge されて完了など）、そちらを優先する", () =>
+      Effect.gen(function* () {
+        const { taskId } = yield* dependencyTask();
+        const agent = withAgent({
+          onRun: Effect.gen(function* () {
+            yield* (yield* TaskRepository).updateTask(taskId, { status: "done" });
+          }),
+        });
 
-      yield* agent.provide(run);
+        yield* agent.provide(run);
 
-      assert.strictEqual(yield* statusOf(taskId), "done");
-    }).pipe(Effect.provide(TestDatabase)));
+        assert.strictEqual(yield* statusOf(taskId), "done");
+      }).pipe(Effect.provide(TestDatabase)));
+  });
 
   it.effect("bot 以外の PR・ほかのアカウント・手を付けた Task・閉じた PR・PR でない項目は調べない", () =>
     Effect.gen(function* () {

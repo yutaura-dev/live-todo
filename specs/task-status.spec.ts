@@ -240,6 +240,20 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "untested:createBySync:同期だけ": "誰が起こすかは呼び出し口で決まる。Task を作る triage は同期の処理からしか呼ばれず、実装に権限の判定はないので、テストで確かめるものがない",
+  "untested:createByHand:ユーザーだけ": "手で Task を作る addTask は画面の操作からしか呼ばれず、実装に権限の判定はない",
+  "untested:createByHand:まだ Task がないときだけ": "「未作成」は spec だけの値。手で作る操作は毎回新しい Task を作る",
+  "untested:reconcile:同期だけ": "status を導き直すのは同期の処理だけで、画面からは呼べない。実装に権限の判定はない",
+  "untested:move:ユーザーだけ": "列を移す moveTask は画面の操作（IPC）からしか呼ばれず、実装に権限の判定はない",
+  "untested:finishAllSteps:ユーザーか AI だけ": "手順を書き換えるのは画面の操作と AI の処理だけで、同期は手順を書き換えない。実装に権限の判定はない",
+  "untested:finishAllSteps:Task があるときだけ": "「未作成」は spec だけの値。手順の操作は既にある Task の id を受け取る",
+  "untested:reopenSteps:ユーザーか AI だけ": "手順を書き換えるのは画面の操作と AI の処理だけ。誰が戻したかで結果が変わることは、シナリオ「AI が手順を足しても、完了の Task は戻らない」と task-repository のテストで確かめている",
+  "untested:reopenSteps:Task があるときだけ": "「未作成」は spec だけの値。手順の操作は既にある Task の id を受け取る",
+  "untested:startAgent:ユーザーか AI だけ": "AI の処理を始めるのは画面の操作と定期の処理だけで、同期は始めない。実装に権限の判定はない",
+  "untested:startAgent:Task があるときだけ": "「未作成」は spec だけの値。処理を始める操作は既にある Task の id を受け取る",
+  "untested:stopAgent:AI だけ": "作業をやめるかを決めるのは Claude Code の回答だけで、画面や同期からは呼べない",
+  "untested:cancelQueued:同期だけ": "待ち行列を取り消すのは同期が追う項目の変化を見つけたときだけで、画面からは呼べない",
+  "untested:finishAgent:AI だけ": "処理を終えるのは AI の処理の後片付けだけで、画面や同期からは呼べない",
   "indistinguishable-example:createBySync:要確認,todoではない": "todo ではないと判定しても、判定の当たり具合を確かめるまでは隠さずに要確認にする",
   "same-for-similar-actors:finishAllSteps": "手順を済ませたのがユーザーでも AI でも、残りがなければ完了にする",
   "same-for-similar-actors:reopenSteps": "できるかどうかは同じで、違うのは結果だけ（完了から todo に戻すのはユーザーが戻したときだけ）。シナリオ「AI が手順を足しても、完了の Task は戻らない」で確かめている",

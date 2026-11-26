@@ -14,7 +14,8 @@ Source Item の triage、Task の status、Approval のように、「どの状�
 - 振る舞いの仕様は live-spec（`@yutaura/live-spec`）で、`specs/*.spec.ts` に 1 ファイル 1 ドメインオブジェクトで書く。spec は AI が書き、人は生成された状態遷移図と「できる／できない」の一覧を見てレビューする
 - spec の書き方は live-spec 同梱の skill（live-spec-authoring / live-spec-from-code / live-spec-review）に従う。skill は drizzle-kit と同じく pnpm の `permissions` で承認し、`.claude/skills/` にリンクする
 - 振る舞いの正本は spec で、実装はそれに従う。振る舞いを変えるときは先に spec を直し、生成した図と一覧で振る舞いを決めてから実装する。実装に合わせて spec を書き換えない
-- spec からコードを指さない（live-spec の `// 根拠: path:line` と `live-spec.evidence.lock` は使わない）。コードを指すと、実装が変わるたびに spec を追従させることになり、実装が正本になってしまうため。spec と実装が合っているかはテストで確かめる
+- spec からコードを指さない。コードを指すと、実装が変わるたびに spec を追従させることになり、実装が正本になってしまうため
+- spec と実装の対応はテストの側から持つ。実装のテストは `specOf`（`@yutaura/live-spec/testing`）で spec の条件に結び、`live-spec check specs/ --tests src` で、どのテストも確かめていない条件がないかを検査する。テストで確かめられない条件（誰が起こすかが呼び出し口だけで決まるものなど）は、理由を書いて `reviewed` に入れる
 - 生成した仕様書はコミットしない
 - 役割を分ける。charter・ADR は「なぜ」（何をやらないか、判断の理由）、spec は「どう振る舞うべきか」。architecture.md の状態や権限を文章で説明している部分が spec と重なったら、spec を正にして文書側は spec へのリンクにする
 
@@ -33,7 +34,7 @@ Source Item の triage、Task の status、Approval のように、「どの状�
 ### Negative
 
 - 振る舞いを変えるたびに、実装の前に spec の更新とその確認が要る
-- spec と実装のずれは検査では見つからず、テストに頼る
+- 条件ごとにテストを結ぶ手間がかかる
 - live-spec は公開されたばかりで版の更新が速い。pnpm の `minimumReleaseAge` を満たさない版を入れるときは、`minimumReleaseAgeExclude` に完全な版で例外を書く
 
 ## References

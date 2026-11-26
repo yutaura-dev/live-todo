@@ -1,4 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
+import { specOf } from "@yutaura/live-spec/testing";
+import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { Database } from "../db/database.js";
@@ -129,28 +131,32 @@ describe("BoardService.moveTask", () => {
       }),
     ));
 
-  it.effect("処理中の Task は動かせず、status も変えない", () =>
-    run(
-      Effect.gen(function* () {
-        const task = yield* taskWithItem("a", "agent_running");
+  describe(specOf(TaskStatusSpec.move, "処理中でないときだけ"), () => {
+    it.effect("処理中の Task は動かせず、status も変えない", () =>
+      run(
+        Effect.gen(function* () {
+          const task = yield* taskWithItem("a", "agent_running");
 
-        const error = yield* Effect.flip((yield* BoardService).moveTask(task.id, "todo"));
+          const error = yield* Effect.flip((yield* BoardService).moveTask(task.id, "todo"));
 
-        const tasks = yield* TaskRepository;
-        assert.instanceOf(error, TaskBusyError);
-        assert.strictEqual((yield* tasks.listTasks)[0]?.status, "agent_running");
-        assert.deepStrictEqual(yield* tasks.listChanges(task.id), []);
-      }),
-    ));
+          const tasks = yield* TaskRepository;
+          assert.instanceOf(error, TaskBusyError);
+          assert.strictEqual((yield* tasks.listTasks)[0]?.status, "agent_running");
+          assert.deepStrictEqual(yield* tasks.listChanges(task.id), []);
+        }),
+      ));
+  });
 
-  it.effect("存在しない Task を動かそうとしたらエラーにする", () =>
-    run(
-      Effect.gen(function* () {
-        const error = yield* Effect.flip((yield* BoardService).moveTask(999, "todo"));
+  describe(specOf(TaskStatusSpec.move, "Task があるときだけ"), () => {
+    it.effect("存在しない Task を動かそうとしたらエラーにする", () =>
+      run(
+        Effect.gen(function* () {
+          const error = yield* Effect.flip((yield* BoardService).moveTask(999, "todo"));
 
-        assert.instanceOf(error, TaskNotFoundError);
-      }),
-    ));
+          assert.instanceOf(error, TaskNotFoundError);
+        }),
+      ));
+  });
 });
 
 describe("BoardService.markSeen", () => {

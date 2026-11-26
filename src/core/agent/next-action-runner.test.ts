@@ -1,4 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
+import { specOf } from "@yutaura/live-spec/testing";
+import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
 import { eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { Database } from "../db/database.js";
@@ -200,14 +202,16 @@ describe("requestReplan（次にやることを考え直す）", () => {
       assert.include(agent.requests[0]?.prompt ?? "", "このメールはアーカイブして終わりにしたい");
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("処理中の Task は考え直さない", () =>
-    Effect.gen(function* () {
-      const taskId = yield* task({ status: "agent_running", nextActions: { steps: [] } });
+  describe(specOf(TaskStatusSpec.startAgent, "処理中でないときだけ"), () => {
+    it.effect("処理中の Task は考え直さない", () =>
+      Effect.gen(function* () {
+        const taskId = yield* task({ status: "agent_running", nextActions: { steps: [] } });
 
-      const error = yield* requestReplan(taskId).pipe(Effect.flip);
+        const error = yield* requestReplan(taskId).pipe(Effect.flip);
 
-      assert.include(error.message, "処理中");
-    }).pipe(Effect.provide(TestDatabase)));
+        assert.include(error.message, "処理中");
+      }).pipe(Effect.provide(TestDatabase)));
+  });
 });
 
 describe("runNextActionPlanning", () => {
