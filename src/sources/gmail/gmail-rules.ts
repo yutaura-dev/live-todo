@@ -35,7 +35,8 @@ export function matchesRule(mail: RuleTarget, rule: GmailRule): boolean {
   const { topics, kinds, fromContains, subjectContains } = rule.when;
   if (topics !== undefined && topics.length > 0 && (mail.topic === null || !topics.includes(mail.topic))) return false;
   if (kinds !== undefined && kinds.length > 0 && !kinds.includes(mail.kind)) return false;
-  return contains(`${mail.senderName} ${mail.senderKey}`, fromContains) && contains(mail.subject, subjectContains);
+  // 表示名に当てない理由: 送る側が自由に付けられるので、なりすましのメールがルールに合ってしまう
+  return contains(mail.senderKey, fromContains) && contains(mail.subject, subjectContains);
 }
 
 /** ルールの操作を、Gmail のラベルの付け外しにする。labelIds はラベルの名前から id への対応 */

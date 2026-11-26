@@ -737,7 +737,7 @@ function GmailRuleEditor(props: { rule: GmailRuleDraft; onChange: (next: GmailRu
         ))}
       </div>
       <label className="field" htmlFor={`${id}-from`}>
-        差出人に含む文字
+        差出人のアドレスに含む文字（表示名は見ません）
         <input id={`${id}-from`} value={rule.when.fromContains ?? ""} placeholder="cloudflare.com" onChange={(event) => when({ fromContains: event.target.value })} />
       </label>
       <label className="field" htmlFor={`${id}-subject`}>

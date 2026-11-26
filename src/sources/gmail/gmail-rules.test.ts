@@ -33,6 +33,12 @@ describe("matchesRule（利用者が決めたルールの条件に合うか）",
     assert.isFalse(matchesRule(mail({ senderKey: "billing@aws.example", senderName: "AWS" }), strict));
   });
 
+  it("差出人の条件は、アドレスにだけ当てる（表示名は送る側が自由に付けられるので見ない）", () => {
+    const fromCloudflare = rule({ when: { fromContains: "cloudflare" } });
+    assert.isFalse(matchesRule(mail({ senderName: "Cloudflare", senderKey: "evil@attacker.example" }), fromCloudflare));
+    assert.isTrue(matchesRule(mail({ senderName: "請求", senderKey: "noreply@notify.cloudflare.com" }), fromCloudflare));
+  });
+
   it("メルマガかお知らせか（kind）でも絞れる", () => {
     assert.isFalse(matchesRule(mail(), rule({ when: { kinds: ["newsletter"] } })));
     assert.isTrue(matchesRule(mail(), rule({ when: { kinds: ["notification"] } })));

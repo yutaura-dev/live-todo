@@ -12,7 +12,7 @@ describe("describeRule（ルールを一文で見せる）", () => {
   it("条件と操作を、読める文にする", () => {
     assert.strictEqual(
       describeRule({ id: "r", name: "x", createdAt: "", when: { topics: ["billing"], fromContains: "cloudflare" }, then: { labels: ["レシート"], markRead: true } }),
-      "用件が「請求・支払い」で、差出人に「cloudflare」を含むメールに、ラベル「レシート」を付けて既読にする",
+      "用件が「請求・支払い」で、差出人のアドレスに「cloudflare」を含むメールに、ラベル「レシート」を付けて既読にする",
     );
   });
 });

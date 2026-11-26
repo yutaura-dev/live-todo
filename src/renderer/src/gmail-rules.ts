@@ -21,7 +21,7 @@ export function describeRule(rule: GmailRuleDraft): string {
   const conditions = [
     ...((rule.when.topics ?? []).length > 0 ? [`用件が${(rule.when.topics ?? []).map((topic) => `「${TOPIC_LABEL.get(topic) ?? topic}」`).join("か")}`] : []),
     ...((rule.when.kinds ?? []).length > 0 ? [`種類が${(rule.when.kinds ?? []).map((kind) => `「${KIND_LABEL[kind] ?? kind}」`).join("か")}`] : []),
-    ...((rule.when.fromContains ?? "").trim() !== "" ? [`差出人に「${rule.when.fromContains!.trim()}」を含む`] : []),
+    ...((rule.when.fromContains ?? "").trim() !== "" ? [`差出人のアドレスに「${rule.when.fromContains!.trim()}」を含む`] : []),
     ...((rule.when.subjectContains ?? "").trim() !== "" ? [`件名に「${rule.when.subjectContains!.trim()}」を含む`] : []),
   ];
   const actions: Array<{ te: string; end: string }> = [
