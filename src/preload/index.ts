@@ -42,6 +42,7 @@ const api: LiveTodoApi = {
   acceptSuggestion: (questionId, index) => ipcRenderer.invoke(IPC_CHANNELS.acceptSuggestion, { questionId, index }),
   dismissSuggestion: (questionId, index) => ipcRenderer.invoke(IPC_CHANNELS.dismissSuggestion, { questionId, index }),
   gmailProcess: (taskId, action, messageIds) => ipcRenderer.invoke(IPC_CHANNELS.gmailProcess, { taskId, action, messageIds }),
+  gmailRunStep: (taskId, stepId, messageIds) => ipcRenderer.invoke(IPC_CHANNELS.gmailRunStep, { taskId, stepId, messageIds }),
   connectSlack: (accountId, workspace) => ipcRenderer.invoke(IPC_CHANNELS.connectSlack, { accountId, workspace }),
   testSlack: (accountId) => ipcRenderer.invoke(IPC_CHANNELS.testSlack, accountId),
   previewFilter: (request) => ipcRenderer.invoke(IPC_CHANNELS.previewFilter, request),

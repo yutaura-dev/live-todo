@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   acceptSuggestion: "board:accept-suggestion",
   dismissSuggestion: "board:dismiss-suggestion",
   gmailProcess: "board:gmail-process",
+  gmailRunStep: "board:gmail-run-step",
   fixPullRequest: "board:fix-pull-request",
   pullRequestFix: "board:pull-request-fix",
   pushPullRequestFix: "board:push-pull-request-fix",

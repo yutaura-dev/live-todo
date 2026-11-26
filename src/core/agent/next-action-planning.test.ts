@@ -125,7 +125,7 @@ describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
       "workflow_succeeded",
       "none",
     ]);
-    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait", "merge_pull_request", "process_mail"]);
+    assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait", "merge_pull_request", "process_mail", "gmail_action"]);
   });
 });
 

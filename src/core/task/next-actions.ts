@@ -23,14 +23,37 @@ export type WaitCondition =
 /** resolve_conflicts: アプリが Claude Code にコンフリクトを直させる / push_conflict_resolution: 直した内容を確かめて push する */
 /** Web でやる手順の開く先（公式のサイトなど）。画面に「〇〇を開く」ボタンを出す */
 export type StepLink = { url: string; label: string };
+/** gmail_action の手順で、アプリが Gmail で行う操作 */
+export type GmailStepActions = { labels?: ReadonlyArray<string>; markRead?: boolean; archive?: boolean };
 export type ActionStep = StepBase & {
-  kind: "manual" | "wait" | "merge_pull_request" | "fix_and_push" | "resolve_conflicts" | "push_conflict_resolution" | "process_mail" | "archive_past_invites";
+  kind:
+    | "manual"
+    | "wait"
+    | "merge_pull_request"
+    | "fix_and_push"
+    | "resolve_conflicts"
+    | "push_conflict_resolution"
+    | "process_mail"
+    | "archive_past_invites"
+    | "gmail_action";
   until?: WaitCondition;
   link?: StepLink;
+  gmail?: GmailStepActions;
 };
 /** process_mail: アプリがメールの一覧を見せ、承認したものを Gmail で確認済みにする（アーカイブ）かゴミ箱に入れる */
 /** archive_past_invites: 日程が過ぎた招待のメールを見せ、承認したら Gmail で確認済みにする */
-export const ACTION_KINDS = ["manual", "wait", "merge_pull_request", "fix_and_push", "resolve_conflicts", "push_conflict_resolution", "process_mail", "archive_past_invites"] as const;
+/** gmail_action: アプリが Gmail でラベルを付ける・既読にする・アーカイブする（押したときに） */
+export const ACTION_KINDS = [
+  "manual",
+  "wait",
+  "merge_pull_request",
+  "fix_and_push",
+  "resolve_conflicts",
+  "push_conflict_resolution",
+  "process_mail",
+  "archive_past_invites",
+  "gmail_action",
+] as const;
 export type DecisionStep = StepBase & {
   kind: "decision";
   options: ReadonlyArray<{ key: string; label: string; steps: ReadonlyArray<Step> }>;
@@ -149,6 +172,7 @@ export type ProposedStep = {
   type?: ActionStep["kind"] | undefined;
   until?: ProposedWaitCondition | undefined;
   link?: { url: string; label: string } | undefined;
+  gmail?: { labels: ReadonlyArray<string>; markRead: boolean; archive: boolean } | undefined;
   options?: ReadonlyArray<{ label: string; steps: ReadonlyArray<Omit<ProposedStep, "options">> }> | undefined;
 };
 
@@ -197,14 +221,28 @@ const linkOf = (link: { url: string; label: string } | undefined): StepLink | un
 
 function actionStepOf(
   base: StepBase,
-  step: { type?: ActionStep["kind"] | undefined; until?: ProposedWaitCondition | undefined; link?: { url: string; label: string } | undefined },
+  step: {
+    type?: ActionStep["kind"] | undefined;
+    until?: ProposedWaitCondition | undefined;
+    link?: { url: string; label: string } | undefined;
+    gmail?: { labels: ReadonlyArray<string>; markRead: boolean; archive: boolean } | undefined;
+  },
   now: string | undefined,
 ): ActionStep {
-  const kind = step.type ?? "manual";
+  const gmail = gmailActionsOf(step.gmail);
+  // 操作の決まっていない Gmail の手順は、押しても何もしないので手作業にする
+  const kind = step.type === "gmail_action" && gmail === undefined ? "manual" : (step.type ?? "manual");
   const until = kind === "wait" ? waitConditionOf(step.until, now) : undefined;
   const link = linkOf(step.link);
-  return { ...base, kind, ...(until === undefined ? {} : { until }), ...(link === undefined ? {} : { link }) };
+  return { ...base, kind, ...(until === undefined ? {} : { until }), ...(link === undefined ? {} : { link }), ...(kind === "gmail_action" && gmail !== undefined ? { gmail } : {}) };
 }
+
+const gmailActionsOf = (gmail: { labels: ReadonlyArray<string>; markRead: boolean; archive: boolean } | undefined): GmailStepActions | undefined => {
+  if (gmail === undefined) return undefined;
+  const labels = gmail.labels.map((label) => label.trim()).filter((label) => label !== "");
+  if (labels.length === 0 && !gmail.markRead && !gmail.archive) return undefined;
+  return { ...(labels.length === 0 ? {} : { labels }), ...(gmail.markRead ? { markRead: true } : {}), ...(gmail.archive ? { archive: true } : {}) };
+};
 
 /** 手順の id から、その手順の開く先を探す（分かれ道の中も含める） */
 export function stepLinkOf(plan: NextActionPlan, stepId: string): StepLink | undefined {
@@ -329,6 +367,9 @@ const ActionStepSchema = Schema.Struct({
   kind: Schema.Literals(ACTION_KINDS),
   until: Schema.optionalKey(WaitConditionSchema),
   link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
+  gmail: Schema.optionalKey(
+    Schema.Struct({ labels: Schema.optionalKey(Schema.Array(Schema.String)), markRead: Schema.optionalKey(Schema.Boolean), archive: Schema.optionalKey(Schema.Boolean) }),
+  ),
 });
 interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchema> {
   readonly kind: "decision";

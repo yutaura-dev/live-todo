@@ -9,7 +9,7 @@ import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import { GmailRequestError } from "../sources/gmail/gmail-client.js";
 import { makeTestGmail } from "../sources/gmail/test-client.js";
-import { gmailMailTarget, gmailProcess } from "./gmail-write.js";
+import { gmailMailTarget, gmailProcess, gmailRunStep } from "./gmail-write.js";
 
 const insertMail = (messageId: string, overrides: Partial<typeof gmailMessages.$inferInsert> = {}) =>
   Effect.gen(function* () {
@@ -172,5 +172,35 @@ describe("gmailProcess（承認したメールを確認済みにする・ゴミ�
       const taskId = yield* linkedTask("slack:home", "C1:1.1");
       const error = yield* gmailProcess(taskId, "trash", ["a"], () => Effect.succeed(makeTestGmail().client)).pipe(Effect.flip);
       assert.include(error.message, "Gmail");
+    }).pipe(Effect.provide(TestDatabase)));
+});
+describe("gmailRunStep（Gmail の操作の手順を、押したときにアプリが行う）", () => {
+  it.effect("手順の操作（ラベル・既読・アーカイブ）を承認したメールに行い、記録して、手順を済みにする", () => {
+    const gmail = makeTestGmail();
+    return Effect.gen(function* () {
+      yield* insertMail("a");
+      const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
+      const tasks = yield* TaskRepository;
+      yield* tasks.updateTask(taskId, {
+        nextActions: { steps: [{ id: "s1", kind: "gmail_action", title: "レシートを付けてアーカイブ", effort: "easy", mode: "serial", status: "todo", gmail: { labels: ["レシート"], markRead: true, archive: true } }] },
+      });
+
+      yield* gmailRunStep(taskId, "s1", ["a"], () => Effect.succeed(gmail.client));
+
+      assert.deepStrictEqual(gmail.state.labels, [{ id: "Label_1", name: "レシート" }]);
+      assert.deepStrictEqual(gmail.state.modified, [{ id: "a", add: ["Label_1"], remove: ["UNREAD", "INBOX"] }]);
+      const db = yield* Database;
+      assert.deepInclude((yield* db.select().from(approvals).pipe(Effect.orDie))[0], { action: "gmail_actions", status: "executed" });
+      const task = Option.getOrThrow(yield* tasks.findTask(taskId));
+      assert.strictEqual(task.status, "done");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("Gmail の操作の手順でなければ、何もしない", () =>
+    Effect.gen(function* () {
+      const taskId = yield* linkedTask("gmail:me:senders", "news@shop.example");
+      yield* (yield* TaskRepository).updateTask(taskId, { nextActions: { steps: [{ id: "s1", kind: "manual", title: "x", effort: "easy", mode: "serial", status: "todo" }] } });
+      const error = yield* gmailRunStep(taskId, "s1", [], () => Effect.succeed(makeTestGmail().client)).pipe(Effect.flip);
+      assert.include(error.message, "Gmail の操作");
     }).pipe(Effect.provide(TestDatabase)));
 });

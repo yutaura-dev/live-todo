@@ -294,3 +294,19 @@ describe("手順のリンク（Web でやる手順を開くボタン）", () => 
     assert.isUndefined(stepLinkOf(plan, "s1"));
   });
 });
+
+describe("Gmail の操作の手順（ボタンでアプリが行う）", () => {
+  it("ラベル・既読・アーカイブを持つ手順にする（操作のないものは手作業にする）", () => {
+    const plan = planFromProposedSteps([
+      { title: "レシートラベルを付けて既読にし、アーカイブする", effort: "easy", mode: "serial", type: "gmail_action", gmail: { labels: ["レシート"], markRead: true, archive: true } },
+      { title: "何もしない", effort: "easy", mode: "serial", type: "gmail_action", gmail: { labels: [], markRead: false, archive: false } },
+    ]);
+    assert.deepInclude(plan.steps[0], { kind: "gmail_action", gmail: { labels: ["レシート"], markRead: true, archive: true } });
+    assert.deepInclude(plan.steps[1], { kind: "manual" });
+  });
+
+  it("保存した Gmail の操作の手順を読める", () => {
+    const plan = { steps: [{ id: "s1", kind: "gmail_action", title: "x", effort: "easy", mode: "serial", status: "todo", gmail: { labels: ["レシート"], markRead: true } }] };
+    assert.deepInclude(Option.getOrThrow(decodePlan(plan)).steps[0], { gmail: { labels: ["レシート"], markRead: true } });
+  });
+});

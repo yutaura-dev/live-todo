@@ -72,6 +72,7 @@ export const mockApi: LiveTodoApi = {
   acceptSuggestion: async () => ({ ok: true }),
   dismissSuggestion: async () => ({ ok: true }),
   gmailProcess: async () => ({ ok: true }),
+  gmailRunStep: async () => ({ ok: true }),
   fixPullRequest: async () => ({ ok: true }),
   pullRequestFix: async () => ({ error: "見本の画面では使えない" }),
   pushPullRequestFix: async () => ({ ok: true }),

@@ -4,12 +4,13 @@ import { ProposedWaitConditionSchema, WAIT_CONDITION_JSON_SCHEMA, WAIT_CONDITION
 
 const ProposedStep = Schema.Struct({
   title: Schema.NonEmptyString,
-  type: Schema.Literals(["manual", "wait", "merge_pull_request", "process_mail"]),
+  type: Schema.Literals(["manual", "wait", "merge_pull_request", "process_mail", "gmail_action"]),
   until: ProposedWaitConditionSchema,
   effort: Schema.Literals(EFFORTS),
   mode: Schema.Literals(["serial", "parallel"]),
   // 前の形の回答（この項目がない）も読めるようにする
   link: Schema.optionalKey(Schema.Struct({ url: Schema.String, label: Schema.String })),
+  gmail: Schema.optionalKey(Schema.Struct({ labels: Schema.Array(Schema.String), markRead: Schema.Boolean, archive: Schema.Boolean })),
 });
 const RecurringProposal = Schema.Struct({
   suggest: Schema.Boolean,
@@ -40,9 +41,9 @@ const stepSchema = {
     title: { type: "string", description: "やること（自分が手を動かす内容を、動詞で終わる短い文で）" },
     type: {
       type: "string",
-      enum: ["manual", "wait", "merge_pull_request", "process_mail"],
+      enum: ["manual", "wait", "merge_pull_request", "process_mail", "gmail_action"],
       description:
-        "manual: 自分が手を動かす / wait: 自分では進められず、相手（レビュー・CI・返信など）を待つ / merge_pull_request: この Task が追う PR を merge する（アプリから merge できる） / process_mail: この Task の Gmail のメールを確認済みにする（アーカイブ）かゴミ箱に入れる（アプリのボタンでできる）",
+        "manual: 自分が手を動かす / wait: 自分では進められず、相手（レビュー・CI・返信など）を待つ / merge_pull_request: この Task が追う PR を merge する（アプリから merge できる） / process_mail: この Task の Gmail のメールを確認済みにする（アーカイブ）かゴミ箱に入れるか、ユーザーが選ぶ（アプリのボタンでできる） / gmail_action: この Task の Gmail のメールに、決まった操作（ラベルを付ける・既読にする・アーカイブする）を行う（アプリのボタンでできる。gmail に操作を書く）",
     },
     until: WAIT_CONDITION_JSON_SCHEMA,
     effort: { type: "string", enum: [...EFFORTS] },
@@ -54,8 +55,15 @@ const stepSchema = {
       required: ["url", "label"],
       additionalProperties: false,
     },
+    gmail: {
+      type: "object",
+      description: "type が gmail_action のとき、行う操作。labels は付けるラベルの名前（なければ作る）。それ以外は labels を空、ほかを false にする",
+      properties: { labels: { type: "array", items: { type: "string" } }, markRead: { type: "boolean" }, archive: { type: "boolean" } },
+      required: ["labels", "markRead", "archive"],
+      additionalProperties: false,
+    },
   },
-  required: ["title", "type", "until", "effort", "mode", "link"],
+  required: ["title", "type", "until", "effort", "mode", "link", "gmail"],
   additionalProperties: false,
 } as const;
 
@@ -143,7 +151,8 @@ export function nextActionPrompt(subject: { title: string; contextDir: string; r
     "- 本文から、毎月など決まった周期で繰り返す仕事（月初の請求書・定例の報告など）だと読み取れるときだけ、recurring に定期の Task の提案を書く。" +
       "推測で提案しない（1 回きりの仕事なら suggest を false にする）",
     "- この Task が追う PR を merge する手順は merge_pull_request にする（アプリのボタンで merge できる）。ほかの PR の merge は manual にする",
-    "- Gmail のメールの Task（task.json の items の source が gmail: で始まる）で、メールをアーカイブする・確認済みにする・ゴミ箱に入れる手順は process_mail にする（アプリのボタンでできる）",
+    "- Gmail のメールの Task（task.json の items の source が gmail: で始まる）で、ラベルを付ける・既読にする・アーカイブするといった決まった操作は、手作業（manual）にせず gmail_action にして gmail に操作を書く（続けて行う操作は 1 つの手順にまとめる）。" +
+      "確認済みにするかゴミ箱に入れるかをユーザーが選ぶ手順は process_mail にする。どちらもアプリのボタンでできるので、ユーザーに Gmail を開かせない",
     "- Web でやる手順（サービスにログインする・設定画面で変える・手続きのページを開く、など）には、link に開く先と、ボタンに出す名前（サービス名）を付ける。" +
       "開く先は公式のサイトのページにし、分からなければ Web で検索して確かめる。メールの中のリンクは、なりすましのおそれがあるので使わない。確かめられなければ空にする",
     "- 手間（effort）は次の基準で付ける: easy は 10 秒で終わる（ボタンを押す・一言返す）、normal は 5 分あれば終わる、" +

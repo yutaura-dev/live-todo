@@ -509,6 +509,71 @@ export function GmailMailFlow({ taskId, onDone, onlyPastInvites = false }: { tas
 
 const isThreadTask = (detail: TaskDetail) => detail.items.some((item) => item.role === "tracks" && /^gmail:[a-z0-9][a-z0-9-]*:threads$/.test(item.source));
 
+const describeGmailActions = (actions: { labels?: ReadonlyArray<string>; markRead?: boolean; archive?: boolean }) =>
+  [...(actions.labels ?? []).map((label) => `ラベル「${label}」を付ける`), ...(actions.markRead === true ? ["既読にする"] : []), ...(actions.archive === true ? ["アーカイブする"] : [])].join("・");
+
+/** Gmail の操作の手順。対象のメールを見せ、押して承認したらアプリが Gmail で行う */
+function GmailStepFlow(props: { taskId: number; stepId: string; actions: { labels?: ReadonlyArray<string>; markRead?: boolean; archive?: boolean }; onDone: () => Promise<void> }) {
+  const [target, setTarget] = useState<GmailMailTargetView | null>(null);
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string }>({ kind: "idle" });
+  const open = async () => {
+    setState({ kind: "busy" });
+    const loaded = await api.gmailMailTarget(props.taskId);
+    if ("error" in loaded) setState({ kind: "failed", message: loaded.error });
+    else {
+      setTarget(loaded);
+      setState({ kind: "idle" });
+    }
+  };
+  const run = async (messageIds: ReadonlyArray<string>) => {
+    setState({ kind: "busy" });
+    const outcome = await api.gmailRunStep(props.taskId, props.stepId, messageIds);
+    if (outcome.ok) {
+      setTarget(null);
+      setState({ kind: "idle" });
+      await props.onDone();
+    } else setState({ kind: "failed", message: outcome.message });
+  };
+  return (
+    <>
+      {target === null ? (
+        <div className="step-actions">
+          <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void open()}>
+            Gmail で{describeGmailActions(props.actions)}
+          </button>
+        </div>
+      ) : target.messages.length === 0 ? (
+        <p className="problem">対象のメールはありません。</p>
+      ) : (
+        <div className="merge-confirm" role="alertdialog" aria-labelledby={`gmail-step-${props.stepId}`}>
+          <p id={`gmail-step-${props.stepId}`} className="merge-confirm-title">
+            次の {target.messages.length} 通に、Gmail で{describeGmailActions(props.actions)}
+          </p>
+          <ul className="gmail-trash-list">
+            {target.messages.slice(0, GMAIL_PREVIEW_LIMIT).map((message) => (
+              <li key={message.messageId}>
+                <span className="gmail-trash-date">{dateTimeOf(new Date(message.receivedAt).toISOString())}</span>
+                {message.subject === "" ? "（件名なし）" : message.subject}
+                <span className="gmail-trash-from">{message.senderName}</span>
+              </li>
+            ))}
+            {target.messages.length > GMAIL_PREVIEW_LIMIT && <li>ほか {target.messages.length - GMAIL_PREVIEW_LIMIT} 通</li>}
+          </ul>
+          <div className="merge-confirm-actions">
+            <button type="button" className="primary-button" disabled={state.kind === "busy"} onClick={() => void run(target.messages.map((message) => message.messageId))}>
+              実行する
+            </button>
+            <button type="button" className="quiet-button" onClick={() => setTarget(null)}>
+              やめる
+            </button>
+          </div>
+        </div>
+      )}
+      {state.kind === "failed" && <p className="problem">Gmail に反映できませんでした: {state.message}</p>}
+    </>
+  );
+}
+
 const hasMailStep = (detail: TaskDetail) => JSON.stringify(detail.nextActions ?? null).includes('"process_mail"');
 
 /** Gmail のメールを追う Task のうち、次にやることに片付ける手順がないものに出す（人からのメールのスレッドなど）。日程が過ぎた招待があれば案内する */
@@ -728,6 +793,7 @@ function StepItem(props: {
       )}
       {isCurrent && step.kind === "push_conflict_resolution" && <ConflictPushFlow taskId={detail.id} onPushed={props.onChanged} />}
       {isCurrent && step.kind === "process_mail" && <GmailMailFlow taskId={detail.id} onDone={props.onChanged} />}
+      {isCurrent && step.kind === "gmail_action" && step.gmail !== undefined && <GmailStepFlow taskId={detail.id} stepId={step.id} actions={step.gmail} onDone={props.onChanged} />}
       {isCurrent && step.kind === "archive_past_invites" && <GmailMailFlow taskId={detail.id} onDone={props.onChanged} onlyPastInvites />}
       {isCurrent && step.kind === "decision" && (
         <div className="step-actions">

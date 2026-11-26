@@ -200,6 +200,8 @@ export interface LiveTodoApi {
   gmailMailTarget(taskId: number): Promise<GmailMailTargetView | { error: string }>;
   /** 確認で見せたメールを、Gmail で確認済みにする（アーカイブして既読）かゴミ箱に入れる。外部への書き込み。承認したあとにだけ呼ぶ */
   gmailProcess(taskId: number, action: "archive" | "trash", messageIds: ReadonlyArray<string>): Promise<Outcome>;
+  /** Gmail の操作の手順（ラベル・既読・アーカイブ）を、確認で見せたメールに行う。外部への書き込み。押して承認したあとにだけ呼ぶ */
+  gmailRunStep(taskId: number, stepId: string, messageIds: ReadonlyArray<string>): Promise<Outcome>;
   /** Slack のセッションでつながるかを確かめる（auth.test）。誰のどのワークスペースか */
   testSlack(accountId: string): Promise<{ user: string; team: string } | { error: string }>;
   /** Slack のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する。workspace が空ならログインしたワークスペースを使う */

@@ -27,7 +27,7 @@ import {
 } from "../app/task-questions.js";
 import { actionsFromInterpretation, labelCandidatesOf } from "../core/rules/interpret.js";
 import { decodePlan, stepLinkOf } from "../core/task/next-actions.js";
-import { gmailMailTarget, gmailProcess, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
+import { gmailMailTarget, gmailProcess, gmailRunStep, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
 import { releaseUntouchedInboxTasks, runSlackConversationTriage } from "../app/slack-conversations.js";
@@ -726,6 +726,17 @@ function registerGmailActions() {
     ),
   );
   // 外部への書き込み。renderer で一覧を見せて確認を出し、ユーザーが承認したメールだけを渡す
+  // 外部への書き込み。renderer で対象のメールと操作を見せ、ユーザーが押して承認したときだけ呼ばれる
+  ipcMain.handle(IPC_CHANNELS.gmailRunStep, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), stepId: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(100)), messageIds: Schema.Array(Schema.String) }),
+        )(input);
+        yield* gmailRunStep(request.taskId, request.stepId, request.messageIds, gmailClientFor);
+      }),
+    ),
+  );
   ipcMain.handle(IPC_CHANNELS.gmailProcess, (_event, input: unknown) =>
     outcomeOf(
       Effect.gen(function* () {

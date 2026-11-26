@@ -3,6 +3,10 @@ import { DateTime, Effect, Schema } from "effect";
 import { Database } from "../core/db/database.js";
 import { approvals, gmailMessages, sourceItems, taskLinks } from "../core/db/schema.js";
 import { applyItemState } from "../core/sync/sync-source.js";
+import { completeStep, decodePlan, type GmailStepActions, type Step } from "../core/task/next-actions.js";
+import { TaskRepository } from "../core/task/task-repository.js";
+import { gmailLabelChangesOf } from "../core/rules/rule.js";
+import { Option } from "effect";
 import type { GmailClient } from "../sources/gmail/gmail-client.js";
 import { effectiveKind, isPastInvite } from "../sources/gmail/gmail-mailbox.js";
 
@@ -132,5 +136,78 @@ export const gmailProcess = Effect.fnUntraced(function* <E, R>(
   }
   yield* db.insert(approvals).values({ ...record, status: "executed", executedAt }).pipe(Effect.orDie);
   if ((yield* candidates(group)).every((row) => !row.inInbox)) yield* applyItemState(group.source, group.externalId, "resolved");
+  return { processed: done.length };
+});
+
+const findStep = (steps: ReadonlyArray<Step>, stepId: string): Step | undefined => {
+  for (const step of steps) {
+    if (step.id === stepId) return step;
+    if (step.kind === "decision") {
+      for (const option of step.options) {
+        const found = findStep(option.steps, stepId);
+        if (found !== undefined) return found;
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * 外部への書き込み。Gmail の操作の手順（ラベル・既読・アーカイブ）を、ユーザーが押して承認したメール（approved）に行い、手順を済みにする。
+ * 失敗したらそこで止め、やり直さない（書き込みは二重に効くおそれがあるため）
+ */
+export const gmailRunStep = Effect.fnUntraced(function* <E, R>(
+  taskId: number,
+  stepId: string,
+  approved: ReadonlyArray<string>,
+  clientFor: (accountId: string) => Effect.Effect<GmailClient["Service"], E, R>,
+) {
+  const db = yield* Database;
+  const tasks = yield* TaskRepository;
+  const task = yield* tasks.findTask(taskId);
+  const plan = Option.flatMap(task, (value) => decodePlan(value.nextActions));
+  const step = Option.isNone(plan) ? undefined : findStep(plan.value.steps, stepId);
+  if (step === undefined || step.kind !== "gmail_action" || step.gmail === undefined) return yield* new GmailWriteError({ message: "Gmail の操作の手順ではない" });
+  const actions: GmailStepActions = step.gmail;
+  const group = yield* trackedGroup(taskId);
+  const allowed = new Set(approved);
+  const targets = (yield* candidates(group)).map((row) => row.messageId).filter((id) => allowed.has(id));
+  const client = yield* clientFor(group.accountId);
+
+  const labelIds = new Map<string, string>();
+  const done: string[] = [];
+  let failure: string | undefined;
+  const outcome = yield* Effect.gen(function* () {
+    if ((actions.labels ?? []).length > 0) {
+      for (const label of yield* client.labels) labelIds.set(label.name, label.id);
+      for (const name of actions.labels ?? []) if (!labelIds.has(name)) labelIds.set(name, (yield* client.createLabel(name)).id);
+    }
+  }).pipe(Effect.result);
+  if (outcome._tag === "Failure") failure = outcome.failure._tag === "GmailRequestError" ? outcome.failure.message : "Gmail に書き込めなかった";
+  for (const id of failure === undefined ? targets : []) {
+    const result = yield* client.modifyLabels(id, gmailLabelChangesOf(actions, labelIds)).pipe(Effect.result);
+    if (result._tag === "Failure") {
+      failure = result.failure._tag === "GmailRequestError" ? result.failure.message : "Gmail に書き込めなかった";
+      break;
+    }
+    done.push(id);
+  }
+  const executedAt = DateTime.formatIso(yield* DateTime.now);
+  if (done.length > 0) {
+    yield* db
+      .update(gmailMessages)
+      .set({ ...(actions.markRead === true ? { unread: false } : {}), ...(actions.archive === true ? { inInbox: false } : {}), updatedAt: executedAt })
+      .where(and(eq(gmailMessages.accountId, group.accountId), inArray(gmailMessages.messageId, done)))
+      .pipe(Effect.orDie);
+  }
+  const record = { taskId, action: "gmail_actions", target: `${group.source} ${group.externalId}`, payload: { messageIds: done, actions }, approvedAt: executedAt, executedAt };
+  if (failure !== undefined) {
+    yield* db.insert(approvals).values({ ...record, status: "failed", error: failure }).pipe(Effect.orDie);
+    return yield* new GmailWriteError({ message: `${done.length} 通に行ったところで止めた: ${failure}` });
+  }
+  yield* db.insert(approvals).values({ ...record, status: "executed" }).pipe(Effect.orDie);
+  // 手順を済みにする（すべて済めば Task は完了になる）
+  yield* tasks.updateTask(taskId, { nextActions: completeStep(Option.getOrThrow(plan), stepId) }, "user");
+  if (actions.archive === true && (yield* candidates(group)).every((row) => !row.inInbox)) yield* applyItemState(group.source, group.externalId, "resolved");
   return { processed: done.length };
 });
