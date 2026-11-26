@@ -112,6 +112,8 @@ export interface LiveTodoApi {
   pushConflictResolution(taskId: number, commitSha: string): Promise<Outcome>;
   /** Slack のセッションでつながるかを確かめる（auth.test）。誰のどのワークスペースか */
   testSlack(accountId: string): Promise<{ user: string; team: string } | { error: string }>;
+  /** Slack のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する。workspace が空ならログインしたワークスペースを使う */
+  connectSlack(accountId: string, workspace: string): Promise<{ workspace: string; team: string } | { error: string }>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

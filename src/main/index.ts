@@ -8,6 +8,8 @@ import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
+import { withSlackSession } from "../app/slack-session.js";
+import { captureSlackSession } from "./slack-connect.js";
 import { SlackClient } from "../sources/slack/slack-client.js";
 import { SlackClientLive } from "../sources/slack/slack-client-live.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
@@ -405,6 +407,35 @@ const claudeAllowedFor = (accountId: string) =>
   });
 
 function registerSlackSettings() {
+  // 外部への書き込みではない（自分のセッションを読み取るだけ）。読み取った値は暗号化して保存し、ログに出さない
+  ipcMain.handle(IPC_CHANNELS.connectSlack, async (_event, input: unknown) => {
+    const request = await runtime
+      .runPromise(
+        Schema.decodeUnknownEffect(
+          Schema.Struct({ accountId: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)), workspace: Schema.String.check(Schema.isPattern(/^([a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com)?$/)) }),
+        )(input),
+      )
+      .catch(() => undefined);
+    if (request === undefined) return { error: "アカウントの名前かワークスペースのドメインが正しくない" };
+    const captured = await captureSlackSession(request.workspace).catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+    if (typeof captured === "string") return { error: captured };
+    const outcome = await outcomeOf(
+      Effect.gen(function* () {
+        const vault = yield* SecretVault;
+        yield* vault.set(`slack.${request.accountId}.token`, Redacted.make(captured.token));
+        yield* vault.set(`slack.${request.accountId}.cookie`, Redacted.make(captured.cookie));
+        const document = yield* readAppConfigDocument(configPath);
+        yield* saveAppConfigFile(
+          configPath,
+          withSlackSession(Option.getOrElse(document, () => ({})), { id: request.accountId, workspace: captured.workspace, userAgent: captured.userAgent }),
+        );
+      }),
+    );
+    if (!outcome.ok) return { error: outcome.message };
+    await restartSync();
+    return { team: captured.team, workspace: captured.workspace };
+  });
+
   ipcMain.handle(IPC_CHANNELS.testSlack, (_event, input: unknown) =>
     runtime.runPromise(
       Effect.gen(function* () {

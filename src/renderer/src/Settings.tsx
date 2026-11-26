@@ -125,6 +125,7 @@ export function Settings() {
               }
               onRemove={() => setDraft((current) => ({ ...current, slackAccounts: (current.slackAccounts ?? []).filter((_, at) => at !== index) }))}
               onSecretChanged={reload}
+              onConnected={async () => setDraft(toDocument((await reload()).config))}
             />
           ))}
           <AddAccount
@@ -397,9 +398,24 @@ function SlackAccountEditor(props: {
   onChange: (next: SlackAccountDraft) => void;
   onRemove: () => void;
   onSecretChanged: () => Promise<unknown>;
+  onConnected: () => Promise<void>;
 }) {
   const { account } = props;
   const [open, setOpen] = useState(account.workspace === "");
+  const [connecting, setConnecting] = useState(false);
+  const connect = async () => {
+    setConnecting(true);
+    setCheck("開いたウィンドウで Slack にログインしてください。ログインが済むと自動で閉じます");
+    const result = await api.connectSlack(account.id, account.workspace);
+    setConnecting(false);
+    if ("error" in result) {
+      setCheck(`取り込めませんでした: ${result.error}`);
+      return;
+    }
+    await props.onConnected();
+    const me = await api.testSlack(account.id);
+    setCheck("error" in me ? `取り込みましたが、つながりません: ${me.error}` : `${me.team} の ${me.user} としてつながりました`);
+  };
   const [check, setCheck] = useState<string | null>(null);
   const tokenStatus = props.secrets[`slack.${account.id}.token`] ?? "missing";
   const cookieStatus = props.secrets[`slack.${account.id}.cookie`] ?? "missing";
@@ -420,9 +436,19 @@ function SlackAccountEditor(props: {
       <div className="account-body">
         <label className="field">
           <span className="field-label">ワークスペースのドメイン</span>
-          <span className="field-hint">例: yutaura.slack.com</span>
+          <span className="field-hint">例: yutaura.slack.com。空のままでも、ログインしたワークスペースを使います</span>
           <input value={account.workspace} onChange={(event) => props.onChange({ ...account, workspace: event.target.value.trim() })} placeholder="yutaura.slack.com" />
         </label>
+        <div className="request-review">
+          <button type="button" className="primary-button" disabled={connecting} onClick={() => void connect()}>
+            ブラウザでログインして取り込む
+          </button>
+          <span className="field-hint">
+            {check ?? "Slack のログイン画面を開き、ログインが済んだらセッションを読み取って保存します。このアプリ専用のログインになり、ほかのブラウザのログインには影響しません"}
+          </span>
+        </div>
+        <details className="manual-secrets">
+          <summary className="field-hint">手で入れる</summary>
         <label className="field">
           <span className="field-label">ブラウザの User-Agent</span>
           <span className="field-hint">
@@ -432,11 +458,11 @@ function SlackAccountEditor(props: {
         </label>
         <SecretField label="トークン（xoxc-）" secretKey={`slack.${account.id}.token`} status={tokenStatus} onChanged={props.onSecretChanged} />
         <SecretField label="Cookie の d（xoxd-）" secretKey={`slack.${account.id}.cookie`} status={cookieStatus} onChanged={props.onSecretChanged} />
+        </details>
         <div className="request-review">
           <button type="button" className="quiet-button" onClick={() => void test()}>
             接続を確かめる
           </button>
-          <span className="field-hint">{check ?? "設定を保存し、トークンと Cookie を入れてから確かめます"}</span>
         </div>
         <label className="checkbox judge-probabilities">
           <input type="checkbox" checked={account.planNextActions ?? false} onChange={(event) => props.onChange({ ...account, planNextActions: event.target.checked })} />

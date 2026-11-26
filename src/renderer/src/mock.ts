@@ -60,6 +60,7 @@ export const mockApi: LiveTodoApi = {
   reopenStep: async () => ({ ok: true }),
   replanNextActions: async () => ({ ok: true }),
   testSlack: async () => ({ error: "見本の画面では使えない" }),
+  connectSlack: async () => ({ error: "見本の画面では使えない" }),
   resolveConflicts: async () => ({ ok: true }),
   conflictResolution: async () => ({ error: "見本の画面では使えない" }),
   pushConflictResolution: async () => ({ ok: true }),

@@ -14,8 +14,10 @@ Web クライアントが使う内部 API `saved.*`（`saved.list` / `add` / `up
 ## Decision
 
 - Slack の Account は、ワークスペースのドメイン・`xoxc-` のトークン・`d` の Cookie・そのセッションを取ったブラウザの User-Agent で接続する
-  - トークンと Cookie は秘密情報として暗号化して保存する（GitHub のトークンと同じ扱い）。User-Agent は設定に置く
-  - User-Agent はユーザーに入れてもらい、アプリで作らない。違う User-Agent で送ると、盗まれたセッションと判定されて全端末がログアウトされた事例があるため
+  - セッションは、アプリが開く Slack のログイン画面でユーザーにログインしてもらい、ログインが済んだら読み取る（トークンはページの `localConfig_v2`、Cookie はウィンドウのセッション）。このアプリ専用のログインになり、ふだんのブラウザのログインには影響しない
+  - ログイン画面は、アプリ本体とは別の保存先を持たないセッションで開き、Node の機能も preload も渡さない。読み取ったら消す
+  - User-Agent は、ログイン画面に設定した値（Electron の User-Agent から Electron とアプリの名前を除き、Chrome と同じ形にしたもの）をそのまま同期にも使う。違う User-Agent で送ると、盗まれたセッションと判定されて全端末がログアウトされた事例があるため
+  - トークンと Cookie は秘密情報として暗号化して保存する（GitHub のトークンと同じ扱い）。User-Agent は設定に置く。手で入れることもできる
 - To-do・Saved は `saved.list` で全件を取り（未完了と完了済みの 2 つのビュー）、SnapshotDiffer で前回との差分にする
   - Source Item のキーは `<item_id>:<ts>`。`completed` は解消、一覧から消えたら removed
   - 自分で To-do・Saved にしたものなので、判定は規則で todo にする（LLM に送らない）
@@ -28,7 +30,8 @@ Web クライアントが使う内部 API `saved.*`（`saved.list` / `add` / `up
 
 - **公式の Slack アプリ（`xoxp-` のユーザートークン）を作る**: To-do・Saved を読めない。`reminders.add` で行を作れる可能性はあるが、一覧も状態の変化も取れない
 - **`stars.list`**: Later（To-do・Saved）の内容を反映しないと公式に明記されている
-- **User-Agent をアプリで固定する**: ブラウザと違うと全端末のログアウトを招くおそれがある
+- **ユーザーにトークン・Cookie・User-Agent を開発者ツールから写してもらう**: 手間が大きく、User-Agent の写し間違いで全端末のログアウトを招くおそれがある（手で入れる道は残す）
+- **ふだんのブラウザの Cookie を読む**: ブラウザの保存先を読むのは、ほかのサイトの Cookie にも触れることになり、権限も広い
 
 ## Consequences
 
