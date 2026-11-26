@@ -24,6 +24,15 @@ export type ConfigDocument = {
     reviewDependencyPrs?: boolean;
     planNextActions?: boolean;
   }>;
+  /** Slack のワークスペース（ADR-0010）。トークンと Cookie は秘密情報として別に保存する */
+  slackAccounts?: Array<{
+    kind: "slack";
+    id: string;
+    workspace: string;
+    userAgent: string;
+    llmProfile?: string;
+    planNextActions?: boolean;
+  }>;
 };
 
 /** saved: アプリに暗号化して保存済み / env: 環境変数から読んでいる / missing: ない */
@@ -101,6 +110,8 @@ export interface LiveTodoApi {
   conflictResolution(taskId: number): Promise<ConflictResolutionView | { error: string }>;
   /** 直した内容を PR のブランチに push する。外部への書き込み。差分を確かめて承認したあとにだけ呼ぶ */
   pushConflictResolution(taskId: number, commitSha: string): Promise<Outcome>;
+  /** Slack のセッションでつながるかを確かめる（auth.test）。誰のどのワークスペースか */
+  testSlack(accountId: string): Promise<{ user: string; team: string } | { error: string }>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

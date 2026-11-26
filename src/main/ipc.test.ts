@@ -2,6 +2,22 @@ import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
 import { decodeStepRequest, decodeMergeRequest, decodeFilterPreviewRequest, decodeMoveRequest, decodeSecretInput, decodeSecretKey, decodeTaskId, isAllowedExternalUrl } from "./ipc.js";
 
+describe("isAllowedExternalUrl（Slack）", () => {
+  it.each(["https://yutaura.slack.com/archives/C0123ABCD/p1764000000123456", "https://acme.enterprise.slack.com/archives/D1/p1"])(
+    "Slack のワークスペースのメッセージへのリンクは開いてよい: %s",
+    (url) => {
+      assert.isTrue(isAllowedExternalUrl(url));
+    },
+  );
+
+  it.each(["https://slack.com.evil.example/archives/C1/p1", "http://yutaura.slack.com/archives/C1/p1", "https://evil-slack.com/x"])(
+    "それ以外は開かない: %s",
+    (url) => {
+      assert.isFalse(isAllowedExternalUrl(url));
+    },
+  );
+});
+
 describe("isAllowedExternalUrl", () => {
   it.each(["https://github.com/acme/app/pull/42", "https://github.com/acme/app/issues/7#issuecomment-1"])(
     "github.com の https の URL は開いてよい: %s",
@@ -49,7 +65,7 @@ describe("decodeTaskId", () => {
 });
 
 describe("decodeSecretKey", () => {
-  it.effect.each(["github.work.token", "github.my-account.token", "llm.anthropic.api_key", "llm.openai.api_key"])(
+  it.effect.each(["github.work.token", "github.my-account.token", "llm.anthropic.api_key", "llm.openai.api_key", "slack.home.token", "slack.home.cookie"])(
     "アプリが使う秘密情報のキーを受け取る: %s",
     (key) =>
       Effect.gen(function* () {
@@ -57,7 +73,7 @@ describe("decodeSecretKey", () => {
       }),
   );
 
-  it.effect.each(["github.work", "github.Work.token", "github.a:b.token", "llm.gemini.api_key", "anything", 1])(
+  it.effect.each(["github.work", "github.Work.token", "github.a:b.token", "llm.gemini.api_key", "slack.home.user_agent", "anything", 1])(
     "それ以外のキーはエラーにする: %s",
     (key) =>
       Effect.gen(function* () {

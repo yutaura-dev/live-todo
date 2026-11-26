@@ -43,10 +43,23 @@ const GitHubAccount = Schema.Struct({
 });
 export type GitHubAccount = typeof GitHubAccount.Type;
 
+const SlackAccount = Schema.Struct({
+  kind: Schema.Literal("slack"),
+  id: AccountId,
+  workspace: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/)),
+  // セッションを取ったブラウザの User-Agent。違うと全端末のログアウトを招くことがあるので、アプリで作らずに書いてもらう（ADR-0010）
+  userAgent: Schema.NonEmptyString,
+  llmProfile: Schema.optional(Schema.String),
+  planNextActions: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+});
+export type SlackAccount = typeof SlackAccount.Type;
+
 const AppConfigFile = Schema.Struct({
   llmProfiles: Schema.Record(Schema.String, LlmProfile),
   defaultLlmProfile: Schema.String,
   accounts: Schema.Array(GitHubAccount),
+  // GitHub の accounts と分ける理由: GitHub だけの項目（リポジトリのフィルタ・依存更新の調査）を読む箇所を、種類で分けずに済ませるため
+  slackAccounts: Schema.Array(SlackAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 });
 
 export type ResolvedAccount = GitHubAccount & { resolvedLlmProfile: LlmProfile };
@@ -91,6 +104,14 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
       return;
     }
     accounts.push({ ...account, resolvedLlmProfile });
+  });
+
+  file.slackAccounts.forEach((account, index) => {
+    if (seenIds.has(account.id)) issues.push(`slackAccounts[${index}].id: "${account.id}" が重複している`);
+    seenIds.add(account.id);
+    if (account.llmProfile !== undefined && profileOf(account.llmProfile) === undefined) {
+      issues.push(`slackAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
+    }
   });
 
   if (issues.length > 0) {

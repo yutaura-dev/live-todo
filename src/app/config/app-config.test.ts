@@ -93,6 +93,32 @@ describe("decodeAppConfig", () => {
     }));
 });
 
+describe("Slack のアカウント", () => {
+  const slack = { kind: "slack", id: "home", workspace: "yutaura.slack.com", userAgent: "Mozilla/5.0 TestBrowser" };
+
+  it.effect("ワークスペースのドメインとブラウザの User-Agent で Slack のアカウントを書ける。書かなければ空", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).slackAccounts, []);
+
+      const config = yield* decodeAppConfig({ ...validConfig, slackAccounts: [slack] });
+
+      assert.deepInclude(config.slackAccounts[0], { id: "home", workspace: "yutaura.slack.com", planNextActions: false });
+    }));
+
+  it.effect("Slack のドメインでないワークスペースと、空の User-Agent はエラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({ ...validConfig, slackAccounts: [{ ...slack, workspace: "evil.example.com" }] });
+      yield* invalidReason({ ...validConfig, slackAccounts: [{ ...slack, userAgent: "" }] });
+    }));
+
+  it.effect("id は GitHub のアカウントとも重ならないようにする（秘密情報のキーや Source 名の区別に使うため）", () =>
+    Effect.gen(function* () {
+      const reason = yield* invalidReason({ ...validConfig, slackAccounts: [{ ...slack, id: "work" }] });
+
+      assert.include(reason, "重複");
+    }));
+});
+
 describe("Decisions の閾値", () => {
   it.effect("decisions に閾値を書ける", () =>
     Effect.gen(function* () {

@@ -1,12 +1,15 @@
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Redacted } from "effect";
+import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Redacted, Schema } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
+import { makeSlackJobs } from "../app/slack-jobs.js";
+import { SlackClient } from "../sources/slack/slack-client.js";
+import { SlackClientLive } from "../sources/slack/slack-client-live.js";
 import { previewAccountFilter } from "../app/settings/filter-preview.js";
 import { finishMerge, mergePlan, startMerge } from "../app/merge-approval.js";
 import { applyConflictPlans } from "../app/conflict-plans.js";
@@ -125,6 +128,19 @@ const startSync = Effect.gen(function* () {
   }
   const jobs = (yield* Effect.forEach(config.accounts, makeGitHubJobs)).flat();
   syncProblem = undefined;
+  // Slack は 1 つのワークスペースのセッションが切れても、ほかの同期は止めない（理由は設定画面に出す）
+  const slackJobs = (
+    yield* Effect.forEach(config.slackAccounts, (account) =>
+      makeSlackJobs(account).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Slack（${account.id}）の同期を始められない: ${error.message}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
 
   yield* backfillNextActions;
   yield* applyConflictPlans;
@@ -135,9 +151,10 @@ const startSync = Effect.gen(function* () {
   const reviewSources = config.accounts
     .filter((account) => account.reviewDependencyPrs)
     .flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]);
-  const planSources = config.accounts
-    .filter((account) => account.planNextActions)
-    .flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]);
+  const planSources = [
+    ...config.accounts.filter((account) => account.planNextActions).flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]),
+    ...config.slackAccounts.filter((account) => account.planNextActions).map((account) => `slack:${account.id}`),
+  ];
   const planJobs: ReadonlyArray<SyncJob<never, AgentWorkspace | ClaudeCode | Database | TaskRepository>> =
     planSources.length === 0
       ? []
@@ -179,8 +196,8 @@ const startSync = Effect.gen(function* () {
     run: applyConflictPlans,
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...agentJobs, conflictPlanJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(agentJobs), runJobs([conflictPlanJob])], { concurrency: 3, discard: true });
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...agentJobs, conflictPlanJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(agentJobs), runJobs([conflictPlanJob])], { concurrency: 4, discard: true });
 }).pipe(
   // 設定やトークンがなくても画面は開けるようにする（同期だけが止まり、設定画面に理由を出す）
   Effect.catchCause((cause) =>
@@ -222,14 +239,23 @@ const settingsSnapshot = Effect.gen(function* () {
   }
   if (syncProblem !== undefined) problems.push(syncProblem);
 
-  const accountIds = (yield* loadAppConfigFile(configPath).pipe(Effect.option)).pipe(
+  const loadedConfig = yield* loadAppConfigFile(configPath).pipe(Effect.option);
+  const accountIds = loadedConfig.pipe(
     Option.map((loaded) => loaded.accounts.map((account) => account.id)),
+    Option.getOrElse((): string[] => []),
+  );
+  const slackIds = loadedConfig.pipe(
+    Option.map((loaded) => loaded.slackAccounts.map((account) => account.id)),
     Option.getOrElse((): string[] => []),
   );
   const stored = new Set(yield* (yield* SecretVault).storedKeys);
   const store = yield* SecretStore;
   const secrets: Record<string, SecretStatus> = {};
-  for (const key of [...accountIds.map((id) => `github.${id}.token`), ...LLM_SECRET_KEYS]) {
+  for (const key of [
+    ...accountIds.map((id) => `github.${id}.token`),
+    ...slackIds.flatMap((id) => [`slack.${id}.token`, `slack.${id}.cookie`]),
+    ...LLM_SECRET_KEYS,
+  ]) {
     secrets[key] = stored.has(key) ? "saved" : Option.isSome(yield* store.get(key)) ? "env" : "missing";
   }
 
@@ -378,6 +404,30 @@ const claudeAllowedFor = (accountId: string) =>
     return account !== undefined && (account.reviewDependencyPrs || account.planNextActions);
   });
 
+function registerSlackSettings() {
+  ipcMain.handle(IPC_CHANNELS.testSlack, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const accountId = yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)))(input);
+        const config = yield* loadAppConfigFile(configPath);
+        const account = config.slackAccounts.find((candidate) => candidate.id === accountId);
+        if (account === undefined) return { error: "保存した設定に、この Slack のワークスペースがない。先に設定を保存してください" };
+        const secrets = yield* SecretStore;
+        const token = yield* secrets.require(`slack.${accountId}.token`);
+        const cookie = yield* secrets.require(`slack.${accountId}.cookie`);
+        const http = yield* HttpClient.HttpClient;
+        const me = yield* Effect.gen(function* () {
+          return yield* (yield* SlackClient).authTest;
+        }).pipe(
+          Effect.provide(SlackClientLive({ workspace: account.workspace, token, cookie, userAgent: account.userAgent })),
+          Effect.provideService(HttpClient.HttpClient, http),
+        );
+        return { user: me.user, team: me.team };
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+}
+
 function registerReplan() {
   ipcMain.handle(IPC_CHANNELS.replanNextActions, (_event, input: unknown) =>
     outcomeOf(
@@ -386,8 +436,9 @@ function registerReplan() {
         const detail = yield* (yield* BoardService).taskDetail(taskId);
         // 次にやることを考える処理は、AI に考えさせる設定のアカウントでしか動かない（会社の情報を許可していない LLM に送らないため）
         const config = yield* loadAppConfigFile(configPath);
-        const accountIds = detail.items.filter((item) => item.role === "tracks").map((item) => /^github:([^:]+)/.exec(item.source)?.[1]);
-        const allowed = accountIds.length > 0 && accountIds.every((id) => config.accounts.some((account) => account.id === id && account.planNextActions));
+        const accountIds = detail.items.filter((item) => item.role === "tracks").map((item) => /^(?:github|slack):([^:]+)/.exec(item.source)?.[1]);
+        const planning = [...config.accounts, ...config.slackAccounts].filter((account) => account.planNextActions).map((account) => account.id);
+        const allowed = accountIds.length > 0 && accountIds.every((id) => id !== undefined && planning.includes(id));
         if (!allowed) return yield* new GitHubRequestError({ message: "このアカウントでは、次にやることを AI に考えさせない設定です" });
         yield* requestReplan(taskId);
       }),
@@ -556,6 +607,7 @@ void app.whenReady().then(() => {
   registerMerge();
   registerConflictResolution();
   registerReplan();
+  registerSlackSettings();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();
 });

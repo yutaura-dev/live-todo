@@ -11,6 +11,7 @@ import { api } from "./api.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
+type SlackAccountDraft = NonNullable<ConfigDocument["slackAccounts"]>[number];
 
 const PREVIEW_DELAY_MS = 400;
 
@@ -34,6 +35,7 @@ function toDocument(config: unknown): ConfigDocument {
     llmProfiles: draft.llmProfiles ?? EMPTY_CONFIG.llmProfiles,
     defaultLlmProfile: draft.defaultLlmProfile ?? EMPTY_CONFIG.defaultLlmProfile,
     accounts: Array.isArray(draft.accounts) ? draft.accounts : [],
+    slackAccounts: Array.isArray(draft.slackAccounts) ? draft.slackAccounts : [],
   };
 }
 
@@ -103,6 +105,38 @@ export function Settings() {
           <AddAccount
             existing={draft.accounts.map((account) => account.id)}
             onAdd={(id) => setDraft((current) => ({ ...current, accounts: [...current.accounts, { kind: "github", id }] }))}
+          />
+        </section>
+
+        <section className="settings-section" aria-labelledby="slack-heading">
+          <h3 id="slack-heading" className="section-title">
+            Slack ワークスペース
+          </h3>
+          <p className="field-hint">
+            To-do・Saved（後で）にしたメッセージを Task にします。ブラウザのセッションを使うので、私用のワークスペースか、管理者に確かめたワークスペースだけで使ってください
+          </p>
+          {(draft.slackAccounts ?? []).map((account, index) => (
+            <SlackAccountEditor
+              key={account.id || index}
+              account={account}
+              secrets={snapshot.secrets}
+              onChange={(next) =>
+                setDraft((current) => ({ ...current, slackAccounts: (current.slackAccounts ?? []).map((entry, at) => (at === index ? next : entry)) }))
+              }
+              onRemove={() => setDraft((current) => ({ ...current, slackAccounts: (current.slackAccounts ?? []).filter((_, at) => at !== index) }))}
+              onSecretChanged={reload}
+            />
+          ))}
+          <AddAccount
+            label="ワークスペースを追加"
+            placeholder="home"
+            existing={[...draft.accounts.map((account) => account.id), ...(draft.slackAccounts ?? []).map((account) => account.id)]}
+            onAdd={(id) =>
+              setDraft((current) => ({
+                ...current,
+                slackAccounts: [...(current.slackAccounts ?? []), { kind: "slack", id, workspace: "", userAgent: "" }],
+              }))
+            }
           />
         </section>
 
@@ -357,7 +391,69 @@ function RepositoryList(props: { title: string; entries: AccountFilterPreview["i
   );
 }
 
-function AddAccount(props: { existing: string[]; onAdd: (id: string) => void }) {
+function SlackAccountEditor(props: {
+  account: SlackAccountDraft;
+  secrets: Record<string, SecretStatus>;
+  onChange: (next: SlackAccountDraft) => void;
+  onRemove: () => void;
+  onSecretChanged: () => Promise<unknown>;
+}) {
+  const { account } = props;
+  const [open, setOpen] = useState(account.workspace === "");
+  const [check, setCheck] = useState<string | null>(null);
+  const tokenStatus = props.secrets[`slack.${account.id}.token`] ?? "missing";
+  const cookieStatus = props.secrets[`slack.${account.id}.cookie`] ?? "missing";
+  const test = async () => {
+    setCheck("確かめています");
+    const result = await api.testSlack(account.id);
+    setCheck("error" in result ? `つながりません: ${result.error}` : `${result.team} の ${result.user} としてつながりました`);
+  };
+
+  return (
+    <details className="account" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="account-header">
+        <h4 className="account-name">{account.id}</h4>
+        <span className="field-hint">
+          {account.workspace || "ワークスペース未設定"}・トークン: {SECRET_LABELS[tokenStatus]}・Cookie: {SECRET_LABELS[cookieStatus]}
+        </span>
+      </summary>
+      <div className="account-body">
+        <label className="field">
+          <span className="field-label">ワークスペースのドメイン</span>
+          <span className="field-hint">例: yutaura.slack.com</span>
+          <input value={account.workspace} onChange={(event) => props.onChange({ ...account, workspace: event.target.value.trim() })} placeholder="yutaura.slack.com" />
+        </label>
+        <label className="field">
+          <span className="field-label">ブラウザの User-Agent</span>
+          <span className="field-hint">
+            トークンと Cookie を取ったブラウザで、開発者ツールのコンソールに navigator.userAgent と打って出た値をそのまま貼ります。違う値だと、Slack が全端末をログアウトさせることがあります
+          </span>
+          <textarea rows={2} value={account.userAgent} onChange={(event) => props.onChange({ ...account, userAgent: event.target.value.trim() })} />
+        </label>
+        <SecretField label="トークン（xoxc-）" secretKey={`slack.${account.id}.token`} status={tokenStatus} onChanged={props.onSecretChanged} />
+        <SecretField label="Cookie の d（xoxd-）" secretKey={`slack.${account.id}.cookie`} status={cookieStatus} onChanged={props.onSecretChanged} />
+        <div className="request-review">
+          <button type="button" className="quiet-button" onClick={() => void test()}>
+            接続を確かめる
+          </button>
+          <span className="field-hint">{check ?? "設定を保存し、トークンと Cookie を入れてから確かめます"}</span>
+        </div>
+        <label className="checkbox judge-probabilities">
+          <input type="checkbox" checked={account.planNextActions ?? false} onChange={(event) => props.onChange({ ...account, planNextActions: event.target.checked })} />
+          <span>
+            <span className="judge-option-label">次にやることを Claude Code で考える</span>
+            <span className="field-hint">Task の内容（メッセージの 1 行目など）を Claude に送ります</span>
+          </span>
+        </label>
+        <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
+          このワークスペースを外す
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function AddAccount(props: { existing: string[]; onAdd: (id: string) => void; label?: string; placeholder?: string }) {
   const [id, setId] = useState("");
   const valid = /^[a-z0-9][a-z0-9-]*$/.test(id) && !props.existing.includes(id);
   return (
@@ -371,9 +467,9 @@ function AddAccount(props: { existing: string[]; onAdd: (id: string) => void }) 
       }}
     >
       <label className="field">
-        <span className="field-label">アカウントを追加</span>
-        <span className="field-hint">名前は英小文字・数字・ハイフン（例: work）</span>
-        <input value={id} onChange={(event) => setId(event.target.value)} placeholder="work" />
+        <span className="field-label">{props.label ?? "アカウントを追加"}</span>
+        <span className="field-hint">名前は英小文字・数字・ハイフン（例: {props.placeholder ?? "work"}）</span>
+        <input value={id} onChange={(event) => setId(event.target.value)} placeholder={props.placeholder ?? "work"} />
       </label>
       <button type="submit" className="quiet-button" disabled={!valid}>
         追加する

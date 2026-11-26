@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
   setSecret: "settings:set-secret",
   removeSecret: "settings:remove-secret",
   previewFilter: "settings:preview-filter",
+  testSlack: "settings:test-slack",
   taskDetail: "board:task-detail",
   mergePlan: "board:merge-plan",
   merge: "board:merge",
