@@ -8,8 +8,11 @@ import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
+import { and, eq, like } from "drizzle-orm";
+import { sourceItems, taskLinks } from "../core/db/schema.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
+import { answerQuestion, askQuestion, listQuestions, recoverInterruptedQuestions, TaskQuestionError } from "../app/task-questions.js";
 import { gmailMailTarget, gmailProcess, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
@@ -178,6 +181,8 @@ const startSync = Effect.gen(function* () {
   yield* applyConflictPlans;
   yield* completeFinishedPlans;
   yield* upgradeMergeSteps;
+  const interruptedQuestions = yield* recoverInterruptedQuestions;
+  if (interruptedQuestions > 0) yield* Effect.log(`途中で止まった質問を ${interruptedQuestions} 件、失敗として残した`);
   const recovered = yield* recoverInterruptedAgentRuns;
   if (recovered > 0) yield* Effect.log(`途中で止まった AI の調査を ${recovered} 件戻した`);
   const reviewSources = config.accounts
@@ -504,6 +509,97 @@ const gmailClientFor = (accountId: string) =>
       return yield* GmailClient;
     }).pipe(Effect.provide(GmailClientLive.pipe(Layer.provide(Gws.layer))));
   });
+
+/**
+ * Task について Claude Code に質問してよいか。元の項目のアカウントで Claude Code で考えるのを有効にしていなければ断る
+ * （会社のアカウントのデータを、許可していない LLM に送らないため。charter の前提と制約）。手で追加した Task は聞ける
+ */
+const questionAllowedFor = (taskId: number) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const db = yield* Database;
+    const rows = yield* db
+      .select({ source: sourceItems.source })
+      .from(taskLinks)
+      .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+      .where(eq(taskLinks.taskId, taskId))
+      .pipe(Effect.orDie);
+    return rows.every((row) => {
+      const match = /^(github|slack|gmail):([^:]+)/.exec(row.source);
+      if (match === null) return false;
+      const [, kind, id] = match;
+      if (kind === "github") return config.accounts.some((account) => account.id === id && (account.planNextActions || account.reviewDependencyPrs));
+      if (kind === "slack") return config.slackAccounts.some((account) => account.id === id && account.planNextActions);
+      return config.gmailAccounts.some((account) => account.id === id && account.planNextActions);
+    });
+  });
+
+const MAX_MAIL_TEXT = 8000;
+
+/** 質問に答えるときに渡す、元の項目の本文（今は Gmail のスレッドだけ） */
+const questionContextFor = (taskId: number) =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const [thread] = yield* db
+      .select({ source: sourceItems.source, externalId: sourceItems.externalId })
+      .from(taskLinks)
+      .innerJoin(sourceItems, eq(taskLinks.sourceItemId, sourceItems.id))
+      .where(and(eq(taskLinks.taskId, taskId), like(sourceItems.source, "gmail:%:threads")))
+      .pipe(Effect.orDie);
+    if (thread === undefined) return {};
+    const accountId = /^gmail:([^:]+):threads$/.exec(thread.source)?.[1] ?? "";
+    const messages = yield* (yield* gmailClientFor(accountId)).thread(thread.externalId);
+    return {
+      "mail.json": JSON.stringify(
+        messages.map((message) => ({
+          from: message.labelIds.includes("SENT") ? "me" : (message.headers.from ?? ""),
+          at: new Date(message.receivedAt).toISOString(),
+          subject: message.headers.subject ?? "",
+          text: message.text.slice(0, MAX_MAIL_TEXT),
+        })),
+        null,
+        2,
+      ),
+    };
+  });
+
+function registerTaskQuestions() {
+  const TaskIdInput = Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)) });
+  ipcMain.handle(IPC_CHANNELS.taskQuestions, (_event, input: unknown) =>
+    runtime.runPromise(
+      Schema.decodeUnknownEffect(TaskIdInput)(input).pipe(
+        Effect.flatMap((request) => listQuestions(request.taskId)),
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            id: row.id,
+            question: row.question,
+            status: row.status,
+            answer: row.answer,
+            sources: Array.isArray(row.sources) ? row.sources.filter((source): source is string => typeof source === "string") : [],
+            error: row.error,
+            askedAt: row.askedAt,
+            answeredAt: row.answeredAt,
+          })),
+        ),
+        Effect.orElseSucceed(() => []),
+      ),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.askTask, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const request = yield* Schema.decodeUnknownEffect(Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)), question: Schema.String }))(input);
+        if (!(yield* questionAllowedFor(request.taskId))) {
+          return yield* new TaskQuestionError({ message: "この Task の元の項目のアカウントでは Claude Code を使わない設定です。設定で Claude Code で考えるのを有効にしてから質問してください" });
+        }
+        const id = yield* askQuestion(request.taskId, request.question);
+        runtime.runFork(
+          answerQuestion(id, { model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD, extraContext: questionContextFor }),
+        );
+      }),
+    ),
+  );
+}
 
 function registerGmailActions() {
   const TaskIdInput = Schema.Struct({ taskId: Schema.Int.check(Schema.isGreaterThan(0)) });
@@ -901,6 +997,7 @@ void app.whenReady().then(() => {
   registerTasksAndRecurring();
   registerSlackSettings();
   registerGmailActions();
+  registerTaskQuestions();
   createWindow();
   if (!smokeTest && screenshotPath === undefined) void restartSync();
 });

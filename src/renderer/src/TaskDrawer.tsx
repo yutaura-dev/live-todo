@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ConflictResolutionView, GmailMailTargetView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
+import type { ConflictResolutionView, GmailMailTargetView, TaskQuestionView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
 import { conclusionLabel, describeChange, effortLabel, judgmentText, splitTitle, statusLabel, taskNumber, tracksGmail, tracksSlackSaved } from "./task-text.js";
@@ -108,6 +108,7 @@ export function TaskDrawer(props: {
             <NextAction detail={detail} onMerged={props.onChanged} onStarted={props.onStarted} />
             <SlackActions detail={detail} onDone={props.onChanged} />
             <GmailActions detail={detail} onDone={props.onChanged} />
+            <TaskQuestions taskId={detail.id} />
             <MakeRecurring detail={detail} onCreated={props.onChanged} />
             {detail.agentRun && <AgentRunSection run={detail.agentRun} problem={detail.agentRunProblem} taskId={detail.id} onRequested={props.onChanged} />}
 
@@ -331,6 +332,80 @@ export function RecurrenceFields(props: {
         </label>
       )}
     </div>
+  );
+}
+
+const QUESTION_POLL_MS = 3000;
+
+/** Task について質問し、Claude Code が調べた回答を読む。調べている途中は少しずつ問い合わせ直す */
+export function TaskQuestions({ taskId }: { taskId: number }) {
+  const [questions, setQuestions] = useState<TaskQuestionView[]>([]);
+  const [draft, setDraft] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const load = async () => setQuestions(await api.taskQuestions(taskId));
+  useEffect(() => {
+    void load();
+  }, [taskId]);
+  const running = questions.some((question) => question.status === "running");
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => void load(), QUESTION_POLL_MS);
+    return () => clearInterval(timer);
+  }, [running, taskId]);
+  const ask = async () => {
+    setSending(true);
+    const outcome = await api.askTask(taskId, draft);
+    setSending(false);
+    if (outcome.ok) {
+      setDraft("");
+      setProblem(null);
+      await load();
+    } else setProblem(outcome.message);
+  };
+
+  return (
+    <section className="drawer-section" aria-labelledby="drawer-questions">
+      <h3 id="drawer-questions" className="drawer-section-title">
+        質問
+      </h3>
+      {questions.length > 0 && (
+        <ol className="task-questions">
+          {questions.map((question) => (
+            <li key={question.id} className="task-question">
+              <p className="task-question-text">{question.question}</p>
+              {question.status === "running" && <p className="field-hint">Claude Code が調べています…</p>}
+              {question.status === "failed" && <p className="problem">答えられませんでした: {question.error}</p>}
+              {question.status === "answered" && question.answer !== null && (
+                <div className="task-question-answer">
+                  <Markdown text={question.answer} onOpenLink={(url) => void api.openExternal(url)} />
+                  {question.sources.length > 0 && <p className="field-hint">根拠: {question.sources.join("、")}</p>}
+                </div>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+      <form
+        className="task-question-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (draft.trim() !== "" && !running) void ask();
+        }}
+      >
+        <textarea
+          aria-label="この Task についての質問"
+          placeholder="この Task について聞きたいこと（例: 期限はいつ？ この PR は何を変える？）"
+          value={draft}
+          rows={3}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button type="submit" className="primary-button" disabled={sending || running || draft.trim() === ""}>
+          質問する
+        </button>
+      </form>
+      {problem && <p className="problem">{problem}</p>}
+    </section>
   );
 }
 

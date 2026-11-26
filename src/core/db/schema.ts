@@ -220,3 +220,29 @@ export const gmailMessages = sqliteTable(
     index("gmail_messages_account_sender").on(table.accountId, table.senderKey),
   ],
 );
+
+export const TASK_QUESTION_STATUSES = ["running", "answered", "failed"] as const;
+
+/** Task についてユーザーがした質問と、Claude Code が調べて答えた回答（Task ごとのやりとり） */
+export const taskQuestions = sqliteTable(
+  "task_questions",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id),
+    question: text().notNull(),
+    status: text({ enum: TASK_QUESTION_STATUSES }).notNull(),
+    answer: text(),
+    /** 回答の根拠にしたもの（ファイルのパス・URL など） */
+    sources: text({ mode: "json" }),
+    error: text(),
+    /** 続けて質問したときに同じ会話として聞くため。session は作業ディレクトリに結び付くので、場所も残す */
+    sessionId: text("session_id"),
+    workspace: text(),
+    costUsd: text("cost_usd"),
+    askedAt: text("asked_at").notNull(),
+    answeredAt: text("answered_at"),
+  },
+  (table) => [index("task_questions_task_id").on(table.taskId)],
+);

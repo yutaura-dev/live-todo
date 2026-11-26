@@ -1487,3 +1487,33 @@ button:disabled {
   opacity: 0.7;
   font-size: 0.9em;
 }
+
+.task-questions {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.task-question-text {
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.task-question-answer {
+  padding-left: 0.75rem;
+  border-left: 2px solid currentColor;
+  border-left-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.task-question-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.task-question-form textarea {
+  width: 100%;
+  font: inherit;
+  resize: vertical;
+}

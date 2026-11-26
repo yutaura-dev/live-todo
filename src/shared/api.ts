@@ -7,6 +7,17 @@ import type { TaskDetail } from "../core/board/board-service.js";
 export type { AccountFilterPreview, TargetCheck } from "../app/settings/filter-preview.js";
 export type { FilterReason } from "../sources/github/repository-filter.js";
 
+export type TaskQuestionView = {
+  id: number;
+  question: string;
+  status: "running" | "answered" | "failed";
+  answer: string | null;
+  sources: ReadonlyArray<string>;
+  error: string | null;
+  askedAt: string;
+  answeredAt: string | null;
+};
+
 export type GmailMailTargetView = {
   kind: "senders" | "threads";
   messages: ReadonlyArray<{ messageId: string; subject: string; senderName: string; receivedAt: number; pastInvite: boolean }>;
@@ -143,6 +154,10 @@ export interface LiveTodoApi {
   recurringUpdate(input: { id: number; title?: string; note?: string; schedule?: RecurrenceScheduleView; active?: boolean }): Promise<Outcome>;
   /** Slack の To-do を完了にする・To-do から外す。外部への書き込み。確認で承認したあとにだけ呼ぶ */
   slackAction(taskId: number, action: "complete" | "remove"): Promise<Outcome>;
+  /** Task についての質問と回答（古い順） */
+  taskQuestions(taskId: number): Promise<TaskQuestionView[]>;
+  /** Task について質問し、Claude Code に調べさせる（調べ終わると taskQuestions に回答が載る） */
+  askTask(taskId: number, question: string): Promise<Outcome>;
   /** 確認済みにする・ゴミ箱に入れる候補のメール（確認に見せる） */
   gmailMailTarget(taskId: number): Promise<GmailMailTargetView | { error: string }>;
   /** 確認で見せたメールを、Gmail で確認済みにする（アーカイブして既読）かゴミ箱に入れる。外部への書き込み。承認したあとにだけ呼ぶ */
