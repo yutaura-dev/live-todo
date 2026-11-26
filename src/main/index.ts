@@ -624,7 +624,16 @@ function registerPullRequestFix() {
           return yield* new GitHubRequestError({ message: "このアカウントでは Claude Code を使わない設定です。設定画面で AI の調査を有効にしてから直してください" });
         }
         const runId = yield* startPullRequestFix(taskId);
-        runtime.runFork(finishPullRequestFix(runId, { model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: PULL_FIX_BUDGET_USD }));
+        runtime.runFork(
+          finishPullRequestFix(runId, {
+            model: DEPENDENCY_REVIEW_MODEL,
+            maxBudgetUsd: PULL_FIX_BUDGET_USD,
+            home: app.getPath("home"),
+            // アプリの秘密情報・DB・設定と、アプリのソース（.env.local がある）は読ませない。
+            // userData を丸ごと塞がない理由: Claude Code の作業場所（agent-workspaces）もその中にあるため
+            denyRead: [secretsPath, tokenInfoPath, dbPath, configPath, app.getAppPath(), process.cwd()],
+          }),
+        );
       }),
     ),
   );

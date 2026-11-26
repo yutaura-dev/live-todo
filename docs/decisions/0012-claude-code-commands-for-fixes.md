@@ -16,7 +16,13 @@
 - それでも外部への書き込みを承認なしにさせないため、2 つを重ねる
   - Claude Code の許可で、外部に書き込めるもの・履歴を変えるものを禁止する（`git push`・`git commit`・`git reset`・`git checkout`・`git switch`・`git rebase`・`git remote`・`git config`・`gh`）
   - Claude Code に渡す環境から認証情報を外す。git の全体とシステムの設定（gh の認証を使う credential.helper を含む）を読ませず、gh の設定は空のフォルダを指させ、`GH_TOKEN`・`GITHUB_TOKEN`・SSH エージェントを外す。禁止をすり抜けても、認証がないので書き込めない
-- commit と push は、これまでどおりアプリが行う。差分を見せ、承認された commit だけを、直し始めたときの head から動いていないことを確かめて push する（force はしない）
+- Bash は Claude Code の sandbox（macOS の仕組みで OS が閉じ込める）の中で動かす。`--settings` で次を指定する
+  - 書き込みは作業ディレクトリとパッケージのキャッシュの場所だけ（一時フォルダは sandbox の既定で書ける）。git のデータ・アプリの取り直した git のデータ・`~/.gitconfig` などには書けない
+  - 読ませない: `~/.ssh`・gh の設定・`~/.aws`・`~/.npmrc` などの認証情報、アプリの秘密情報・DB・設定・ソース
+  - 通信は npm・yarn のレジストリだけ（`strictAllowlist`）
+  - sandbox を起動できなければ止める（`failIfUnavailable`）。sandbox の外での再実行を許さない（`allowUnsandboxedCommands: false`）
+  - 2026-11-26 に、`--restricted` と組み合わせて、ホームの下での作業ディレクトリの外への書き込み・`~/.ssh` の読み取り・許可していない通信が止まることを確かめた
+- commit と push は、これまでどおりアプリが行う。AI が直し終わったら、AI が触れていない git のデータを取り直し、AI の作業ツリーのファイルをそのデータで commit・push する（AI が書き換えた git の設定を使わない）。アプリの git には PATH と HOME だけを渡す。差分を見せ、承認された commit だけを、直し始めたときの head から動いていないことを確かめて push する（force はしない）
 - git のデータは作業ディレクトリの外に分け、アプリの git は危ない設定を打ち消して動かす（コンフリクトの直しと同じ）
 
 ## Alternatives Considered
@@ -33,7 +39,7 @@
 
 ### Negative
 
-- Claude Code は作業ディレクトリの外のファイルを読み書きしたり、ネットワークに出たりできる。パッケージのインストールスクリプトも動く。私用のリポジトリで、Claude Code の防御を前提に受け入れる
+- sandbox の中でも、作業ディレクトリの中ではパッケージのインストールスクリプトが動く。一時フォルダには書ける。読ませない場所に挙げていないファイルは読める
 - renovate のブランチに push すると、renovate はそのブランチを自動で作り直さなくなる
 
 ## References

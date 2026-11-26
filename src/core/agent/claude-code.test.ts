@@ -76,6 +76,27 @@ describe("claudeArgs（禁止するツール）", () => {
   });
 });
 
+describe("claudeArgs（sandbox）", () => {
+  it("sandbox を有効にし、起動できなければ止め、外での再実行を禁止し、通信先と読ませない場所・書いてよい場所を決める", () => {
+    const args = claudeArgs({ ...request, sandbox: { allowedDomains: ["registry.npmjs.org"], denyRead: ["/Users/me/.ssh"], allowWrite: ["/work/cache"] } });
+    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+
+    assert.deepStrictEqual(settings, {
+      sandbox: {
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        filesystem: { denyRead: ["/Users/me/.ssh"], allowWrite: ["/work/cache"] },
+        network: { allowedDomains: ["registry.npmjs.org"], strictAllowlist: true },
+      },
+    });
+  });
+
+  it("sandbox を指定しなければ --settings を付けない", () => {
+    assert.notInclude(claudeArgs(request), "--settings");
+  });
+});
+
 describe("childEnv（認証を渡さない）", () => {
   it("書き込みを伴うコマンドを任せるときは、git・gh の認証と SSH エージェントを使えないようにする", () => {
     const env = childEnv(

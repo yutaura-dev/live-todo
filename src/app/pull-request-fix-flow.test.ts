@@ -64,7 +64,16 @@ const doubles = () => {
           prepare: (taskId, _pullUrl, options) =>
             Effect.sync(() => {
               prepared.push({ purpose: options?.purpose ?? "conflict" });
-              return { cwd: `/w/task-${taskId}/fix`, repository: "acme/app", headRef: "renovate/changesets-action-2.x", baseRef: "main", headSha: "a".repeat(40), conflicted: [], isolationDir: `/w/task-${taskId}/no-credentials` };
+              return {
+                cwd: `/w/task-${taskId}/fix`,
+                repository: "acme/app",
+                headRef: "renovate/changesets-action-2.x",
+                baseRef: "main",
+                headSha: "a".repeat(40),
+                conflicted: [],
+                isolationDir: `/w/task-${taskId}/no-credentials`,
+                cacheDir: `/w/task-${taskId}/package-cache`,
+              };
             }),
           commit: (_cwd, _conflicted, options) =>
             Effect.sync(() => {
@@ -92,7 +101,7 @@ describe("Claude Code に PR を修正させる", () => {
       const taskId = yield* fixTask;
       const h = doubles();
 
-      yield* h.provide(finishPullRequestFix(yield* startPullRequestFix(taskId), {}));
+      yield* h.provide(finishPullRequestFix(yield* startPullRequestFix(taskId), { denyRead: ["/app/data"] }));
 
       assert.deepStrictEqual(h.prepared, [{ purpose: "fix" }]);
       const request = h.requests[0]!;
@@ -100,6 +109,10 @@ describe("Claude Code に PR を修正させる", () => {
       assert.include([...request.allowedTools], "Bash");
       assert.include([...(request.disallowedTools ?? [])], "Bash(git push:*)");
       assert.deepStrictEqual(request.withoutCredentials, { ghConfigDir: `/w/task-${taskId}/no-credentials` });
+      assert.deepStrictEqual(request.sandbox?.allowWrite, [`/w/task-${taskId}/package-cache`]);
+      assert.includeMembers([...(request.sandbox?.denyRead ?? [])], ["/app/data"]);
+      assert.include([...(request.sandbox?.allowedDomains ?? [])], "registry.npmjs.org");
+      assert.deepInclude(request.env as object, { npm_config_cache: `/w/task-${taskId}/package-cache/npm`, npm_config_store_dir: `/w/task-${taskId}/package-cache/pnpm` });
       assert.deepStrictEqual(h.commits, [{ anyChanges: true, message: "CLI v3 への更新をまとめて push する", headSha: "a".repeat(40) }]);
       assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "todo");
       const [run] = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.kind, "fix_pull_request"));

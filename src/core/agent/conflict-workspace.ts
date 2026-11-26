@@ -27,6 +27,8 @@ export type PreparedMerge = {
   conflicted: ReadonlyArray<string>;
   /** AI にコマンドを任せるときに使う、認証情報のない gh の設定の場所（空のフォルダ） */
   isolationDir: string;
+  /** sandbox の中でパッケージマネージャーが書いてよいキャッシュの場所 */
+  cacheDir: string;
 };
 
 const PullInfo = Schema.Struct({
@@ -88,7 +90,9 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
 
           const dir = `${root}/task-${taskId}/${purpose}`;
           const isolationDir = `${root}/task-${taskId}/no-credentials`;
+          const cacheDir = `${root}/task-${taskId}/package-cache`;
           yield* fs.makeDirectory(isolationDir, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
+          yield* fs.makeDirectory(cacheDir, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
           yield* fs.remove(dir, { recursive: true }).pipe(Effect.ignore);
           yield* fs.remove(gitDirOf(dir), { recursive: true }).pipe(Effect.ignore);
           yield* fs.remove(trustedGitDirOf(dir), { recursive: true }).pipe(Effect.ignore);
@@ -101,14 +105,14 @@ export class ConflictWorkspace extends Context.Service<ConflictWorkspace, {
           if (head !== info.headRefOid) return yield* new ConflictWorkspaceError({ message: "PR のブランチが取得の途中で進んだ。もう一度直してください" });
 
           if (purpose === "fix") {
-            return { cwd: dir, repository, headRef: info.headRefName, baseRef: info.baseRefName, headSha: head, conflicted: [], isolationDir } satisfies PreparedMerge;
+            return { cwd: dir, repository, headRef: info.headRefName, baseRef: info.baseRefName, headSha: head, conflicted: [], isolationDir, cacheDir } satisfies PreparedMerge;
           }
           // コンフリクトがあると終了コードは 1 になる。それ以外の失敗は、コンフリクトしたファイルの一覧で見分ける
           yield* exitCode(commands.merge[0], commands.merge[1], `${info.baseRefName} を merge できない`);
           const conflicted = (yield* git(dir, ["diff", "--name-only", "--diff-filter=U"], "コンフリクトしたファイルを読めない"))
             .split("\n")
             .filter((line) => line !== "");
-          return { cwd: dir, repository, headRef: info.headRefName, baseRef: info.baseRefName, headSha: head, conflicted, isolationDir } satisfies PreparedMerge;
+          return { cwd: dir, repository, headRef: info.headRefName, baseRef: info.baseRefName, headSha: head, conflicted, isolationDir, cacheDir } satisfies PreparedMerge;
         });
 
         const commit = Effect.fn("ConflictWorkspace.commit")(function* (

@@ -65,7 +65,20 @@ export const startPullRequestFix = Effect.fnUntraced(function* (taskId: number) 
   return run!.id;
 });
 
-const fix = Effect.fnUntraced(function* (runId: number, options: { model?: string; maxBudgetUsd?: number }) {
+export type PullRequestFixOptions = {
+  model?: string;
+  maxBudgetUsd?: number;
+  /** sandbox の中から読ませない場所（アプリのデータ・ソースなど）。認証情報の置き場はここで足す */
+  denyRead?: ReadonlyArray<string>;
+  home?: string;
+};
+
+// 依存の更新に要る通信先だけを許す
+const PACKAGE_REGISTRIES = ["registry.npmjs.org", "registry.yarnpkg.com"];
+const credentialPaths = (home: string | undefined) =>
+  home === undefined ? [] : [".ssh", ".config/gh", ".aws", ".npmrc", ".netrc", ".docker", ".kube", ".gnupg"].map((path) => `${home}/${path}`);
+
+const fix = Effect.fnUntraced(function* (runId: number, options: PullRequestFixOptions) {
   const db = yield* Database;
   const claude = yield* ClaudeCode;
   const workspace = yield* ConflictWorkspace;
@@ -94,6 +107,13 @@ const fix = Effect.fnUntraced(function* (runId: number, options: { model?: strin
     allowedTools: PULL_FIX_TOOLS,
     disallowedTools: PULL_FIX_DISALLOWED_TOOLS,
     withoutCredentials: { ghConfigDir: prepared.isolationDir },
+    sandbox: {
+      allowedDomains: PACKAGE_REGISTRIES,
+      denyRead: [...credentialPaths(options.home), ...(options.denyRead ?? [])],
+      allowWrite: [prepared.cacheDir],
+    },
+    // 作業ディレクトリの外には書けないので、パッケージマネージャーのキャッシュは書いてよい場所に置かせる
+    env: { npm_config_cache: `${prepared.cacheDir}/npm`, npm_config_store_dir: `${prepared.cacheDir}/pnpm`, YARN_CACHE_FOLDER: `${prepared.cacheDir}/yarn` },
     model: options.model,
     maxBudgetUsd: options.maxBudgetUsd,
   });
@@ -110,7 +130,7 @@ const fix = Effect.fnUntraced(function* (runId: number, options: { model?: strin
 });
 
 /** 裏で PR を修正させる。結果（成功・失敗）は Task と記録に残すので、失敗は返さない */
-export const finishPullRequestFix = (runId: number, options: { model?: string; maxBudgetUsd?: number }) =>
+export const finishPullRequestFix = (runId: number, options: PullRequestFixOptions) =>
   Effect.gen(function* () {
     const db = yield* Database;
     const tasks = yield* TaskRepository;

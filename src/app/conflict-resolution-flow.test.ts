@@ -58,6 +58,7 @@ const doubles = (options: { claudeFails?: boolean; commitFails?: string; pushFai
               headSha: "a".repeat(40),
               conflicted: pullUrl.endsWith("/4") ? ["a.json"] : [],
               isolationDir: `/w/task-${taskId}/no-credentials`,
+              cacheDir: `/w/task-${taskId}/package-cache`,
             }),
           commit: () =>
             options.commitFails === undefined
