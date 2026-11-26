@@ -100,6 +100,8 @@ describe("NEXT_ACTION_PLAN_JSON_SCHEMA", () => {
       "pull_request_opened",
       "review_submitted",
       "merged",
+      "included_in_pull_request",
+      "workflow_succeeded",
       "none",
     ]);
     assert.deepStrictEqual(NEXT_ACTION_PLAN_JSON_SCHEMA.properties.steps.items.properties.type.enum, ["manual", "wait", "merge_pull_request"]);

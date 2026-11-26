@@ -10,6 +10,12 @@ const MAX_PAGES = 10;
 
 const ArrayBody = Schema.Array(Schema.Unknown);
 const SearchBody = Schema.Struct({ items: ArrayBody });
+const CompareBody = Schema.Struct({ status: Schema.String });
+const WorkflowRunsBody = Schema.Struct({
+  workflow_runs: Schema.Array(
+    Schema.Struct({ head_sha: Schema.String, status: Schema.String, conclusion: Schema.NullOr(Schema.String), html_url: Schema.String }),
+  ),
+});
 const SearchCountBody = Schema.Struct({ total_count: Schema.Number, items: Schema.Array(Schema.Struct({ html_url: Schema.String })) });
 const CheckRunsBody = Schema.Struct({ check_runs: ArrayBody });
 const ErrorBody = Schema.Struct({ message: Schema.String });
@@ -288,6 +294,24 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
             if (Option.isNone(response)) return { urls: [] };
             const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(SearchCountBody, url)));
             return { urls: body.items.map((item) => item.html_url) };
+          }),
+        compareCommits: (repository, base, head) =>
+          Effect.gen(function* () {
+            const repoPath = repository.split("/").map(encodeURIComponent).join("/");
+            const url = yield* resolveUrl(`/repos/${repoPath}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`, { per_page: "1" });
+            const response = yield* send(url);
+            if (Option.isNone(response)) return { status: "not_found" };
+            const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(CompareBody, url)));
+            return { status: body.status };
+          }),
+        listWorkflowRuns: (repository, workflow) =>
+          Effect.gen(function* () {
+            const repoPath = repository.split("/").map(encodeURIComponent).join("/");
+            const url = yield* resolveUrl(`/repos/${repoPath}/actions/workflows/${encodeURIComponent(workflow)}/runs`, { per_page: "10" });
+            const response = yield* send(url);
+            if (Option.isNone(response)) return [];
+            const body = yield* jsonOf(url)(response.value).pipe(Effect.flatMap(decodeBody(WorkflowRunsBody, url)));
+            return body.workflow_runs.map((run) => ({ headSha: run.head_sha, status: run.status, conclusion: run.conclusion, url: run.html_url }));
           }),
         listReviews: (pullApiUrl) =>
           resolveUrl(`${pullApiUrl}/reviews`, { per_page: PER_PAGE }).pipe(

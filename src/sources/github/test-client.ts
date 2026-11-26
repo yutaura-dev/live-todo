@@ -18,5 +18,7 @@ export const gitHubClientStub = (overrides: Partial<GitHubClient["Service"]> = {
     listRecentCommits: () => Effect.succeed([]),
     listMyRepositories: Effect.succeed({ repositories: [], truncated: false }),
     searchOpenPullRequests: () => Effect.succeed({ urls: [] }),
+    compareCommits: () => Effect.succeed({ status: "diverged" }),
+    listWorkflowRuns: () => Effect.succeed([]),
     ...overrides,
   });

@@ -265,6 +265,28 @@ describe("GitHubClientLive", () => {
       assert.strictEqual(requests[0]?.url.searchParams.get("q"), "repo:acme/app is:pr is:open in:title @changesets/cli v3");
     }));
 
+  it.effect("2 つの commit を比べ、base が head に含まれるか（ahead・identical）が分かる状態を返す", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({ body: { status: "ahead", ahead_by: 3 } }));
+
+      const result = yield* withClient(layer, (client) => client.compareCommits("acme/app", "merge-sha", "deploy-sha"));
+
+      assert.deepStrictEqual(result, { status: "ahead" });
+      assert.strictEqual(requests[0]?.url.pathname, "/repos/acme/app/compare/merge-sha...deploy-sha");
+    }));
+
+  it.effect("ワークフローの最近の実行を、commit と結果つきで返す", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeGitHub(() => ({
+        body: { workflow_runs: [{ head_sha: "s1", status: "completed", conclusion: "success", html_url: "https://github.com/acme/app/actions/runs/1" }] },
+      }));
+
+      const result = yield* withClient(layer, (client) => client.listWorkflowRuns("acme/app", "deploy-stg.yml"));
+
+      assert.deepStrictEqual(result, [{ headSha: "s1", status: "completed", conclusion: "success", url: "https://github.com/acme/app/actions/runs/1" }]);
+      assert.strictEqual(requests[0]?.url.pathname, "/repos/acme/app/actions/workflows/deploy-stg.yml/runs");
+    }));
+
   it.effect("自分のアカウントは /user から取得する", () =>
     Effect.gen(function* () {
       const { requests, layer } = fakeGitHub(() => ({ body: { login: "YutaUra" } }));

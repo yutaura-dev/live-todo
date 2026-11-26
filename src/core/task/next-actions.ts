@@ -13,6 +13,10 @@ export type WaitCondition =
   | { kind: "pull_request_opened"; repository: string; query: string }
   | { kind: "review_submitted"; pullUrl: string; since?: string }
   | { kind: "merged"; pullUrl: string }
+  /** pullUrl の PR の merge commit が、repository で query に合う開いた PR（deploy の PR など）に入る */
+  | { kind: "included_in_pull_request"; repository: string; query: string; pullUrl: string }
+  /** pullUrl の PR の merge commit を含む commit で、ワークフロー（ファイル名）が成功する */
+  | { kind: "workflow_succeeded"; repository: string; workflow: string; pullUrl: string }
   /** 何を待つかが分からない待ち（返信待ちなど）。元の項目に since より後で動きがあったら済ませる */
   | { kind: "item_changed"; since?: string };
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
@@ -99,7 +103,12 @@ export const conflictPlan = (): NextActionPlan => ({
 });
 
 /** AI が返す待つ条件。JSON Schema の都合で項目は平らに持ち、kind に要らない項目は空文字 */
-export type ProposedWaitCondition = { kind: WaitCondition["kind"] | "none"; repository: string; query: string; pullUrl: string };
+export type ProposedWaitCondition = {
+  kind: Exclude<WaitCondition["kind"], "item_changed"> | "none";
+  repository: string;
+  query: string;
+  pullUrl: string;
+};
 
 /** AI が考えた手順。type がなければ手作業 */
 export type ProposedStep = {
@@ -115,9 +124,25 @@ const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PULL_URL_PATTERN = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/;
 
 /** AI が返した条件のうち、アプリが確かめられる形のものだけを残す（形が崩れていれば、手で済ませる待つ手順になる） */
+const WORKFLOW_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
+
+/** 形が崩れた条件は、元の項目の動きを待つ条件にする（待ちを人に戻さないため） */
 function waitConditionOf(proposed: ProposedWaitCondition | undefined, now: string | undefined): WaitCondition | undefined {
   if (proposed === undefined) return undefined;
+  const fallback: WaitCondition = now === undefined ? { kind: "item_changed" } : { kind: "item_changed", since: now };
+  return checkedWaitCondition(proposed, now) ?? fallback;
+}
+
+function checkedWaitCondition(proposed: ProposedWaitCondition, now: string | undefined): WaitCondition | undefined {
   switch (proposed.kind) {
+    case "included_in_pull_request":
+      return REPOSITORY_PATTERN.test(proposed.repository) && proposed.query.trim() !== "" && PULL_URL_PATTERN.test(proposed.pullUrl)
+        ? { kind: "included_in_pull_request", repository: proposed.repository, query: proposed.query.trim(), pullUrl: proposed.pullUrl }
+        : undefined;
+    case "workflow_succeeded":
+      return REPOSITORY_PATTERN.test(proposed.repository) && WORKFLOW_FILE.test(proposed.query.trim()) && PULL_URL_PATTERN.test(proposed.pullUrl)
+        ? { kind: "workflow_succeeded", repository: proposed.repository, workflow: proposed.query.trim(), pullUrl: proposed.pullUrl }
+        : undefined;
     case "pull_request_opened":
       return REPOSITORY_PATTERN.test(proposed.repository) && proposed.query.trim() !== ""
         ? { kind: "pull_request_opened", repository: proposed.repository, query: proposed.query.trim() }
@@ -128,7 +153,7 @@ function waitConditionOf(proposed: ProposedWaitCondition | undefined, now: strin
     case "merged":
       return PULL_URL_PATTERN.test(proposed.pullUrl) ? { kind: "merged", pullUrl: proposed.pullUrl } : undefined;
     case "none":
-      return now === undefined ? { kind: "item_changed" } : { kind: "item_changed", since: now };
+      return undefined;
   }
 }
 
@@ -240,6 +265,8 @@ const WaitConditionSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("review_submitted"), pullUrl: Schema.String, since: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal("merged"), pullUrl: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("item_changed"), since: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal("included_in_pull_request"), repository: Schema.String, query: Schema.String, pullUrl: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("workflow_succeeded"), repository: Schema.String, workflow: Schema.String, pullUrl: Schema.String }),
 ]);
 const ActionStepSchema = Schema.Struct({ ...StepBaseSchema, kind: Schema.Literals(ACTION_KINDS), until: Schema.optionalKey(WaitConditionSchema) });
 interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchema> {

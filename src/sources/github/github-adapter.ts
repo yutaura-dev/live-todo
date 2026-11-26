@@ -49,6 +49,13 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   listRecentCommits(repository: string): Effect.Effect<ReadonlyArray<{ title: string; parents: number }>, GitHubClientError>;
   /** リポジトリで、タイトルが検索語に合う開いた PR の URL（待つ手順の「PR が出るのを待つ」を確かめるため。数件まで） */
   searchOpenPullRequests(repository: string, query: string): Effect.Effect<{ urls: ReadonlyArray<string> }, GitHubClientError>;
+  /** base から head への比べ方。ahead・identical なら base は head に含まれる */
+  compareCommits(repository: string, base: string, head: string): Effect.Effect<{ status: string }, GitHubClientError>;
+  /** ワークフロー（ファイル名）の最近の実行 */
+  listWorkflowRuns(
+    repository: string,
+    workflow: string,
+  ): Effect.Effect<ReadonlyArray<{ headSha: string; status: string; conclusion: string | null; url: string }>, GitHubClientError>;
   /** 自分が見られるリポジトリ（設定画面でフィルタの効き方を見せるため）。truncated: ページ数の上限で打ち切った */
   readonly listMyRepositories: Effect.Effect<{ repositories: unknown; truncated: boolean }, GitHubClientError>;
 }>()("live-todo/sources/github/GitHubClient") {}

@@ -258,6 +258,10 @@ function waitHint(until: WaitCondition): string {
       return "レビューが付いたら、アプリが自動で済ませます";
     case "merged":
       return "merge されたら、アプリが自動で済ませます";
+    case "included_in_pull_request":
+      return `この PR が ${until.repository} の「${until.query}」の PR に入ったら、アプリが自動で済ませます`;
+    case "workflow_succeeded":
+      return `この PR を含む commit で ${until.workflow} が成功したら、アプリが自動で済ませます`;
     case "item_changed":
       return "元の項目に動き（コメント・レビューなど）があったら、アプリが自動で済ませます";
   }

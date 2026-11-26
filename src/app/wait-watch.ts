@@ -10,6 +10,20 @@ import type { GitHubClient } from "../sources/github/github-adapter.js";
 const WATCHED_STATUSES = ["needs_review", "todo", "in_progress"] as const;
 
 const PullBody = Schema.Struct({ merged: Schema.Boolean });
+const MergedPullBody = Schema.Struct({ merged: Schema.Boolean, merge_commit_sha: Schema.NullOr(Schema.String), head: Schema.Struct({ sha: Schema.String }) });
+// base が head に含まれる比べ方
+const CONTAINED = new Set(["ahead", "identical"]);
+
+/** 自分の PR の merge commit。まだ merge されていなければ none */
+const mergeCommitOf = (client: GitHubClient["Service"], pullUrl: string) =>
+  Effect.gen(function* () {
+    const api = pullApiUrl(pullUrl);
+    if (api === undefined) return Option.none<string>();
+    const raw = yield* client.getPullRequest(api);
+    if (Option.isNone(raw)) return Option.none<string>();
+    const pull = yield* Schema.decodeUnknownEffect(MergedPullBody)(raw.value);
+    return pull.merged && pull.merge_commit_sha !== null ? Option.some(pull.merge_commit_sha) : Option.none<string>();
+  });
 const ReviewsBody = Schema.Array(Schema.Struct({ submitted_at: Schema.optional(Schema.NullOr(Schema.String)) }));
 
 const pullApiUrl = (pullUrl: string) => {
@@ -21,6 +35,31 @@ const pullApiUrl = (pullUrl: string) => {
 const satisfied = (client: GitHubClient["Service"], until: WaitCondition, ownUrls: ReadonlySet<string>, taskId: number) =>
   Effect.gen(function* () {
     switch (until.kind) {
+      case "included_in_pull_request": {
+        const merged = yield* mergeCommitOf(client, until.pullUrl);
+        if (Option.isNone(merged)) return Option.none<string>();
+        const candidates = (yield* client.searchOpenPullRequests(until.repository, until.query)).urls.filter((url) => !ownUrls.has(url));
+        for (const candidate of candidates) {
+          const api = pullApiUrl(candidate);
+          if (api === undefined) continue;
+          const raw = yield* client.getPullRequest(api);
+          if (Option.isNone(raw)) continue;
+          const head = (yield* Schema.decodeUnknownEffect(MergedPullBody)(raw.value)).head.sha;
+          const compared = yield* client.compareCommits(until.repository, merged.value, head);
+          if (CONTAINED.has(compared.status)) return Option.some(`${candidate} に入った`);
+        }
+        return Option.none<string>();
+      }
+      case "workflow_succeeded": {
+        const merged = yield* mergeCommitOf(client, until.pullUrl);
+        if (Option.isNone(merged)) return Option.none<string>();
+        const runs = (yield* client.listWorkflowRuns(until.repository, until.workflow)).filter((run) => run.conclusion === "success");
+        for (const run of runs) {
+          const compared = yield* client.compareCommits(until.repository, merged.value, run.headSha);
+          if (CONTAINED.has(compared.status)) return Option.some(`${until.workflow} が成功した: ${run.url}`);
+        }
+        return Option.none<string>();
+      }
       case "item_changed": {
         const db = yield* Database;
         const since = until.since ?? (yield* waitingSince(taskId));

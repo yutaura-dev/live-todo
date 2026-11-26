@@ -104,6 +104,52 @@ describe("checkWaitConditions", () => {
       assert.deepStrictEqual(yield* currentOf(id), ["w"]);
     }).pipe(Effect.provide(TestDatabase)));
 
+  const merged733 = (pullApi: string) =>
+    Effect.succeed(
+      pullApi.endsWith("/pulls/733")
+        ? Option.some<unknown>({ merged: true, merge_commit_sha: "merge-sha", head: { sha: "pr-head" } })
+        : pullApi.endsWith("/pulls/800")
+          ? Option.some<unknown>({ merged: false, merge_commit_sha: null, head: { sha: "deploy-head" } })
+          : Option.none(),
+    );
+
+  it.effect("自分の PR の merge commit が、開いている deploy の PR に入ったら済ませる", () =>
+    Effect.gen(function* () {
+      const until = { kind: "included_in_pull_request", repository: "acme/app", query: "Deploy stg", pullUrl: "https://github.com/acme/app/pull/733" };
+      const id = yield* waitingFor(until);
+      const compared: string[] = [];
+      const client = (status: string) =>
+        gitHubClientStub({
+          getPullRequest: merged733,
+          searchOpenPullRequests: () => Effect.succeed({ urls: ["https://github.com/acme/app/pull/800"] }),
+          compareCommits: (_repository, base, head) => {
+            compared.push(`${base}...${head}`);
+            return Effect.succeed({ status });
+          },
+        });
+
+      assert.strictEqual(yield* checkWaitConditions("personal", client("diverged")), 0);
+      assert.deepStrictEqual(compared, ["merge-sha...deploy-head"]);
+      assert.strictEqual(yield* checkWaitConditions("personal", client("ahead")), 1);
+      assert.deepStrictEqual(yield* currentOf(id), ["m"]);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("自分の PR の merge commit を含む commit でワークフロー（deploy など）が成功したら済ませる。前の成功では済ませない", () =>
+    Effect.gen(function* () {
+      const until = { kind: "workflow_succeeded", repository: "acme/app", workflow: "deploy-stg.yml", pullUrl: "https://github.com/acme/app/pull/733" };
+      const id = yield* waitingFor(until);
+      const client = (runs: Array<{ headSha: string; conclusion: string | null }>) =>
+        gitHubClientStub({
+          getPullRequest: merged733,
+          listWorkflowRuns: () => Effect.succeed(runs.map((run) => ({ ...run, status: run.conclusion === null ? "in_progress" : "completed", url: "u" }))),
+          compareCommits: (_repository, _base, head) => Effect.succeed({ status: head === "new-deploy" ? "ahead" : "behind" }),
+        });
+
+      assert.strictEqual(yield* checkWaitConditions("personal", client([{ headSha: "old-deploy", conclusion: "success" }, { headSha: "new-deploy", conclusion: null }])), 0);
+      assert.strictEqual(yield* checkWaitConditions("personal", client([{ headSha: "new-deploy", conclusion: "success" }])), 1);
+      assert.deepStrictEqual(yield* currentOf(id), ["m"]);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("まだ出ていなければ、待ったままにする", () =>
     Effect.gen(function* () {
       const id = yield* waitingFor(opened);

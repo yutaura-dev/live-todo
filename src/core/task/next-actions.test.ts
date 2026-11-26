@@ -114,6 +114,20 @@ describe("待つ条件", () => {
     );
   });
 
+  it("deploy の PR に入るのを待つ・ワークフローの成功を待つ条件は、リポジトリと自分の PR が揃っていれば持たせる", () => {
+    const plan = planFromProposedSteps([
+      { title: "deploy の PR に入るのを待つ", type: "wait", effort: "easy", mode: "serial", until: { kind: "included_in_pull_request", repository: "acme/app", query: "Deploy stg", pullUrl: "https://github.com/acme/app/pull/1" } },
+      { title: "deploy を待つ", type: "wait", effort: "easy", mode: "serial", until: { kind: "workflow_succeeded", repository: "acme/app", query: "deploy-stg.yml", pullUrl: "https://github.com/acme/app/pull/1" } },
+      { title: "壊れた条件", type: "wait", effort: "easy", mode: "serial", until: { kind: "workflow_succeeded", repository: "acme/app", query: "../../evil", pullUrl: "https://github.com/acme/app/pull/1" } },
+    ]);
+
+    assert.deepStrictEqual(
+      plan.steps.map((step) => (step.kind === "wait" ? step.until?.kind : undefined)),
+      ["included_in_pull_request", "workflow_succeeded", "item_changed"],
+    );
+    assert.deepStrictEqual(decodePlan(JSON.parse(JSON.stringify(plan))), Option.some(plan));
+  });
+
   it("待つ条件を持つ手順も、保存して読み直せる", () => {
     const plan = planFromProposedSteps(
       [{ title: "merge を待つ", type: "wait", effort: "easy", mode: "serial", until: { kind: "merged", repository: "", query: "", pullUrl: "https://github.com/acme/app/pull/1" } }],
