@@ -8,7 +8,7 @@ import { ClaudeCode, type ClaudeRequest } from "../core/agent/claude-code.js";
 import { TestDatabase } from "../core/db/test-database.js";
 import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TaskRepository } from "../core/task/task-repository.js";
-import { answerQuestion, askQuestion, listQuestions, QUESTION_TOOLS, recoverInterruptedQuestions } from "./task-questions.js";
+import { acceptSuggestion, answerQuestion, askQuestion, dismissSuggestion, listQuestions, QUESTION_JSON_SCHEMA, QUESTION_TOOLS, recoverInterruptedQuestions } from "./task-questions.js";
 
 const harness = (answer: unknown = { answer: "11/27 の 19:00 からです", sources: ["mail.json"] }) => {
   const requests: ClaudeRequest[] = [];
@@ -208,6 +208,48 @@ describe("Task への質問", () => {
       yield* h.provide(answerQuestion(yield* askQuestion(taskId, "何時から？"), {}));
 
       assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "agent_running");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("回答と一緒に、この Task とは別にやったほうがよい Task の案を出させて残す（3 件まで）", () => {
+    const h = harness({
+      answer: "退会の期限は 1/17 です",
+      sources: [],
+      suggestedTasks: [{ title: "ぴあの購入履歴を見て、残したいものを書き出す", brief: "退会すると購入履歴が見られなくなる", reason: "退会の前にやっておくとよい" }],
+    });
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("gmail:mail:threads", "https://mail.google.com/");
+      yield* h.provide(answerQuestion(yield* askQuestion(taskId, "退会するとどうなる？"), {}));
+      const [question] = yield* listQuestions(taskId);
+      assert.deepStrictEqual(question!.suggestions, [{ title: "ぴあの購入履歴を見て、残したいものを書き出す", brief: "退会すると購入履歴が見られなくなる", reason: "退会の前にやっておくとよい", status: "proposed" }]);
+      assert.include(h.requests[0]!.prompt, "別に");
+      assert.include(JSON.stringify(QUESTION_JSON_SCHEMA), "suggestedTasks");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("提案を受け入れると Task ができ、提案に作った Task を残す。見送った提案は Task にしない", () => {
+    const h = harness({
+      answer: "x",
+      sources: [],
+      suggestedTasks: [
+        { title: "購入履歴を書き出す", brief: "退会の前に", reason: "r1" },
+        { title: "別のこと", brief: "", reason: "r2" },
+      ],
+    });
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("gmail:mail:threads", "https://mail.google.com/");
+      const id = yield* askQuestion(taskId, "q");
+      yield* h.provide(answerQuestion(id, {}));
+
+      const created = yield* acceptSuggestion(id, 0);
+      yield* dismissSuggestion(id, 1);
+
+      const tasks = yield* TaskRepository;
+      assert.deepInclude(Option.getOrThrow(yield* tasks.findTask(created)), { title: "購入履歴を書き出す", brief: "退会の前に", status: "todo" });
+      const [question] = yield* listQuestions(taskId);
+      assert.deepStrictEqual((question!.suggestions as Array<{ status: string; taskId?: number }>).map((entry) => [entry.status, entry.taskId]), [["accepted", created], ["dismissed", undefined]]);
+      const error = yield* acceptSuggestion(id, 0).pipe(Effect.flip);
+      assert.include(error.message, "すでに");
     }).pipe(Effect.provide(TestDatabase));
   });
 });

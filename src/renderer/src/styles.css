@@ -1547,3 +1547,10 @@ button:disabled {
   gap: 0.25rem 0.75rem;
   align-items: center;
 }
+
+.task-suggestion {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px dashed color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 6px;
+}

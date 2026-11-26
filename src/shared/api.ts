@@ -16,6 +16,8 @@ export type TaskQuestionView = {
   error: string | null;
   askedAt: string;
   answeredAt: string | null;
+  /** Claude Code が提案した、この Task とは別の Task */
+  suggestions: ReadonlyArray<{ title: string; brief: string; reason: string; status: "proposed" | "accepted" | "dismissed"; taskId?: number }>;
 };
 
 export type GmailMailTargetView = {
@@ -189,6 +191,9 @@ export interface LiveTodoApi {
   interpretRule(then: string): Promise<{ ok: true; actions: RuleActions } | { ok: false; reason: string }>;
   /** Task についての質問と回答（古い順） */
   taskQuestions(taskId: number): Promise<TaskQuestionView[]>;
+  /** 質問の回答で提案された Task を作る（OK を押したとき） */
+  acceptSuggestion(questionId: number, index: number): Promise<Outcome>;
+  dismissSuggestion(questionId: number, index: number): Promise<Outcome>;
   /** Task について質問し、Claude Code に調べさせる（調べ終わると taskQuestions に回答が載る） */
   askTask(taskId: number, question: string): Promise<Outcome>;
   /** 確認済みにする・ゴミ箱に入れる候補のメール（確認に見せる） */

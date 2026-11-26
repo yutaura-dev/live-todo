@@ -15,7 +15,16 @@ import { applyGmailRules } from "../sources/gmail/gmail-rule-runner.js";
 import { MailClassifier } from "../core/judge/mail-classifier.js";
 import { makeMailClassifier } from "../app/llm.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
-import { answerQuestion, askQuestion, listQuestions, recoverInterruptedQuestions, TaskQuestionError } from "../app/task-questions.js";
+import {
+  acceptSuggestion,
+  answerQuestion,
+  askQuestion,
+  dismissSuggestion,
+  listQuestions,
+  recoverInterruptedQuestions,
+  TaskQuestionError,
+  type TaskSuggestion,
+} from "../app/task-questions.js";
 import { actionsFromInterpretation, labelCandidatesOf } from "../core/rules/interpret.js";
 import { decodePlan, stepLinkOf } from "../core/task/next-actions.js";
 import { gmailMailTarget, gmailProcess, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
@@ -646,11 +655,19 @@ function registerTaskQuestions() {
             error: row.error,
             askedAt: row.askedAt,
             answeredAt: row.answeredAt,
+            suggestions: Array.isArray(row.suggestions) ? (row.suggestions as TaskSuggestion[]) : [],
           })),
         ),
         Effect.orElseSucceed(() => []),
       ),
     ),
+  );
+  const SuggestionInput = Schema.Struct({ questionId: Schema.Int.check(Schema.isGreaterThan(0)), index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) });
+  ipcMain.handle(IPC_CHANNELS.acceptSuggestion, (_event, input: unknown) =>
+    outcomeOf(Schema.decodeUnknownEffect(SuggestionInput)(input).pipe(Effect.flatMap((request) => acceptSuggestion(request.questionId, request.index)), Effect.asVoid)),
+  );
+  ipcMain.handle(IPC_CHANNELS.dismissSuggestion, (_event, input: unknown) =>
+    outcomeOf(Schema.decodeUnknownEffect(SuggestionInput)(input).pipe(Effect.flatMap((request) => dismissSuggestion(request.questionId, request.index)))),
   );
   ipcMain.handle(IPC_CHANNELS.askTask, (_event, input: unknown) =>
     outcomeOf(

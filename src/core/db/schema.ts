@@ -240,6 +240,8 @@ export const taskQuestions = sqliteTable(
     answer: text(),
     /** 回答の根拠にしたもの（ファイルのパス・URL など） */
     sources: text({ mode: "json" }),
+    /** Claude Code が提案した、この Task とは別の Task（タイトル・状況・理由と、作った・見送ったか） */
+    suggestions: text({ mode: "json" }),
     error: text(),
     /** 続けて質問したときに同じ会話として聞くため。session は作業ディレクトリに結び付くので、場所も残す */
     sessionId: text("session_id"),

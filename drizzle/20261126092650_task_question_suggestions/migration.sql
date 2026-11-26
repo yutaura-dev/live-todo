@@ -1,0 +1,1 @@
+ALTER TABLE `task_questions` ADD `suggestions` text;

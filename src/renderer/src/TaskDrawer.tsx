@@ -383,6 +383,27 @@ export function TaskQuestions({ taskId }: { taskId: number }) {
                 <div className="task-question-answer">
                   <Markdown text={question.answer} onOpenLink={(url) => void api.openExternal(url)} />
                   {question.sources.length > 0 && <p className="field-hint">根拠: {question.sources.join("、")}</p>}
+                  {question.suggestions.map((suggestion, index) =>
+                    suggestion.status === "dismissed" ? null : (
+                      <div key={index} className="task-suggestion">
+                        <p className="task-question-text">別の Task にしませんか？: {suggestion.title}</p>
+                        {suggestion.brief !== "" && <p className="field-hint">{suggestion.brief}</p>}
+                        <p className="field-hint">理由: {suggestion.reason}</p>
+                        {suggestion.status === "accepted" ? (
+                          <p className="field-hint">Task にしました{suggestion.taskId === undefined ? "" : `（#${suggestion.taskId}）`}</p>
+                        ) : (
+                          <div className="step-actions">
+                            <button type="button" className="primary-button" onClick={() => void api.acceptSuggestion(question.id, index).then(load)}>
+                              Task にする
+                            </button>
+                            <button type="button" className="quiet-button" onClick={() => void api.dismissSuggestion(question.id, index).then(load)}>
+                              見送る
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  )}
                 </div>
               )}
             </li>
