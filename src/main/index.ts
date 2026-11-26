@@ -35,6 +35,7 @@ import { captureSlackSession } from "./slack-connect.js";
 import { captureNotionSession } from "./notion-connect.js";
 import { withNotionSession } from "../app/notion-session.js";
 import { makeNotionJobs, notionTokenKey } from "../app/notion-jobs.js";
+import { makeCalendarJobs } from "../app/calendar-jobs.js";
 import { NotionClient, NotionRequestError } from "../sources/notion/notion-client.js";
 import { NotionClientLive } from "../sources/notion/notion-client-live.js";
 import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js";
@@ -197,9 +198,21 @@ const startSync = Effect.gen(function* () {
       ),
     )
   ).flat();
+  const calendarJobs = (
+    yield* Effect.forEach(config.calendarAccounts, (account) =>
+      makeCalendarJobs(account).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Calendar（${account.id}）の同期を始められない: ${errorMessage(error)}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
   const gmailJobs = (
     yield* Effect.forEach(config.gmailAccounts, (account) =>
-      makeGmailJobs(account, config.rules).pipe(
+      makeGmailJobs(account, config.rules, { invitesHandledByCalendar: config.calendarAccounts.length > 0 }).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
             syncProblem = `Gmail（${account.id}）の同期を始められない: ${errorMessage(error)}`;
@@ -318,8 +331,8 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...calendarJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(calendarJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
     concurrency: 8,
     discard: true,
   });

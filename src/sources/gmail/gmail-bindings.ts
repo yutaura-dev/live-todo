@@ -8,7 +8,7 @@ import type { TodoJudgment } from "../../core/judge/todo-judge.js";
 import type { SourceAdapter } from "../../core/sync/source-adapter.js";
 import { diffSnapshot, type DuplicateExternalIdError } from "../../core/sync/snapshot-differ.js";
 import type { SourceBinding } from "../../core/sync/sync-source.js";
-import { effectiveKind, isPastInvite, type PersonalThread, personalThreads, type SenderGroup, senderGroups, type StoredMail } from "./gmail-mailbox.js";
+import { effectiveKind, isPastInvite, isUpcomingInvite, type PersonalThread, personalThreads, type SenderGroup, senderGroups, type StoredMail } from "./gmail-mailbox.js";
 
 export const gmailSendersSource = (accountId: string) => `gmail:${accountId}:senders`;
 export const gmailThreadsSource = (accountId: string) => `gmail:${accountId}:threads`;
@@ -38,6 +38,7 @@ export const loadMails = Effect.fnUntraced(function* (accountId: string) {
       unread: row.unread,
       trashed: row.trashed,
       pastInvite: isPastInvite(row, now),
+      upcomingInvite: isUpcomingInvite(row, now),
     }),
   );
 });
@@ -131,9 +132,13 @@ export const makeGmailSendersBinding = Effect.fnUntraced(function* (options: { a
 const threadFingerprint = (thread: PersonalThread) => JSON.stringify([thread.subject, thread.open, thread.messageIds]);
 
 /** 人からのメールをスレッドごとの Source Item にする。何をする Task かは、あとで Claude Code がスレッドを読んで決める */
-export const makeGmailThreadsBinding = Effect.fnUntraced(function* (options: { accountId: string }) {
+export const makeGmailThreadsBinding = Effect.fnUntraced(function* (options: { accountId: string; invitesHandledByCalendar?: boolean }) {
   const db = yield* Database;
-  const snapshot = loadMails(options.accountId).pipe(Effect.map(personalThreads), Effect.provideService(Database, db));
+  const invitesHandledElsewhere = options.invitesHandledByCalendar === true;
+  const snapshot = loadMails(options.accountId).pipe(
+    Effect.map((mails) => personalThreads(mails, { invitesHandledElsewhere })),
+    Effect.provideService(Database, db),
+  );
   const identify = (thread: PersonalThread) => ({ externalId: thread.threadId, fingerprint: threadFingerprint(thread) });
 
   return {

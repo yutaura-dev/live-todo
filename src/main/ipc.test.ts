@@ -31,6 +31,16 @@ describe("isAllowedExternalUrl（Gmail）", () => {
   });
 });
 
+describe("isAllowedExternalUrl（Google Calendar）", () => {
+  it.each(["https://www.google.com/calendar/event?eid=abc", "https://calendar.google.com/calendar/r/eventedit/abc"])("予定のページは開いてよい: %s", (url) => {
+    assert.isTrue(isAllowedExternalUrl(url));
+  });
+
+  it.each(["https://www.google.com/search?q=x", "http://calendar.google.com/calendar/", "https://calendar.google.com.evil.example/"])("それ以外は開かない: %s", (url) => {
+    assert.isFalse(isAllowedExternalUrl(url));
+  });
+});
+
 describe("isAllowedExternalUrl（Notion）", () => {
   it.each(["https://www.notion.so/33333333333343338333333333333333?d=d1", "https://notion.so/abc", "https://app.notion.com/p/abc"])("Notion のページは開いてよい: %s", (url) => {
     assert.isTrue(isAllowedExternalUrl(url));

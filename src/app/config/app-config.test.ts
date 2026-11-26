@@ -93,6 +93,24 @@ describe("decodeAppConfig", () => {
     }));
 });
 
+describe("Google Calendar のアカウント", () => {
+  it.effect("Calendar のアカウントを書ける（認証は gws に任せる）。LLM Profile を結び付ける。書かなければ空", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).calendarAccounts, []);
+
+      const config = yield* decodeAppConfig({ ...validConfig, calendarAccounts: [{ kind: "calendar", id: "cal", llmProfile: "personal" }] });
+
+      assert.strictEqual(config.calendarAccounts[0]?.id, "cal");
+      assert.strictEqual(config.calendarAccounts[0]?.resolvedLlmProfile.provider, "anthropic");
+    }));
+
+  it.effect("id はほかのアカウントと重ならないようにし、ない LLM Profile はエラーにする", () =>
+    Effect.gen(function* () {
+      assert.include(yield* invalidReason({ ...validConfig, calendarAccounts: [{ kind: "calendar", id: "work" }] }), "重複");
+      assert.include(yield* invalidReason({ ...validConfig, calendarAccounts: [{ kind: "calendar", id: "cal", llmProfile: "missing" }] }), "calendarAccounts[0].llmProfile");
+    }));
+});
+
 describe("Notion のアカウント", () => {
   const notion = { kind: "notion", id: "notes", userId: "11111111-1111-4111-8111-111111111111", userAgent: "Mozilla/5.0 TestBrowser" };
 

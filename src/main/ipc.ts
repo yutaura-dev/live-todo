@@ -60,15 +60,19 @@ export const decodeFilterPreviewRequest = Schema.decodeUnknownEffect(
   }),
 );
 
+const isCalendarUrl = (parsed: URL) =>
+  parsed.hostname === "calendar.google.com" || (parsed.hostname === "www.google.com" && parsed.pathname.startsWith("/calendar/"));
+
 const NOTION_HOSTS = new Set(["notion.so", "www.notion.so", "app.notion.com", "www.notion.com"]);
 
-/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue、Slack、Gmail、Notion）だけに絞る */
+/** 外部のブラウザで開いてよい URL。Task の元の項目（GitHub の PR / issue、Slack、Gmail、Notion、Calendar）だけに絞る */
 export function isAllowedExternalUrl(url: string): boolean {
   if (!URL.canParse(url)) return false;
   const parsed = new URL(url);
   return (
     parsed.protocol === "https:" &&
     (parsed.hostname === "github.com" || parsed.hostname === "mail.google.com" || /^[a-z0-9][a-z0-9-]*(\.enterprise)?\.slack\.com$/.test(parsed.hostname) ||
-      NOTION_HOSTS.has(parsed.hostname))
+      NOTION_HOSTS.has(parsed.hostname) ||
+      isCalendarUrl(parsed))
   );
 }
