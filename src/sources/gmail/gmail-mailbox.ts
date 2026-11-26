@@ -15,6 +15,8 @@ export type StoredMail = {
   trashed: boolean;
   /** 日程が過ぎた（または取り消された）予定の招待 */
   pastInvite: boolean;
+  /** メルマガ・お知らせとして届いた（kind が personal でも、対応が要るとして移したもの） */
+  bulk?: boolean;
 };
 
 type Headers = Partial<Record<MailHeader, string>>;
@@ -64,11 +66,13 @@ const byReceived = (a: StoredMail, b: StoredMail) => a.receivedAt - b.receivedAt
 export function senderGroups(mails: ReadonlyArray<StoredMail>, now: number): SenderGroup[] {
   const bySender = new Map<string, StoredMail[]>();
   for (const mail of mails) {
-    if (mail.kind !== "newsletter" && mail.kind !== "notification") continue;
+    if (mail.kind !== "newsletter" && mail.kind !== "notification" && mail.bulk !== true) continue;
     bySender.set(mail.senderKey, [...(bySender.get(mail.senderKey) ?? []), mail]);
   }
-  return [...bySender].map(([senderKey, group]) => {
-    const sorted = group.toSorted(byReceived);
+  return [...bySender].map(([senderKey, all]) => {
+    // 人からのメールの側に移したものは、まとまりを残すためだけに数え、未処理や名前・種類には使わない
+    const group = all.filter((mail) => mail.kind === "newsletter" || mail.kind === "notification");
+    const sorted = (group.length === 0 ? all : group).toSorted(byReceived);
     const recent = sorted.filter((mail) => now - mail.receivedAt <= STATS_DAYS * DAY_MS);
     const discarded = recent.filter(isDiscarded).length;
     const notifications = group.filter((mail) => mail.kind === "notification").length;
@@ -76,9 +80,9 @@ export function senderGroups(mails: ReadonlyArray<StoredMail>, now: number): Sen
       senderKey,
       senderName: sorted.at(-1)!.senderName,
       kind: notifications * 2 > group.length ? "notification" : "newsletter",
-      pending: sorted.filter(isPending).map((mail) => mail.messageId),
-      pendingSubjects: sorted.filter(isPending).map((mail) => mail.subject).toReversed(),
-      pastInvites: sorted.filter((mail) => isPending(mail) && mail.pastInvite).map((mail) => mail.messageId),
+      pending: group.toSorted(byReceived).filter(isPending).map((mail) => mail.messageId),
+      pendingSubjects: group.toSorted(byReceived).filter(isPending).map((mail) => mail.subject).toReversed(),
+      pastInvites: group.toSorted(byReceived).filter((mail) => isPending(mail) && mail.pastInvite).map((mail) => mail.messageId),
       received: recent.length,
       discarded,
       suggestUnsubscribe: recent.length >= MIN_RECEIVED_FOR_SUGGESTION && discarded >= recent.length * DISCARD_RATIO_FOR_SUGGESTION,

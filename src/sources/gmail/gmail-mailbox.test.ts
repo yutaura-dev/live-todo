@@ -49,6 +49,11 @@ describe("senderGroups（メルマガ・お知らせを送り主ごとにまと�
     assert.deepStrictEqual(group!.pendingSubjects, ["新しい", "古い"]);
   });
 
+  it("対応が要るとして人からのメールの側に移したメールは、送り主のまとまりを残したまま、未処理の数に入れない（まとまりが消えたり出てきたりしないように）", () => {
+    const [group] = senderGroups([mail({ messageId: "a", kind: "personal", bulk: true })], NOW);
+    assert.deepInclude(group, { senderKey: "news@shop.example", pending: [] });
+  });
+
   it("人からのメール・自分のメールはまとめない", () => {
     assert.deepStrictEqual(senderGroups([mail({ kind: "personal" }), mail({ kind: "mine" })], NOW), []);
   });

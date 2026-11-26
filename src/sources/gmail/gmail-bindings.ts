@@ -31,6 +31,7 @@ export const loadMails = Effect.fnUntraced(function* (accountId: string) {
       subject: row.subject,
       receivedAt: row.receivedAt,
       kind: effectiveKind(row),
+      bulk: row.kind === "newsletter" || row.kind === "notification",
       inInbox: row.inInbox,
       unread: row.unread,
       trashed: row.trashed,
