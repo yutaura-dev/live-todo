@@ -9,6 +9,7 @@ import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
 import { withSlackSession } from "../app/slack-session.js";
+import { releaseUntouchedInboxTasks, runSlackConversationTriage } from "../app/slack-conversations.js";
 import { captureSlackSession } from "./slack-connect.js";
 import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js";
 import { slackWrite } from "../app/slack-write.js";
@@ -167,8 +168,25 @@ const startSync = Effect.gen(function* () {
     .flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]);
   const planSources = [
     ...config.accounts.filter((account) => account.planNextActions).flatMap((account) => [`github:${account.id}`, `github:${account.id}:watch`]),
-    ...config.slackAccounts.filter((account) => account.planNextActions).map((account) => `slack:${account.id}`),
+    ...config.slackAccounts.filter((account) => account.planNextActions).flatMap((account) => [`slack:${account.id}`, `slack:${account.id}:inbox`]),
   ];
+  // Slack の会話から Task を決める（メッセージ本文を Claude に送るので、Claude Code で考えるのを有効にしたワークスペースだけ）
+  const conversationAccounts = config.slackAccounts.filter((account) => account.planNextActions);
+  for (const account of conversationAccounts) {
+    const released = yield* releaseUntouchedInboxTasks(account.id);
+    if (released > 0) yield* Effect.log(`メッセージ 1 件ごとに作っていた Slack の Task を ${released} 件片付け、会話ごとに考え直す`);
+  }
+  const conversationJobs = conversationAccounts.map((account) => ({
+    name: `agent:slack-conversations:${account.id}`,
+    interval: AGENT_JOB_INTERVAL,
+    run: slackClientFor(account.id).pipe(
+      Effect.flatMap((client) =>
+        runSlackConversationTriage({ accountId: account.id, model: DEPENDENCY_REVIEW_MODEL, maxBudgetUsd: DEPENDENCY_REVIEW_BUDGET_USD }, client),
+      ),
+      Effect.catch((error) => Effect.logWarning("Slack の会話から Task を決められなかった").pipe(Effect.annotateLogs({ reason: errorMessage(error) }))),
+    ),
+    backoffUntil: () => Option.none<DateTime.Utc>(),
+  }));
   const planJobs: ReadonlyArray<SyncJob<never, AgentWorkspace | ClaudeCode | Database | TaskRepository>> =
     planSources.length === 0
       ? []
@@ -217,8 +235,8 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...agentJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob])], { concurrency: 4, discard: true });
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...agentJobs, ...conversationJobs, conflictPlanJob, recurringJob].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs)], { concurrency: 5, discard: true });
 }).pipe(
   // 設定やトークンがなくても画面は開けるようにする（同期だけが止まり、設定画面に理由を出す）
   Effect.catchCause((cause) =>

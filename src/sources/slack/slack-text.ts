@@ -24,6 +24,15 @@ const hasContent = (line: string) => line.replace(/@\S+|:[a-z0-9_+'-]+:|\s/gi, "
 
 const cut = (line: string) => (line.length > TITLE_LENGTH ? `${line.slice(0, TITLE_LENGTH)}…` : line);
 
+/** メッセージの本文全体を、読める形に直す（AI に会話を渡すため） */
+export function readableSlackText(text: string, names: { users: ReadonlyMap<string, string> }): string {
+  return text
+    .split("\n")
+    .map((line) => readable(line, names))
+    .join("\n")
+    .trim();
+}
+
 /** メッセージの本文から、Task のタイトルにする 1 行を作る */
 export function slackTitleLine(text: string, names: { users: ReadonlyMap<string, string> }): string {
   const lines = text

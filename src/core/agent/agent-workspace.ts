@@ -36,7 +36,8 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
   /** PR の今の状態と、自分のアカウント（JSON）。次にやることを考えるときに、確認の手順を作らせないため */
   pullRequestState(pullUrl: string): Effect.Effect<string, AgentWorkspaceError>;
   /** Task の情報をファイルに書き出す（リポジトリの要らない調査のため）。書き出したフォルダのパスを返す */
-  writeContext(taskId: number, files: Readonly<Record<string, string>>): Effect.Effect<string, AgentWorkspaceError>;
+  /** owner が数なら Task ごとの場所、文字列なら名前つきの場所（Task になる前の Slack の会話など）。名前は英小文字・数字・ハイフンだけ */
+  writeContext(owner: number | string, files: Readonly<Record<string, string>>): Effect.Effect<string, AgentWorkspaceError>;
 }>()("live-todo/core/agent/AgentWorkspace") {
   static readonly layer = (root: string) =>
     Layer.effect(
@@ -99,8 +100,9 @@ export class AgentWorkspace extends Context.Service<AgentWorkspace, {
           return { cwd: dir, contextDir, headSha: headShaOf(view) };
         });
 
-        const writeContext = Effect.fn("AgentWorkspace.writeContext")(function* (taskId: number, files: Readonly<Record<string, string>>) {
-          const contextDir = `${root}/task-${taskId}/context`;
+        const writeContext = Effect.fn("AgentWorkspace.writeContext")(function* (owner: number | string, files: Readonly<Record<string, string>>) {
+          if (typeof owner === "string" && !/^[a-z0-9][a-z0-9-]*$/.test(owner)) return yield* new AgentWorkspaceError({ message: `作業場所の名前が不正: ${owner}` });
+          const contextDir = typeof owner === "number" ? `${root}/task-${owner}/context` : `${root}/${owner}/context`;
           yield* fs.makeDirectory(contextDir, { recursive: true }).pipe(Effect.mapError(fail("作業場所を作れない")));
           for (const [name, content] of Object.entries(files)) {
             // パスに使うので、決まった形のファイル名だけを受け付ける

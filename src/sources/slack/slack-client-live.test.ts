@@ -200,6 +200,25 @@ describe("SlackClientLive", () => {
       assert.strictEqual(requests[0]?.form.get("include_users"), "true");
     }));
 
+  it.effect("スレッドの会話は conversations.replies で、DM の会話は conversations.history でその時刻までの直近を、古い順に返す", () =>
+    Effect.gen(function* () {
+      const { requests, layer } = fakeSlack((method) =>
+        method === "conversations.replies"
+          ? { body: { ok: true, messages: [{ ts: "1.0", text: "親", user: "U2" }, { ts: "2.0", text: "返信", user: "U1" }] } }
+          : { body: { ok: true, messages: [{ ts: "9.0", text: "新しい", user: "U2" }, { ts: "8.0", text: "古い", user: "U1" }] } },
+      );
+
+      const thread = yield* withClient(layer, (client) => client.conversation("C1", { threadTs: "1.0" }));
+      const dm = yield* withClient(layer, (client) => client.conversation("D1", { latestTs: "9.0" }));
+
+      assert.deepStrictEqual(thread.map((message) => message.text), ["親", "返信"]);
+      assert.deepStrictEqual(dm.map((message) => message.text), ["古い", "新しい"]);
+      assert.deepStrictEqual(
+        [requests[1]?.form.get("channel"), requests[1]?.form.get("latest"), requests[1]?.form.get("inclusive"), requests[1]?.form.get("limit")],
+        ["D1", "9.0", "true", "30"],
+      );
+    }));
+
   it.effect("セッションの持ち主（自分）とワークスペースを auth.test で確かめる", () =>
     Effect.gen(function* () {
       const { layer } = fakeSlack(() => ({ body: { ok: true, user_id: "U1", user: "me", team: "Acme", url: "https://acme.slack.com/" } }));

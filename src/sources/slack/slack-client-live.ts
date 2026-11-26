@@ -152,6 +152,17 @@ export const SlackClientLive = (options: SlackClientLiveOptions) =>
             "saved-api/updateSavedMessage",
           ).pipe(Effect.asVoid),
         removeSaved: (channel, ts) => call("saved.delete", { item_type: "message", item_id: channel, ts }, OkBody).pipe(Effect.asVoid),
+        conversation: (channel, options) =>
+          ("threadTs" in options
+            ? call("conversations.replies", { channel, ts: options.threadTs, limit: "100" }, MessagesBody)
+            : call("conversations.history", { channel, latest: options.latestTs, inclusive: "true", limit: "30" }, MessagesBody)
+          ).pipe(
+            Effect.map((body) =>
+              (body.messages ?? [])
+                .map((message) => ({ ts: message.ts, user: message.user, text: message.text ?? "" }))
+                .toSorted((a, b) => Number(a.ts) - Number(b.ts)),
+            ),
+          ),
         searchMessages: (query, page = 1) =>
           call("search.messages", { query, sort: "timestamp", sort_dir: "desc", count: "100", page: String(page) }, SearchBody).pipe(
             Effect.map((body) => ({

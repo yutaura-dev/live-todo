@@ -42,6 +42,11 @@ export class SlackClient extends Context.Service<SlackClient, {
   searchMessages(query: string, page?: number): Effect.Effect<{ total: number; pages: number; matches: ReadonlyArray<SlackSearchMatch> }, SlackClientError>;
   /** 自分が入っているユーザーグループ（グループへのメンションを探すため） */
   myUserGroups(userId: string): Effect.Effect<ReadonlyArray<{ id: string; handle: string }>, SlackClientError>;
+  /** 会話のメッセージ（古い順）。threadTs ならそのスレッド、latestTs なら DM などのその時刻までの直近 */
+  conversation(
+    channel: string,
+    options: { threadTs: string } | { latestTs: string },
+  ): Effect.Effect<ReadonlyArray<{ ts: string; user: string | undefined; text: string }>, SlackClientError>;
   /** セッションの持ち主（自分）とワークスペース */
   readonly authTest: Effect.Effect<{ userId: string; user: string; team: string }, SlackClientError>;
 }>()("live-todo/sources/slack/SlackClient") {}
