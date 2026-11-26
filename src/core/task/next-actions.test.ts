@@ -88,7 +88,7 @@ describe("AI が考えた次にやること（依存更新の PR）", () => {
 });
 
 describe("待つ条件", () => {
-  it("AI が返した待つ条件を、アプリが確かめられる形で手順に持たせる（条件がなければ持たせない）", () => {
+  it("AI が返した待つ条件を、アプリが確かめられる形で手順に持たせる（何を待つか分からなければ、元の項目の動きを待つ）", () => {
     const plan = planFromProposedSteps(
       [
         {
@@ -109,7 +109,7 @@ describe("待つ条件", () => {
       [
         { kind: "pull_request_opened", repository: "acme/app", query: "@changesets/cli v3" },
         { kind: "review_submitted", pullUrl: "https://github.com/acme/app/pull/1", since: "2026-11-25T00:00:00.000Z" },
-        undefined,
+        { kind: "item_changed", since: "2026-11-25T00:00:00.000Z" },
       ],
     );
   });

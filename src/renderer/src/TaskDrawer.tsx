@@ -258,6 +258,8 @@ function waitHint(until: WaitCondition): string {
       return "レビューが付いたら、アプリが自動で済ませます";
     case "merged":
       return "merge されたら、アプリが自動で済ませます";
+    case "item_changed":
+      return "元の項目に動き（コメント・レビューなど）があったら、アプリが自動で済ませます";
   }
 }
 
@@ -326,12 +328,16 @@ function StepItem(props: {
           ))}
         </div>
       )}
-      {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push" || step.kind === "wait") && (
+      {isCurrent && step.kind === "wait" && (
+        <div className="step-actions">
+          <span className="field-hint">{waitHint(step.until ?? { kind: "item_changed" })}</span>
+        </div>
+      )}
+      {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push") && (
         <div className="step-actions">
           {step.kind === "fix_and_push" && <span className="field-hint">アプリからの修正はまだできません。修正して push したら「済んだ」を押してください</span>}
-          {step.kind === "wait" && step.until !== undefined && <span className="field-hint">{waitHint(step.until)}</span>}
           <button type="button" className="quiet-button" onClick={() => void run(api.completeStep(detail.id, step.id))}>
-            {step.kind === "wait" ? "待ち終わった" : "済んだ"}
+            済んだ
           </button>
         </div>
       )}

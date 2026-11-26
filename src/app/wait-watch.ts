@@ -1,13 +1,13 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { Cause, Effect, Option, Schema } from "effect";
 import { Database } from "../core/db/database.js";
-import { sourceItems, taskLinks, tasks } from "../core/db/schema.js";
+import { activities, sourceItems, taskLinks, tasks } from "../core/db/schema.js";
 import { type ActionStep, completeStep, currentSteps, decodePlan, type WaitCondition } from "../core/task/next-actions.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 import type { GitHubClient } from "../sources/github/github-adapter.js";
 
-// 待ちは Todo か進行中の Task にしかない（要確認・完了などは見ない）
-const WATCHED_STATUSES = ["todo", "in_progress"] as const;
+// 終わっていない Task の待ちを見張る（要確認のままでも、待っていることは進む）
+const WATCHED_STATUSES = ["needs_review", "todo", "in_progress"] as const;
 
 const PullBody = Schema.Struct({ merged: Schema.Boolean });
 const ReviewsBody = Schema.Array(Schema.Struct({ submitted_at: Schema.optional(Schema.NullOr(Schema.String)) }));
@@ -18,9 +18,21 @@ const pullApiUrl = (pullUrl: string) => {
 };
 
 /** 条件が成り立っていれば、何が起きたかの説明を返す */
-const satisfied = (client: GitHubClient["Service"], until: WaitCondition, ownUrls: ReadonlySet<string>) =>
+const satisfied = (client: GitHubClient["Service"], until: WaitCondition, ownUrls: ReadonlySet<string>, taskId: number) =>
   Effect.gen(function* () {
     switch (until.kind) {
+      case "item_changed": {
+        const db = yield* Database;
+        const since = until.since ?? (yield* waitingSince(taskId));
+        const [moved] = yield* db
+          .select({ id: activities.id })
+          .from(activities)
+          .innerJoin(taskLinks, eq(taskLinks.sourceItemId, activities.sourceItemId))
+          .where(and(eq(taskLinks.taskId, taskId), gt(activities.occurredAt, since)))
+          .limit(1)
+          .pipe(Effect.orDie);
+        return moved === undefined ? Option.none<string>() : Option.some("元の項目に動きがあった");
+      }
       case "pull_request_opened": {
         // Task 自身が追う PR は、待っている PR ではない（待つ理由の PR がタイトルに同じ語を含むことがある）
         const found = (yield* client.searchOpenPullRequests(until.repository, until.query)).urls.filter((url) => !ownUrls.has(url));
@@ -43,6 +55,15 @@ const satisfied = (client: GitHubClient["Service"], until: WaitCondition, ownUrl
         return body.merged ? Option.some(`merge された: ${until.pullUrl}`) : Option.none<string>();
       }
     }
+  });
+
+/** 何を待つかを持たない古い待つ手順の、待ち始めた時刻の代わり（次にやることが最後に変わった時刻） */
+const waitingSince = (taskId: number) =>
+  Effect.gen(function* () {
+    const taskRepository = yield* TaskRepository;
+    const changes = yield* taskRepository.listChanges(taskId);
+    const planChanged = changes.filter((change) => change.field === "next_actions").at(-1);
+    return planChanged?.occurredAt ?? Option.getOrThrow(yield* taskRepository.findTask(taskId)).createdAt;
   });
 
 /**
@@ -74,15 +95,16 @@ export const checkWaitConditions = (accountId: string, client: GitHubClient["Ser
       const task = Option.getOrUndefined(yield* taskRepository.findTask(taskId));
       const plan = task === undefined ? Option.none() : decodePlan(task.nextActions);
       if (Option.isNone(plan)) continue;
-      const waits = currentSteps(plan.value).filter((step): step is ActionStep & { until: WaitCondition } => step.kind === "wait" && "until" in step && step.until !== undefined);
+      const waits = currentSteps(plan.value).filter((step): step is ActionStep => step.kind === "wait");
       let next = plan.value;
       const reasons: string[] = [];
       for (const step of waits) {
         // 1 件を確かめられなくても（PR が消えた・応答の形が違うなど）、ほかの Task は確かめる
-        const outcome = yield* satisfied(client, step.until, trackedUrls.get(taskId) ?? new Set()).pipe(
+        const until: WaitCondition = step.until ?? { kind: "item_changed" };
+        const outcome = yield* satisfied(client, until, trackedUrls.get(taskId) ?? new Set(), taskId).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("待つ条件を確かめられない").pipe(
-              Effect.annotateLogs({ taskId, kind: step.until.kind, cause: Cause.pretty(cause) }),
+              Effect.annotateLogs({ taskId, kind: until.kind, cause: Cause.pretty(cause) }),
               Effect.as(Option.none<string>()),
             ),
           ),

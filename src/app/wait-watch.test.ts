@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { TestDatabase } from "../core/db/test-database.js";
 import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import type { NextActionPlan } from "../core/task/next-actions.js";
@@ -10,6 +11,7 @@ import { gitHubClientStub } from "../sources/github/test-client.js";
 import { checkWaitConditions } from "./wait-watch.js";
 
 let itemNumber = 0;
+let lastItemId = 0;
 const waitingFor = (until: unknown, options: { source?: string; status?: TaskStatus } = {}) =>
   Effect.gen(function* () {
     const sourceItems = yield* SourceItemRepository;
@@ -20,11 +22,12 @@ const waitingFor = (until: unknown, options: { source?: string; status?: TaskSta
     yield* tasks.linkItem(task.id, item.id, "tracks");
     const plan = {
       steps: [
-        { id: "w", kind: "wait", title: "CLI v3 の PR が出るのを待つ", effort: "easy", mode: "serial", status: "todo", until },
+        { id: "w", kind: "wait", title: "CLI v3 の PR が出るのを待つ", effort: "easy", mode: "serial", status: "todo", ...(until === undefined ? {} : { until }) },
         { id: "m", kind: "manual", title: "移行する", effort: "tedious", mode: "serial", status: "todo" },
       ],
     } as NextActionPlan;
     yield* tasks.updateTask(task.id, { nextActions: plan });
+    lastItemId = item.id;
     return task.id;
   });
 
@@ -65,6 +68,39 @@ describe("checkWaitConditions", () => {
       const client = gitHubClientStub({ searchOpenPullRequests: () => Effect.succeed({ urls: [ownUrl] }) });
 
       assert.strictEqual(yield* checkWaitConditions("personal", client), 0);
+      assert.deepStrictEqual(yield* currentOf(id), ["w"]);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("要確認の Task の待つ手順も見張る", () =>
+    Effect.gen(function* () {
+      const id = yield* waitingFor(opened, { status: "needs_review" });
+      const client = gitHubClientStub({ searchOpenPullRequests: () => Effect.succeed({ urls: ["https://github.com/acme/app/pull/240"] }) });
+
+      assert.strictEqual(yield* checkWaitConditions("personal", client), 1);
+      assert.deepStrictEqual(yield* currentOf(id), ["m"]);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("何を待つかが分からない待つ手順は、元の項目に待ち始めたあとで動き（新しいコメントなど）があったら済ませる", () =>
+    Effect.gen(function* () {
+      const id = yield* waitingFor(undefined);
+      const itemId = lastItemId;
+
+      assert.strictEqual(yield* checkWaitConditions("personal", gitHubClientStub()), 0);
+
+      yield* TestClock.adjust("1 minute");
+      yield* (yield* SourceItemRepository).recordActivity(itemId, "changed");
+
+      assert.strictEqual(yield* checkWaitConditions("personal", gitHubClientStub()), 1);
+      assert.deepStrictEqual(yield* currentOf(id), ["m"]);
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("待ち始める前の動きでは済ませない", () =>
+    Effect.gen(function* () {
+      const id = yield* waitingFor({ kind: "item_changed", since: "2100-01-01T00:00:00.000Z" });
+      yield* TestClock.adjust("1 minute");
+      yield* (yield* SourceItemRepository).recordActivity(lastItemId, "changed");
+
+      assert.strictEqual(yield* checkWaitConditions("personal", gitHubClientStub()), 0);
       assert.deepStrictEqual(yield* currentOf(id), ["w"]);
     }).pipe(Effect.provide(TestDatabase)));
 

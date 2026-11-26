@@ -12,7 +12,9 @@ type StepBase = { id: string; title: string; effort: Effort; mode: "serial" | "p
 export type WaitCondition =
   | { kind: "pull_request_opened"; repository: string; query: string }
   | { kind: "review_submitted"; pullUrl: string; since?: string }
-  | { kind: "merged"; pullUrl: string };
+  | { kind: "merged"; pullUrl: string }
+  /** 何を待つかが分からない待ち（返信待ちなど）。元の項目に since より後で動きがあったら済ませる */
+  | { kind: "item_changed"; since?: string };
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
 /** resolve_conflicts: アプリが Claude Code にコンフリクトを直させる / push_conflict_resolution: 直した内容を確かめて push する */
 export type ActionStep = StepBase & {
@@ -126,7 +128,7 @@ function waitConditionOf(proposed: ProposedWaitCondition | undefined, now: strin
     case "merged":
       return PULL_URL_PATTERN.test(proposed.pullUrl) ? { kind: "merged", pullUrl: proposed.pullUrl } : undefined;
     case "none":
-      return undefined;
+      return now === undefined ? { kind: "item_changed" } : { kind: "item_changed", since: now };
   }
 }
 
@@ -237,6 +239,7 @@ const WaitConditionSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("pull_request_opened"), repository: Schema.String, query: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("review_submitted"), pullUrl: Schema.String, since: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal("merged"), pullUrl: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("item_changed"), since: Schema.optionalKey(Schema.String) }),
 ]);
 const ActionStepSchema = Schema.Struct({ ...StepBaseSchema, kind: Schema.Literals(ACTION_KINDS), until: Schema.optionalKey(WaitConditionSchema) });
 interface DecisionStepEncoded extends Schema.Struct.Encoded<typeof StepBaseSchema> {
