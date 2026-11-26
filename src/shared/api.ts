@@ -81,6 +81,9 @@ export type RecurrenceScheduleView = { kind: "monthly"; day: number; leadDays: n
 /** 定期の Task の決まり */
 export type RecurringTaskView = { id: number; title: string; note: string; schedule: RecurrenceScheduleView; active: boolean; lastPeriod: string | null };
 
+/** 作る日が近い定期の Task の予告（Todo にゴーストとして出す） */
+export type RecurringGhost = { ruleId: number; title: string; period: string; date: { year: number; month: number; day: number }; daysLeft: number };
+
 export type Outcome = { ok: true; detail?: string } | { ok: false; message: string };
 
 export type FilterPreviewRequest = {
@@ -117,6 +120,9 @@ export interface LiveTodoApi {
   /** Task を手で追加する */
   addTask(input: { title: string; brief?: string }): Promise<Outcome>;
   recurringList(): Promise<RecurringTaskView[]>;
+  recurringGhosts(): Promise<RecurringGhost[]>;
+  /** 予告している月の分を、作る日を待たずに今すぐ作る */
+  recurringCreateNow(ruleId: number): Promise<Outcome>;
   /** 定期の Task の決まりを登録する。includeCurrent なら、時期を過ぎた今月の分もすぐに作る */
   recurringCreate(input: { title: string; note: string; schedule: RecurrenceScheduleView; includeCurrent: boolean }): Promise<Outcome>;
   /** Task をもとに定期の Task を作る（タイトルと次にやることをひな形にする） */

@@ -17,6 +17,8 @@ export const IPC_CHANNELS = {
   recurringCreate: "recurring:create",
   recurringFromTask: "recurring:from-task",
   recurringUpdate: "recurring:update",
+  recurringGhosts: "recurring:ghosts",
+  recurringCreateNow: "recurring:create-now",
   taskDetail: "board:task-detail",
   mergePlan: "board:merge-plan",
   merge: "board:merge",

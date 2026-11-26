@@ -3,7 +3,15 @@ import { Effect, Option } from "effect";
 import { TestDatabase } from "../core/db/test-database.js";
 import { currentSteps, decodePlan, type NextActionPlan } from "../core/task/next-actions.js";
 import { TaskRepository } from "../core/task/task-repository.js";
-import { createRecurringFromTask, createRecurringTask, listRecurringTasks, runRecurringTasks, updateRecurringActive } from "./recurring-tasks.js";
+import {
+  createRecurringFromTask,
+  createRecurringNow,
+  createRecurringTask,
+  listRecurringTasks,
+  runRecurringTasks,
+  upcomingRecurringTasks,
+  updateRecurringActive,
+} from "./recurring-tasks.js";
 
 const monthly = (day: number, leadDays = 0) => ({ kind: "monthly" as const, day, leadDays });
 const template: NextActionPlan = {
@@ -70,6 +78,32 @@ describe("定期の Task", () => {
       const id = yield* createRecurringTask({ title: "A", note: "", schedule: monthly(1) }, { year: 2026, month: 11, day: 26 });
       yield* updateRecurringActive(id, false);
 
+      assert.strictEqual(yield* runRecurringTasks({ year: 2026, month: 12, day: 1 }), 0);
+    }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("ゴースト（作る日が近い定期の Task の予告）", () => {
+  it.effect("作る日の 7 日前から、何月分か・作る日・残りの日数つきで予告する。止めた決まりは予告しない", () =>
+    Effect.gen(function* () {
+      yield* createRecurringTask({ title: "請求書を送る", note: "", schedule: monthly(1) }, { year: 2026, month: 11, day: 20 });
+      const stopped = yield* createRecurringTask({ title: "止めたもの", note: "", schedule: monthly(1) }, { year: 2026, month: 11, day: 20 });
+      yield* updateRecurringActive(stopped, false);
+
+      assert.deepStrictEqual(yield* upcomingRecurringTasks({ year: 2026, month: 11, day: 23 }), []);
+      assert.deepStrictEqual(
+        (yield* upcomingRecurringTasks({ year: 2026, month: 11, day: 26 })).map(({ title, date, daysLeft }) => ({ title, date, daysLeft })),
+        [{ title: "請求書を送る（12月分）", date: { year: 2026, month: 12, day: 1 }, daysLeft: 5 }],
+      );
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("「今すぐ作る」で予告していた月の分の Task を作り、その月の分はもう作らない", () =>
+    Effect.gen(function* () {
+      const id = yield* createRecurringTask({ title: "請求書を送る", note: "", schedule: monthly(1) }, { year: 2026, month: 11, day: 20 });
+
+      yield* createRecurringNow(id, { year: 2026, month: 11, day: 26 });
+
+      assert.deepStrictEqual((yield* tasksOf).map((task) => [task.title, task.period]), [["請求書を送る（12月分）", "2026-12"]]);
+      assert.deepStrictEqual(yield* upcomingRecurringTasks({ year: 2026, month: 11, day: 26 }), []);
       assert.strictEqual(yield* runRecurringTasks({ year: 2026, month: 12, day: 1 }), 0);
     }).pipe(Effect.provide(TestDatabase)));
 });

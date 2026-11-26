@@ -14,7 +14,9 @@ import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js
 import { slackWrite } from "../app/slack-write.js";
 import {
   createRecurringFromTask,
+  createRecurringNow,
   createRecurringTask,
+  upcomingRecurringTasks,
   listRecurringTasks,
   localToday,
   runRecurringTasks,
@@ -516,6 +518,15 @@ function registerTasksAndRecurring() {
           rules.map((rule) => ({ id: rule.id, title: rule.title, note: rule.note, schedule: rule.schedule, active: rule.active, lastPeriod: rule.lastPeriod })),
         ),
       ),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.recurringGhosts, () => runtime.runPromise(localToday.pipe(Effect.flatMap(upcomingRecurringTasks))));
+  ipcMain.handle(IPC_CHANNELS.recurringCreateNow, (_event, input: unknown) =>
+    outcomeOf(
+      Effect.gen(function* () {
+        const ruleId = yield* Schema.decodeUnknownEffect(Schema.Int.check(Schema.isGreaterThan(0)))(input);
+        yield* createRecurringNow(ruleId, yield* localToday);
+      }),
     ),
   );
   ipcMain.handle(IPC_CHANNELS.recurringCreate, (_event, input: unknown) =>

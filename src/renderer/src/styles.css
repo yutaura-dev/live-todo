@@ -1185,6 +1185,16 @@ button:disabled {
   inline-size: 4.5rem;
 }
 
+.card--ghost {
+  opacity: 0.55;
+  border-style: dashed;
+  background: transparent;
+}
+
+.card--ghost:hover {
+  opacity: 0.85;
+}
+
 .add-task {
   display: flex;
   gap: 8px;

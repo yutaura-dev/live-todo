@@ -10,7 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot } from "../../shared/api.js";
+import type { RecurringGhost, Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot } from "../../shared/api.js";
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
 import { TaskDrawer } from "./TaskDrawer.js";
@@ -34,9 +34,11 @@ export function App() {
   const [openTaskId, setOpenTaskId] = useState<number | null>(null);
   const [undo, setUndo] = useState<{ taskId: number; title: string; previous: MovableStatus } | null>(null);
   const [expiringTokens, setExpiringTokens] = useState<{ accountId: string; daysLeft: number }[]>([]);
+  const [ghosts, setGhosts] = useState<RecurringGhost[]>([]);
 
   const load = useCallback(async () => {
     void api.settings().then((snapshot) => setExpiringTokens(expiringTokensOf(snapshot)));
+    void api.recurringGhosts().then(setGhosts);
     try {
       const next = await api.board();
       // カードがレーンを移ったときだけ動かす。何も変わらない定期の読み直しでアニメーションさせない
@@ -159,7 +161,13 @@ export function App() {
         <DndContext sensors={sensors} onDragEnd={onDragEnd}>
           <main className="board">
             {board.columns.map((column) => (
-              <Column key={column.id} id={column.id} title={column.title} cards={column.cards}>
+              <Column
+                key={column.id}
+                id={column.id}
+                title={column.title}
+                cards={column.cards}
+                extra={column.id === "todo" && ghosts.length > 0 ? ghosts.map((ghost) => <GhostCard key={`${ghost.ruleId}:${ghost.period}`} ghost={ghost} onCreated={load} />) : undefined}
+              >
                 {column.cards.map((card) => (
                   <Card
                     key={card.id}
@@ -274,7 +282,7 @@ const EMPTY_MESSAGES: Record<BoardColumnId, string> = {
   done: "完了した Task はまだありません。",
 };
 
-function Column(props: { id: BoardColumnId; title: string; cards: readonly BoardCard[]; children: React.ReactNode }) {
+function Column(props: { id: BoardColumnId; title: string; cards: readonly BoardCard[]; children: React.ReactNode; extra?: React.ReactNode }) {
   // 処理中と待ちは、アプリが手順や裏の処理から出し分ける列なので、ドラッグでは入れない
   const { setNodeRef, isOver } = useDroppable({ id: props.id, disabled: props.id === "agent_running" || props.id === "waiting" });
   return (
@@ -288,7 +296,8 @@ function Column(props: { id: BoardColumnId; title: string; cards: readonly Board
         <span className="count">{props.cards.length}</span>
       </h2>
       <div className="column-body">
-        {props.cards.length === 0 ? <p className="empty">{EMPTY_MESSAGES[props.id]}</p> : props.children}
+        {props.cards.length === 0 ? props.extra === undefined && <p className="empty">{EMPTY_MESSAGES[props.id]}</p> : props.children}
+        {props.extra}
       </div>
     </section>
   );
@@ -460,5 +469,33 @@ function AddTask({ onAdded }: { onAdded: () => Promise<unknown> }) {
       </button>
       {problem && <span className="problem">{problem}</span>}
     </form>
+  );
+}
+
+/** 作る日が近い定期の Task の予告。まだ本当の Task ではないので、ドラッグも削除もできない */
+function GhostCard({ ghost, onCreated }: { ghost: RecurringGhost; onCreated: () => Promise<unknown> }) {
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <article className="card card--ghost" aria-label={`予告: ${ghost.title}`}>
+      <h3 className="card-title">{ghost.title}</h3>
+      <p className="card-meta">
+        定期の Task・あと {ghost.daysLeft} 日（{ghost.date.month}月{ghost.date.day}日に作る）
+      </p>
+      <div className="card-actions">
+        <button
+          type="button"
+          className="open-link"
+          onClick={() =>
+            void api.recurringCreateNow(ghost.ruleId).then(async (outcome) => {
+              if (outcome.ok) await onCreated();
+              else setProblem(outcome.message);
+            })
+          }
+        >
+          今すぐ作る
+        </button>
+      </div>
+      {problem && <p className="problem">{problem}</p>}
+    </article>
   );
 }

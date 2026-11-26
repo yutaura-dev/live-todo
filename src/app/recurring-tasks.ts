@@ -3,7 +3,7 @@ import { DateTime, Effect, Option, Schema } from "effect";
 import { Database } from "../core/db/database.js";
 import { recurringTasks, tasks } from "../core/db/schema.js";
 import { decodePlan, type NextActionPlan, templateOf } from "../core/task/next-actions.js";
-import { type CalendarDate, periodLabel, periodToCreate, RecurrenceSchedule } from "../core/task/recurrence.js";
+import { type CalendarDate, periodLabel, periodToCreate, RecurrenceSchedule, upcomingPeriod } from "../core/task/recurrence.js";
 import { TaskRepository } from "../core/task/task-repository.js";
 
 export class RecurringTaskError extends Schema.TaggedError<RecurringTaskError>()("RecurringTaskError", { message: Schema.String }) {}
@@ -87,17 +87,53 @@ export const updateRecurringTask = Effect.fnUntraced(function* (id: number, patc
     .pipe(Effect.orDie);
 });
 
+type RecurringRule = typeof recurringTasks.$inferSelect;
+
+const scheduleOf = (rule: RecurringRule) => Option.getOrUndefined(Schema.decodeUnknownOption(RecurrenceSchedule)(rule.schedule));
+
 /** 時期が来た決まりから Task を作る。作った数を返す */
 export const runRecurringTasks = Effect.fnUntraced(function* (today: CalendarDate) {
   const db = yield* Database;
-  const taskRepository = yield* TaskRepository;
   const rules = yield* db.select().from(recurringTasks).where(eq(recurringTasks.active, true)).pipe(Effect.orDie);
   let created = 0;
   for (const rule of rules) {
-    const schedule = Option.getOrUndefined(Schema.decodeUnknownOption(RecurrenceSchedule)(rule.schedule));
+    const schedule = scheduleOf(rule);
     if (schedule === undefined) continue;
     const period = Option.getOrUndefined(periodToCreate(schedule, today));
     if (period === undefined || (rule.lastPeriod !== null && period <= rule.lastPeriod)) continue;
+    yield* createForPeriod(rule, period, today);
+    created++;
+  }
+  return created;
+});
+
+/** 作る日が近い（GHOST_WINDOW_DAYS 日以内）、まだ作っていない定期の Task の予告 */
+export const upcomingRecurringTasks = Effect.fnUntraced(function* (today: CalendarDate) {
+  const rules = yield* (yield* Database).select().from(recurringTasks).where(eq(recurringTasks.active, true)).orderBy(asc(recurringTasks.id)).pipe(Effect.orDie);
+  return rules.flatMap((rule) => {
+    const schedule = scheduleOf(rule);
+    const upcoming = schedule === undefined ? Option.none() : upcomingPeriod(schedule, today, rule.lastPeriod);
+    return Option.match(upcoming, {
+      onNone: () => [],
+      onSome: ({ period, date, daysLeft }) => [{ ruleId: rule.id, title: `${rule.title}（${periodLabel(period, today.year)}）`, period, date, daysLeft }],
+    });
+  });
+});
+
+/** 予告している月の分を、作る日を待たずに今すぐ作る */
+export const createRecurringNow = Effect.fnUntraced(function* (ruleId: number, today: CalendarDate) {
+  const [rule] = yield* (yield* Database).select().from(recurringTasks).where(eq(recurringTasks.id, ruleId)).pipe(Effect.orDie);
+  const schedule = rule === undefined ? undefined : scheduleOf(rule);
+  if (rule === undefined || schedule === undefined) return yield* new RecurringTaskError({ message: "定期の Task が見つからない" });
+  const upcoming = upcomingPeriod(schedule, today, rule.lastPeriod);
+  if (Option.isNone(upcoming)) return yield* new RecurringTaskError({ message: "今すぐ作れる月の分がない（もう作ったか、まだ先）" });
+  yield* createForPeriod(rule, upcoming.value.period, today);
+});
+
+const createForPeriod = Effect.fnUntraced(function* (rule: RecurringRule, period: string, today: CalendarDate) {
+  const db = yield* Database;
+  const taskRepository = yield* TaskRepository;
+  {
 
     const unfinished = yield* db
       .select({ period: tasks.recurrencePeriod })
@@ -125,9 +161,7 @@ export const runRecurringTasks = Effect.fnUntraced(function* (today: CalendarDat
     });
     yield* taskRepository.recordChange(task.id, { kind: "created", after: { recurringTaskId: rule.id, period }, unread: true, actor: "agent" });
     yield* db.update(recurringTasks).set({ lastPeriod: period, updatedAt: yield* nowIso }).where(eq(recurringTasks.id, rule.id)).pipe(Effect.orDie);
-    created++;
   }
-  return created;
 });
 
 /** PC のタイムゾーンでの今日の日付 */
