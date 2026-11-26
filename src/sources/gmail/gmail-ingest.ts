@@ -9,6 +9,7 @@ type StoredClassification = Omit<MailClassification, "method"> & { method: MailC
 import { SourceItemRepository } from "../../core/source/source-item-repository.js";
 import { GmailClient, type GmailMessage } from "./gmail-client.js";
 import { senderKeyOf, senderNameOf } from "./gmail-mailbox.js";
+import { inviteEndOf } from "./ics.js";
 
 // 最初に取り込む範囲。送ったメール（返信したか）も含める
 const FIRST_QUERY = "newer_than:14d -in:drafts -in:chats";
@@ -66,6 +67,40 @@ const previousClassification = Effect.fnUntraced(function* (accountId: string, m
   // 案内のないメールに使い回すのは、人からのメールという結果だけ（読む側に倒れるので、見落としにならない）
   if (!isBulk(message) && row.kind !== "personal") return Option.none<StoredClassification>();
   return Option.some<StoredClassification>({ kind: row.kind, probability: row.probability, method: "sender" });
+});
+
+// 予定のファイルを読むのは受信トレイの招待のメールだけで、1 通につき 1 回（本文の全体を取るので数を絞る）
+const INVITE_QUERY = "in:inbox filename:ics";
+
+const checkInvites = Effect.fnUntraced(function* (accountId: string, now: string) {
+  const client = yield* GmailClient;
+  const db = yield* Database;
+  const { ids } = yield* client.listMessages(INVITE_QUERY);
+  if (ids.length === 0) return;
+  const unchecked = yield* db
+    .select({ messageId: gmailMessages.messageId })
+    .from(gmailMessages)
+    .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.inviteChecked, false), inArray(gmailMessages.messageId, [...ids])))
+    .pipe(Effect.orDie);
+  yield* Effect.forEach(
+    unchecked,
+    ({ messageId }) =>
+      Effect.gen(function* () {
+        const calendar = yield* client.calendar(messageId);
+        const end = Option.map(calendar, inviteEndOf);
+        yield* db
+          .update(gmailMessages)
+          .set({
+            inviteChecked: true,
+            inviteState: Option.isSome(end) ? end.value.kind : null,
+            inviteEndsAt: Option.isSome(end) && end.value.kind === "ends" ? end.value.at : null,
+            updatedAt: now,
+          })
+          .where(and(eq(gmailMessages.accountId, accountId), eq(gmailMessages.messageId, messageId)))
+          .pipe(Effect.orDie);
+      }),
+    { concurrency: FETCH_CONCURRENCY },
+  );
 });
 
 /**
@@ -187,6 +222,7 @@ export const ingestGmail = Effect.fnUntraced(function* (options: { accountId: st
       .pipe(Effect.orDie);
   }
   yield* markTrashed(changed.deleted);
+  yield* checkInvites(options.accountId, now);
   yield* items.saveCursor(source, { historyId: changed.historyId });
   return { fetched: ids.length };
 });

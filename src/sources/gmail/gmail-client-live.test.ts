@@ -111,6 +111,25 @@ describe("GmailClientLive（gws でGmail を読む）", () => {
     }).pipe(Effect.provide(fake.layer));
   });
 
+  it.effect("招待のメールの予定のファイルを、添付として付いていれば取りに行って返す", () => {
+    const fake = fakeGws((args) =>
+      args[3] === "get" && args[2] === "messages"
+        ? ok({ id: "m1", threadId: "t1", internalDate: "1", payload: { mimeType: "multipart/mixed", parts: [{ mimeType: "text/plain", body: { data: b64("x") } }, { mimeType: "text/calendar", filename: "invite.ics", body: { attachmentId: "att1" } }] } })
+        : ok({ data: b64("BEGIN:VCALENDAR"), size: 15 }),
+    );
+    return Effect.gen(function* () {
+      const calendar = yield* (yield* client).calendar("m1");
+      assert.deepStrictEqual(calendar, Option.some("BEGIN:VCALENDAR"));
+      assert.deepStrictEqual(fake.calls[1]!.slice(0, 5), ["gmail", "users", "messages", "attachments", "get"]);
+      assert.deepInclude(paramsOf(fake.calls[1]!), { userId: "me", messageId: "m1", id: "att1" });
+    }).pipe(Effect.provide(fake.layer));
+  });
+
+  it.effect("予定のファイルがなければ none", () =>
+    Effect.gen(function* () {
+      assert.isTrue(Option.isNone(yield* (yield* client).calendar("m1")));
+    }).pipe(Effect.provide(fakeGws(() => ok({ id: "m1", threadId: "t1", internalDate: "1", payload: { mimeType: "text/plain", body: { data: b64("x") } } })).layer)));
+
   it.effect("ゴミ箱に入れる", () => {
     const fake = fakeGws(() => ok({ id: "m1" }));
     return Effect.gen(function* () {

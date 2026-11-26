@@ -59,7 +59,7 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
     const { gmail, layer } = setup([]);
     return Effect.gen(function* () {
       yield* run;
-      assert.deepStrictEqual(gmail.state.queries, ["newer_than:14d -in:drafts -in:chats"]);
+      assert.deepStrictEqual(gmail.state.queries.filter((query) => query !== "in:inbox filename:ics"), ["newer_than:14d -in:drafts -in:chats"]);
     }).pipe(Effect.provide(layer));
   });
 
@@ -130,7 +130,7 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
       gmail.state.messages.set("b", gmailMessage({ id: "b" }));
       yield* run;
       assert.deepStrictEqual((yield* stored).map((row) => row.messageId), ["a", "b"]);
-      assert.lengthOf(gmail.state.queries, 2);
+      assert.lengthOf(gmail.state.queries.filter((query) => query !== "in:inbox filename:ics"), 2);
     }).pipe(Effect.provide(layer));
   });
 
@@ -200,6 +200,20 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
       yield* run;
       assert.lengthOf(requests, 1);
       assert.deepInclude((yield* stored)[1], { messageId: "b", kind: "personal", method: "sender" });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("受信トレイの招待のメールは、予定のファイルを読んで、いつ終わるかを覚える（1 回だけ読む）", () => {
+    const { gmail, layer } = setup([gmailMessage({ id: "invite" }), gmailMessage({ id: "plain" })]);
+    gmail.state.calendars.set("invite", ["BEGIN:VCALENDAR", "METHOD:REQUEST", "BEGIN:VEVENT", "DTSTART:20261120T010000Z", "DTEND:20261120T020000Z", "END:VEVENT", "END:VCALENDAR"].join("\r\n"));
+    return Effect.gen(function* () {
+      yield* run;
+      const rows = yield* stored;
+      assert.deepStrictEqual(rows.map((row) => [row.messageId, row.inviteChecked, row.inviteState, row.inviteEndsAt]), [
+        ["invite", true, "ends", Date.UTC(2026, 10, 20, 2)],
+        ["plain", true, null, null],
+      ]);
+      assert.include(gmail.state.queries, "in:inbox filename:ics");
     }).pipe(Effect.provide(layer));
   });
 });

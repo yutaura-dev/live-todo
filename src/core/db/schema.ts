@@ -205,6 +205,10 @@ export const gmailMessages = sqliteTable(
     /** 配信の解除に使う（List-Unsubscribe・List-Unsubscribe-Post） */
     listUnsubscribe: text("list_unsubscribe"),
     listUnsubscribePost: text("list_unsubscribe_post"),
+    /** 招待のメールか（予定のファイルを見たか）と、予定がいつ終わるか。日程が過ぎた招待を片付けるよう勧めるため */
+    inviteChecked: integer("invite_checked", { mode: "boolean" }).notNull().default(false),
+    inviteState: text("invite_state", { enum: ["ends", "open", "cancelled"] }),
+    inviteEndsAt: integer("invite_ends_at"),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [

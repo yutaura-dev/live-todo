@@ -56,6 +56,8 @@ export class GmailClient extends Context.Service<GmailClient, {
   message(id: string): Effect.Effect<Option.Option<GmailMessage>, GmailClientError>;
   /** startHistoryId からの変化。古すぎれば GmailHistoryExpiredError */
   history(startHistoryId: string): Effect.Effect<GmailHistory, GmailClientError>;
+  /** 招待のメールに付いた予定のファイル（text/calendar）の中身。付いていなければ none */
+  calendar(id: string): Effect.Effect<Option.Option<string>, GmailClientError>;
   /** スレッドのメール（古い順、本文つき） */
   thread(threadId: string): Effect.Effect<ReadonlyArray<GmailThreadMessage>, GmailClientError>;
   /** 確認済みにする: 受信トレイから外して（アーカイブ）既読にする（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ） */

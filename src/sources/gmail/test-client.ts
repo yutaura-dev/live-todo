@@ -6,6 +6,7 @@ export function makeTestGmail(initial: ReadonlyArray<GmailMessage> = []) {
   const state = {
     messages: new Map(initial.map((message) => [message.id, message])),
     texts: new Map<string, string>(),
+    calendars: new Map<string, string>(),
     historyId: "100",
     history: undefined as GmailHistory | "expired" | undefined,
     queries: [] as string[],
@@ -29,6 +30,7 @@ export function makeTestGmail(initial: ReadonlyArray<GmailMessage> = []) {
       state.history === "expired"
         ? Effect.fail(new GmailHistoryExpiredError())
         : Effect.succeed(state.history ?? { historyId: state.historyId, added: [], labelsChanged: [], deleted: [] }),
+    calendar: (id) => Effect.sync(() => Option.fromNullishOr(state.calendars.get(id))),
     thread: (threadId) =>
       Effect.sync(() =>
         [...state.messages.values()]

@@ -33,11 +33,16 @@ export class Gws extends Context.Service<Gws, {
 }
 
 const Header = Schema.Struct({ name: Schema.String, value: Schema.String });
-type Part = { mimeType?: string | undefined; headers?: ReadonlyArray<typeof Header.Type> | undefined; body?: { data?: string | undefined } | undefined; parts?: ReadonlyArray<Part> | undefined };
+type Part = {
+  mimeType?: string | undefined;
+  headers?: ReadonlyArray<typeof Header.Type> | undefined;
+  body?: { data?: string | undefined; attachmentId?: string | undefined } | undefined;
+  parts?: ReadonlyArray<Part> | undefined;
+};
 const Part: Schema.Codec<Part> = Schema.Struct({
   mimeType: Schema.optional(Schema.String),
   headers: Schema.optional(Schema.Array(Header)),
-  body: Schema.optional(Schema.Struct({ data: Schema.optional(Schema.String) })),
+  body: Schema.optional(Schema.Struct({ data: Schema.optional(Schema.String), attachmentId: Schema.optional(Schema.String) })),
   parts: Schema.optional(Schema.Array(Schema.suspend((): Schema.Codec<Part> => Part))),
 });
 const Message = Schema.Struct({
@@ -84,6 +89,11 @@ const toMessage = (message: typeof Message.Type): GmailMessage => ({
 const decodeBody = (data: string | undefined) => (data === undefined ? "" : Buffer.from(data, "base64url").toString("utf8"));
 const findPart = (part: Part, mimeType: string): Part | undefined =>
   part.mimeType === mimeType && part.body?.data !== undefined ? part : (part.parts ?? []).map((child) => findPart(child, mimeType)).find((found) => found !== undefined);
+const findCalendar = (part: Part): Part | undefined =>
+  part.mimeType === "text/calendar" && (part.body?.data !== undefined || part.body?.attachmentId !== undefined)
+    ? part
+    : (part.parts ?? []).map(findCalendar).find((found) => found !== undefined);
+const Attachment = Schema.Struct({ data: Schema.String });
 // HTML のメールを正しく描かずにタグを除くだけにする理由: Claude Code に読ませる文脈として足りればよく、描画用の依存を増やさないため
 const htmlToText = (html: string) =>
   html
@@ -153,6 +163,14 @@ export const GmailClientLive = Layer.effect(
       }),
       message,
       history,
+      calendar: Effect.fn("GmailClient.calendar")(function* (id: string) {
+        const message = yield* decodeJson(Message, yield* call(["messages", "get"], { id, format: "full" }));
+        const part = message.payload === undefined ? undefined : findCalendar(message.payload);
+        if (part === undefined) return Option.none<string>();
+        if (part.body?.data !== undefined) return Option.some(decodeBody(part.body.data));
+        const attachment = yield* decodeJson(Attachment, yield* call(["messages", "attachments", "get"], { messageId: id, id: part.body?.attachmentId }));
+        return Option.some(decodeBody(attachment.data));
+      }),
       thread: Effect.fn("GmailClient.thread")(function* (threadId: string) {
         const thread = yield* decodeJson(Thread, yield* call(["threads", "get"], { id: threadId, format: "full" }));
         return (thread.messages ?? []).map((entry): GmailThreadMessage => ({ ...toMessage(entry), text: textOf(entry.payload) }));
