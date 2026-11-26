@@ -817,6 +817,7 @@ function StepItem(props: {
             {stepLink.label}を開く
           </button>
           <span className="field-hint">{hostOf(stepLink.url)}</span>
+          {stepLink.unverified === true && <span className="field-hint">手順の文にあったリンクです。公式のページか確かめていません（{stepLink.url}）</span>}
         </div>
       )}
       {isCurrent && (step.kind === "manual" || step.kind === "fix_and_push") && (

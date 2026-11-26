@@ -22,7 +22,8 @@ export type WaitCondition =
 /** wait: 自分では進められず、何か（依存先の PR が出るなど）を待つ手順。手間は持たないものとして扱う */
 /** resolve_conflicts: アプリが Claude Code にコンフリクトを直させる / push_conflict_resolution: 直した内容を確かめて push する */
 /** Web でやる手順の開く先（公式のサイトなど）。画面に「〇〇を開く」ボタンを出す */
-export type StepLink = { url: string; label: string };
+/** unverified: 手順の文から拾った URL（公式のページか確かめていない） */
+export type StepLink = { url: string; label: string; unverified?: true };
 /** gmail_action の手順で、アプリが Gmail で行う操作 */
 export type GmailStepActions = { labels?: ReadonlyArray<string>; markRead?: boolean; archive?: boolean };
 export type ActionStep = StepBase & {
@@ -230,7 +231,9 @@ const URL_IN_TEXT = /https:\/\/[^\s）)」』>"'、。]+/;
 export function linkOfStep(step: Step): StepLink | undefined {
   if (step.link !== undefined) return step.link;
   const found = URL_IN_TEXT.exec(step.title)?.[0];
-  return found === undefined ? undefined : linkOf({ url: found, label: "ページ" });
+  const link = found === undefined ? undefined : linkOf({ url: found, label: "ページ" });
+  // 文の URL はメールから書き写されたものかもしれないので、公式のページか確かめていないことを画面に出す
+  return link === undefined ? undefined : { ...link, unverified: true };
 }
 
 function actionStepOf(

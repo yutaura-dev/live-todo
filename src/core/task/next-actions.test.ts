@@ -326,7 +326,7 @@ describe("Web ページを開く手順のボタン", () => {
 
   it("開く先がなくても、手順の文に https の URL が書いてあれば、そのページを開く先にする", () => {
     const step = { id: "s1", kind: "decision", title: "権限更新ページ（https://github.com/settings/installations/1/permissions/update）を開き、承認するか決める", effort: "normal", mode: "serial", status: "todo", options: [] } as const;
-    assert.deepStrictEqual(linkOfStep(step), { url: "https://github.com/settings/installations/1/permissions/update", label: "ページ" });
+    assert.deepStrictEqual(linkOfStep(step), { url: "https://github.com/settings/installations/1/permissions/update", label: "ページ", unverified: true });
   });
 
   it("http や javascript: の URL は開く先にしない", () => {
