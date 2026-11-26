@@ -14,6 +14,7 @@ import type { TaskRepository } from "../core/task/task-repository.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { ingestGmail } from "../sources/gmail/gmail-ingest.js";
 import { applyGmailRules } from "../sources/gmail/gmail-rule-runner.js";
+import { archiveMailOfCompletedTasks } from "./gmail-completion.js";
 import type { Rule } from "../core/rules/rule.js";
 import type { ResolvedGmailAccount } from "./config/app-config.js";
 import { makeMailClassifier } from "./llm.js";
@@ -27,6 +28,8 @@ export type GmailJobRequirements = Database | SourceItemRepository | TaskReposit
 /** 取り込みと仕分けをしてから、送り主ごと・スレッドごとの Source Item を作り直す（同じ表から作るので続けて動かす） */
 export const runGmailSync = Effect.fnUntraced(function* (accountId: string, rules: ReadonlyArray<Rule> = []) {
   yield* ingestGmail({ accountId });
+  // 完了にした Task のメールを確認済みにしてから、送り主・スレッドにまとめ直す（まとめた Task の未処理に残さないため）
+  yield* archiveMailOfCompletedTasks(accountId);
   // 用件を判定したあと、送り主にまとめる前に当てる（既読・アーカイブを、まとめた Task の未処理の数に反映するため）
   yield* applyGmailRules(accountId, rules);
   yield* syncSource(yield* makeGmailSendersBinding({ accountId }));

@@ -492,6 +492,8 @@ export function GmailMailFlow({ taskId, onDone, onlyPastInvites = false }: { tas
   );
 }
 
+const isThreadTask = (detail: TaskDetail) => detail.items.some((item) => item.role === "tracks" && /^gmail:[a-z0-9][a-z0-9-]*:threads$/.test(item.source));
+
 const hasMailStep = (detail: TaskDetail) => JSON.stringify(detail.nextActions ?? null).includes('"process_mail"');
 
 /** Gmail のメールを追う Task のうち、次にやることに片付ける手順がないものに出す（人からのメールのスレッドなど）。日程が過ぎた招待があれば案内する */
@@ -514,6 +516,7 @@ export function GmailActions({ detail, onDone }: { detail: TaskDetail; onDone: (
       <h3 id="drawer-gmail" className="drawer-section-title">
         Gmail
       </h3>
+      {isThreadTask(detail) && <p className="field-hint">この Task を完了にすると、Gmail のメールも確認済み（アーカイブして既読）にします</p>}
       {pastInvites > 0 && (
         <div className="gmail-invite-hint">
           <p className="field-hint">日程が過ぎた招待が {pastInvites} 通あります。確認済みにしますか？</p>
