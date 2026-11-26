@@ -120,8 +120,10 @@ const decodeJudgment = Schema.decodeUnknownOption(StoredJudgment);
 
 const effortRank = (card: { effort?: Effort }) => (card.effort === undefined ? EFFORTS.length : EFFORTS.indexOf(card.effort));
 
+// 更新した時刻で並べない理由: 同期はカードに見えない書き換え（状況の件名の一覧・手順の通数など）でも時刻を進めるので、
+// 理由の見えないままカードが動く。動くのは、カードに見えている変化（更新マーク・手間）があったときだけにする
 const byAttention = (a: TaskWithUnread, b: TaskWithUnread) =>
-  Number(b.unreadChanges > 0) - Number(a.unreadChanges > 0) || b.updatedAt.localeCompare(a.updatedAt);
+  Number(b.unreadChanges > 0) - Number(a.unreadChanges > 0) || b.createdAt.localeCompare(a.createdAt) || b.id - a.id;
 
 export class InvalidTaskInputError extends Schema.TaggedError<InvalidTaskInputError>()("InvalidTaskInputError", { message: Schema.String }) {}
 

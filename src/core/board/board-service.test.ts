@@ -69,7 +69,23 @@ describe("BoardService.board", () => {
       }),
     ));
 
-  it.effect("列の中は、更新マークがあるものを先に、次に新しく更新されたものを先に並べる", () =>
+  it.effect("カードに見えない書き換え（状況の書き直しなど）では、並びを変えない（理由の見えないまま動かないように）", () =>
+    run(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse("2026-11-25T00:00:00Z"));
+        const old = yield* taskWithItem("old", "todo");
+        yield* TestClock.setTime(Date.parse("2026-11-25T01:00:00Z"));
+        yield* taskWithItem("new", "todo");
+        yield* TestClock.setTime(Date.parse("2026-11-25T02:00:00Z"));
+        yield* (yield* TaskRepository).updateTask(old.id, { brief: "書き直した状況" });
+
+        const board = yield* (yield* BoardService).board;
+
+        assert.deepStrictEqual(columnTitles(board)["todo"], ["new", "old"]);
+      }),
+    ));
+
+  it.effect("列の中は、更新マークがあるものを先に、次に新しく作られたものを先に並べる", () =>
     run(
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.parse("2026-11-25T00:00:00Z"));
