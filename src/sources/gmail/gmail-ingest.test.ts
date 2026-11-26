@@ -107,7 +107,7 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
         ["c", true, true, false],
       ]);
       assert.sameMembers(gmail.state.fetched, ["a", "b", "c"]);
-      assert.lengthOf(requests, 1);
+      assert.lengthOf(requests, 3);
     }).pipe(Effect.provide(layer));
   });
 
@@ -134,8 +134,8 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("同じ送り主のメールは 1 回だけ仕分けて、その結果を使い回す（同じ回に届いた分も）", () => {
-    const { requests, layer } = setup([gmailMessage({ id: "a" }), gmailMessage({ id: "b" }), gmailMessage({ id: "c", headers: { from: "Bank <info@bank.example>", subject: "お知らせ" } })]);
+  it.effect("配信の解除の案内があるメールは、同じ送り主なら 1 回だけ仕分けて結果を使い回す（同じ回に届いた分も）", () => {
+    const { requests, layer } = setup([gmailMessage({ id: "a", headers: { from: "Shop <news@shop.example>", subject: "セール", "list-unsubscribe": "<u>" } }), gmailMessage({ id: "b", headers: { from: "Shop <news@shop.example>", subject: "セール", "list-unsubscribe": "<u>" } }), gmailMessage({ id: "c", headers: { from: "Bank <info@bank.example>", subject: "お知らせ", "list-unsubscribe": "<u>" } })]);
     return Effect.gen(function* () {
       yield* run;
       assert.lengthOf(requests, 2);
@@ -146,10 +146,10 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
   });
 
   it.effect("前に確かな確率で仕分けた送り主から新しく届いたメールは、仕分けずに前の結果を使う", () => {
-    const { gmail, requests, layer } = setup([gmailMessage({ id: "a" })]);
+    const { gmail, requests, layer } = setup([gmailMessage({ id: "a", headers: { from: "Shop <news@shop.example>", subject: "セール", "list-unsubscribe": "<u>" } })]);
     return Effect.gen(function* () {
       yield* run;
-      gmail.state.messages.set("b", gmailMessage({ id: "b" }));
+      gmail.state.messages.set("b", gmailMessage({ id: "b", headers: { from: "Shop <news@shop.example>", subject: "セール", "list-unsubscribe": "<u>" } }));
       gmail.state.history = { historyId: "200", added: ["b"], labelsChanged: [], deleted: [] };
       yield* run;
       assert.lengthOf(requests, 1);
@@ -176,6 +176,30 @@ describe("ingestGmail（Gmail のメールを取り込んで仕分ける）", ()
       gmail.state.history = { historyId: "200", added: ["b"], labelsChanged: [], deleted: [] };
       yield* run;
       assert.lengthOf(requests, 2);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("配信の解除の案内がないメールには、メルマガ・お知らせの結果を使い回さず 1 通ずつ仕分ける（同僚のカレンダー招待のあとの、人が書いたメールなど）", () => {
+    const { gmail, requests, layer } = setup([gmailMessage({ id: "a" }), gmailMessage({ id: "b" })]);
+    return Effect.gen(function* () {
+      yield* run;
+      assert.lengthOf(requests, 2);
+      gmail.state.messages.set("c", gmailMessage({ id: "c" }));
+      gmail.state.history = { historyId: "200", added: ["c"], labelsChanged: [], deleted: [] };
+      yield* run;
+      assert.lengthOf(requests, 3);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("配信の解除の案内がないメールでも、前の結果が人からのメールなら使い回す（読む側に倒れるだけなので）", () => {
+    const { gmail, requests, layer } = setup([gmailMessage({ id: "a" })], () => ({ kind: "personal", probability: 0.95, method: "decisions" }));
+    return Effect.gen(function* () {
+      yield* run;
+      gmail.state.messages.set("b", gmailMessage({ id: "b" }));
+      gmail.state.history = { historyId: "200", added: ["b"], labelsChanged: [], deleted: [] };
+      yield* run;
+      assert.lengthOf(requests, 1);
+      assert.deepInclude((yield* stored)[1], { messageId: "b", kind: "personal", method: "sender" });
     }).pipe(Effect.provide(layer));
   });
 });

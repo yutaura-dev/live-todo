@@ -49,7 +49,8 @@ const classificationRequest = (message: GmailMessage) => {
 const labelsOf = (message: GmailMessage, now: string) => ({ inInbox: has(message, "INBOX"), unread: has(message, "UNREAD"), trashed: has(message, "TRASH"), updatedAt: now });
 
 /** 仕分けの結果を使い回せるまとまり。同じ送り主でも、配信の解除の案内の有無が違えば別に仕分ける */
-const signatureOf = (message: GmailMessage) => JSON.stringify([senderKeyOf(message.headers), message.headers["list-unsubscribe"] !== undefined]);
+const isBulk = (message: GmailMessage) => message.headers["list-unsubscribe"] !== undefined;
+const signatureOf = (message: GmailMessage) => (isBulk(message) ? JSON.stringify([senderKeyOf(message.headers), true]) : JSON.stringify(["single", message.id]));
 
 const previousClassification = Effect.fnUntraced(function* (accountId: string, message: GmailMessage) {
   const db = yield* Database;
@@ -61,7 +62,9 @@ const previousClassification = Effect.fnUntraced(function* (accountId: string, m
     .limit(1)
     .pipe(Effect.orDie);
   if (row === undefined || row.kind === "mine" || row.probability === null || row.probability < REUSE_MIN_PROBABILITY) return Option.none<StoredClassification>();
-  if ((row.listUnsubscribe !== null) !== (message.headers["list-unsubscribe"] !== undefined)) return Option.none<MailClassification>();
+  if ((row.listUnsubscribe !== null) !== isBulk(message)) return Option.none<StoredClassification>();
+  // 案内のないメールに使い回すのは、人からのメールという結果だけ（読む側に倒れるので、見落としにならない）
+  if (!isBulk(message) && row.kind !== "personal") return Option.none<StoredClassification>();
   return Option.some<StoredClassification>({ kind: row.kind, probability: row.probability, method: "sender" });
 });
 
@@ -136,7 +139,8 @@ export const ingestGmail = Effect.fnUntraced(function* (options: { accountId: st
     } else if (!has(message, "DRAFT")) fresh.push(message);
   }
 
-  // 送り主ごとに 1 回だけ仕分ける理由: メルマガかどうかはほとんど送り主で決まり、Decisions の呼び出しを送り主の数に抑えられるため。
+  // 配信の解除の案内があるメールは送り主ごとに 1 回だけ仕分ける（大量配信の送り主は、ほぼ必ずこの案内を付けるため）。
+  // 案内がないメールは 1 通ずつ仕分ける: 最初がカレンダーの招待だった同僚や、差出人を偽ったメールの結果で、人が書いたメールを埋もれさせないため。
   // 複数のメールを 1 回の呼び出しにまとめないのは、あるメールに書かれた文で隣のメールの判定まで動かされないようにするため
   const bySignature = new Map<string, GmailMessage[]>();
   for (const message of fresh) {
