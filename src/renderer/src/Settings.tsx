@@ -3,16 +3,19 @@ import type {
   AccountFilterPreview,
   ConfigDocument,
   FilterReason,
+  GmailRuleDraft,
   GitHubTokenSummary,
   SecretStatus,
   SettingsSnapshot,
 } from "../../shared/api.js";
 import { api } from "./api.js";
 import { RecurringSettings } from "./Recurring.js";
+import { describeRule, newGmailRule, TOPIC_CHOICES } from "./gmail-rules.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
 type SlackAccountDraft = NonNullable<ConfigDocument["slackAccounts"]>[number];
+type GmailAccountDraft = NonNullable<ConfigDocument["gmailAccounts"]>[number];
 
 const PREVIEW_DELAY_MS = 400;
 
@@ -37,6 +40,8 @@ function toDocument(config: unknown): ConfigDocument {
     defaultLlmProfile: draft.defaultLlmProfile ?? EMPTY_CONFIG.defaultLlmProfile,
     accounts: Array.isArray(draft.accounts) ? draft.accounts : [],
     slackAccounts: Array.isArray(draft.slackAccounts) ? draft.slackAccounts : [],
+    // 画面で扱わない項目も落とさない（ここで落とすと、保存したときに設定ファイルから消える）
+    gmailAccounts: Array.isArray(draft.gmailAccounts) ? draft.gmailAccounts : [],
   };
 }
 
@@ -139,6 +144,29 @@ export function Settings() {
                 slackAccounts: [...(current.slackAccounts ?? []), { kind: "slack", id, workspace: "", userAgent: "" }],
               }))
             }
+          />
+        </section>
+
+        <section className="settings-section" aria-labelledby="gmail-heading">
+          <h3 id="gmail-heading" className="section-title">
+            Gmail
+          </h3>
+          <p className="field-hint">メールを取り込み、メルマガ・お知らせは送り主と用件ごとに、人からのメールはやることがあれば Task にします。認証は gws に任せます</p>
+          {(draft.gmailAccounts ?? []).map((account, index) => (
+            <GmailAccountEditor
+              key={account.id || index}
+              account={account}
+              onChange={(next) =>
+                setDraft((current) => ({ ...current, gmailAccounts: (current.gmailAccounts ?? []).map((entry, at) => (at === index ? next : entry)) }))
+              }
+              onRemove={() => setDraft((current) => ({ ...current, gmailAccounts: (current.gmailAccounts ?? []).filter((_, at) => at !== index) }))}
+            />
+          ))}
+          <AddAccount
+            label="Gmail のアカウントを追加"
+            placeholder="mail"
+            existing={[...draft.accounts.map((account) => account.id), ...(draft.slackAccounts ?? []).map((account) => account.id), ...(draft.gmailAccounts ?? []).map((account) => account.id)]}
+            onAdd={(id) => setDraft((current) => ({ ...current, gmailAccounts: [...(current.gmailAccounts ?? []), { kind: "gmail", id }] }))}
           />
         </section>
 
@@ -640,5 +668,105 @@ function SecretField(props: { label: string; secretKey: string; status: SecretSt
         </span>
       )}
     </div>
+  );
+}
+
+function GmailAccountEditor(props: { account: GmailAccountDraft; onChange: (next: GmailAccountDraft) => void; onRemove: () => void }) {
+  const { account } = props;
+  const rules = account.rules ?? [];
+  const setRules = (next: GmailRuleDraft[]) => props.onChange({ ...account, rules: next });
+  return (
+    <details className="account">
+      <summary className="account-header">
+        <h4 className="account-name">{account.id}</h4>
+        <span className="field-hint">ルール {rules.length} 件</span>
+      </summary>
+      <label className="checkbox-field">
+        <input type="checkbox" checked={account.planNextActions === true} onChange={(event) => props.onChange({ ...account, planNextActions: event.target.checked })} />
+        人からのメールを Claude Code に読ませて Task にする（本文が Claude に送られます）
+      </label>
+      <h5 className="field-title">ルール</h5>
+      <p className="field-hint">条件に合うメールが届いたら、Gmail で自動でラベルを付ける・既読にする・アーカイブします。ルールを作る前に届いたメールには当てません</p>
+      {rules.map((rule, index) => (
+        <GmailRuleEditor
+          key={rule.id}
+          rule={rule}
+          onChange={(next) => setRules(rules.map((entry, at) => (at === index ? next : entry)))}
+          onRemove={() => setRules(rules.filter((_, at) => at !== index))}
+        />
+      ))}
+      <div className="step-actions">
+        <button type="button" className="quiet-button" onClick={() => setRules([...rules, newGmailRule(new Date().toISOString(), crypto.randomUUID())])}>
+          ルールを追加
+        </button>
+        <button type="button" className="dismiss-button" onClick={props.onRemove}>
+          このアカウントを外す
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function GmailRuleEditor(props: { rule: GmailRuleDraft; onChange: (next: GmailRuleDraft) => void; onRemove: () => void }) {
+  const { rule } = props;
+  const id = useId();
+  const when = (patch: Partial<GmailRuleDraft["when"]>) => props.onChange({ ...rule, when: { ...rule.when, ...patch } });
+  const then = (patch: Partial<GmailRuleDraft["then"]>) => props.onChange({ ...rule, then: { ...rule.then, ...patch } });
+  const topics = rule.when.topics ?? [];
+  return (
+    <fieldset className="gmail-rule">
+      <legend className="gmail-rule-legend">
+        <input aria-label="ルールの名前" value={rule.name} onChange={(event) => props.onChange({ ...rule, name: event.target.value })} />
+        <label className="checkbox-field">
+          <input type="checkbox" checked={rule.enabled !== false} onChange={(event) => props.onChange({ ...rule, enabled: event.target.checked })} />
+          有効
+        </label>
+      </legend>
+      <p className="field-hint">{describeRule(rule)}</p>
+      <div className="gmail-rule-group">
+        <span className="field-title">用件</span>
+        {TOPIC_CHOICES.map((choice) => (
+          <label key={choice.value} className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={topics.includes(choice.value)}
+              onChange={(event) => when({ topics: event.target.checked ? [...topics, choice.value] : topics.filter((topic) => topic !== choice.value) })}
+            />
+            {choice.label}
+          </label>
+        ))}
+      </div>
+      <label className="field" htmlFor={`${id}-from`}>
+        差出人に含む文字
+        <input id={`${id}-from`} value={rule.when.fromContains ?? ""} placeholder="cloudflare.com" onChange={(event) => when({ fromContains: event.target.value })} />
+      </label>
+      <label className="field" htmlFor={`${id}-subject`}>
+        件名に含む文字
+        <input id={`${id}-subject`} value={rule.when.subjectContains ?? ""} placeholder="請求書" onChange={(event) => when({ subjectContains: event.target.value })} />
+      </label>
+      <div className="gmail-rule-group">
+        <span className="field-title">操作</span>
+        <label className="field" htmlFor={`${id}-labels`}>
+          付けるラベル（, で区切る。なければ作ります）
+          <input
+            id={`${id}-labels`}
+            value={(rule.then.labels ?? []).join(", ")}
+            placeholder="レシート"
+            onChange={(event) => then({ labels: event.target.value.split(",").map((label) => label.trim()).filter((label) => label !== "") })}
+          />
+        </label>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={rule.then.markRead === true} onChange={(event) => then({ markRead: event.target.checked })} />
+          既読にする
+        </label>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={rule.then.archive === true} onChange={(event) => then({ archive: event.target.checked })} />
+          アーカイブする（受信トレイから外す）
+        </label>
+      </div>
+      <button type="button" className="dismiss-button" onClick={props.onRemove}>
+        このルールを消す
+      </button>
+    </fieldset>
   );
 }

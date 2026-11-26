@@ -49,6 +49,23 @@ export type ConfigDocument = {
     llmProfile?: string;
     planNextActions?: boolean;
   }>;
+  /** Gmail のアカウント（認証は gws に任せる）。rules は利用者が決めたルール（ADR-0014） */
+  gmailAccounts?: Array<{
+    kind: "gmail";
+    id: string;
+    llmProfile?: string;
+    planNextActions?: boolean;
+    rules?: Array<GmailRuleDraft>;
+  }>;
+};
+
+export type GmailRuleDraft = {
+  id: string;
+  name: string;
+  enabled?: boolean;
+  createdAt: string;
+  when: { topics?: string[]; kinds?: string[]; fromContains?: string; subjectContains?: string };
+  then: { labels?: string[]; markRead?: boolean; archive?: boolean };
 };
 
 /** saved: アプリに暗号化して保存済み / env: 環境変数から読んでいる / missing: ない */

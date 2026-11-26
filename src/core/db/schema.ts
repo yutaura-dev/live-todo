@@ -250,3 +250,26 @@ export const taskQuestions = sqliteTable(
   },
   (table) => [index("task_questions_task_id").on(table.taskId)],
 );
+
+export const GMAIL_RULE_RUN_STATUSES = ["executed", "failed"] as const;
+
+/**
+ * 利用者が決めた Gmail のルールを、メールに当てた記録（ADR-0014）。ルールを決めたことを承認とみなして自動で書き込むので、
+ * 何をしたかを 1 通ずつ残す。同じメールに同じルールを二度当てない
+ */
+export const gmailRuleRuns = sqliteTable(
+  "gmail_rule_runs",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    accountId: text("account_id").notNull(),
+    messageId: text("message_id").notNull(),
+    ruleId: text("rule_id").notNull(),
+    ruleName: text("rule_name").notNull(),
+    /** 付けたラベルの名前・外したラベル（UNREAD・INBOX） */
+    actions: text({ mode: "json" }).notNull(),
+    status: text({ enum: GMAIL_RULE_RUN_STATUSES }).notNull(),
+    error: text(),
+    executedAt: text("executed_at").notNull(),
+  },
+  (table) => [uniqueIndex("gmail_rule_runs_message_rule").on(table.accountId, table.messageId, table.ruleId)],
+);

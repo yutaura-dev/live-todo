@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Option, Schema } from "effect";
 import { isRepositoryPattern } from "../../sources/github/repository-filter.js";
+import { MAIL_TOPICS } from "../../core/judge/mail-classifier.js";
 
 export class InvalidAppConfigError extends Schema.TaggedError<InvalidAppConfigError>()("InvalidAppConfigError", {
   message: Schema.String,
@@ -54,10 +55,31 @@ const SlackAccount = Schema.Struct({
 });
 export type SlackAccount = typeof SlackAccount.Type;
 
+const GmailRule = Schema.Struct({
+  id: Schema.NonEmptyString,
+  name: Schema.NonEmptyString,
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
+  createdAt: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T/)),
+  when: Schema.Struct({
+    topics: Schema.optional(Schema.Array(Schema.Literals(MAIL_TOPICS))),
+    kinds: Schema.optional(Schema.Array(Schema.Literals(["personal", "notification", "newsletter"]))),
+    fromContains: Schema.optional(Schema.String),
+    subjectContains: Schema.optional(Schema.String),
+  }).pipe(Schema.annotate({ parseOptions: { onExcessProperty: "error" } })),
+  // 操作はラベルの付け外しだけ（ADR-0014）。決めていない操作（ゴミ箱に入れるなど）は書けないようにする
+  then: Schema.Struct({
+    labels: Schema.optional(Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(100)))),
+    markRead: Schema.optional(Schema.Boolean),
+    archive: Schema.optional(Schema.Boolean),
+  }).pipe(Schema.annotate({ parseOptions: { onExcessProperty: "error" } })),
+});
+
 const GmailAccount = Schema.Struct({
   kind: Schema.Literal("gmail"),
   id: AccountId,
   llmProfile: Schema.optional(Schema.String),
+  // 利用者が決めたルール。設定したルールの範囲の書き込みは、設定したことを承認とみなして自動で行う（ADR-0014）
+  rules: Schema.Array(GmailRule).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   // 人からのメールを Claude Code に読ませて Task にするか。本文を Claude に送るので、ほかの Source と同じく既定はオフ
   planNextActions: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
@@ -144,6 +166,15 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
       if (account.llmProfile !== undefined) issues.push(`gmailAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
       return;
     }
+    account.rules.forEach((rule, at) => {
+      const { topics, kinds, fromContains, subjectContains } = rule.when;
+      if ((topics ?? []).length === 0 && (kinds ?? []).length === 0 && (fromContains ?? "").trim() === "" && (subjectContains ?? "").trim() === "") {
+        issues.push(`gmailAccounts[${index}].rules[${at}]（${rule.name}）: 条件を 1 つ以上決めてください`);
+      }
+      if ((rule.then.labels ?? []).length === 0 && rule.then.markRead !== true && rule.then.archive !== true) {
+        issues.push(`gmailAccounts[${index}].rules[${at}]（${rule.name}）: 操作を 1 つ以上決めてください`);
+      }
+    });
     if (resolvedLlmProfile.decisions === undefined) {
       issues.push(`gmailAccounts[${index}]: メールの仕分けに Decisions を使うので、LLM Profile「${profileName}」に decisions を書いてください`);
       return;

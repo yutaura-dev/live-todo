@@ -1524,3 +1524,26 @@ button:disabled {
   font-size: 0.9em;
   font-variant-numeric: tabular-nums;
 }
+
+.gmail-rule {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin: 0 0 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.gmail-rule-legend {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0 0.25rem;
+}
+
+.gmail-rule-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: center;
+}

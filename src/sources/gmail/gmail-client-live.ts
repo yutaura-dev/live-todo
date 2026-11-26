@@ -94,6 +94,8 @@ const findCalendar = (part: Part): Part | undefined =>
     ? part
     : (part.parts ?? []).map(findCalendar).find((found) => found !== undefined);
 const Attachment = Schema.Struct({ data: Schema.String });
+const LabelList = Schema.Struct({ labels: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))) });
+const CreatedLabel = Schema.Struct({ id: Schema.String });
 // HTML のメールを正しく描かずにタグを除くだけにする理由: Claude Code に読ませる文脈として足りればよく、描画用の依存を増やさないため
 const htmlToText = (html: string) =>
   html
@@ -178,6 +180,17 @@ export const GmailClientLive = Layer.effect(
         const thread = yield* decodeJson(Thread, yield* call(["threads", "get"], { id: threadId, format: "full" }));
         return (thread.messages ?? []).map((entry): GmailThreadMessage => ({ ...toMessage(entry), text: textOf(entry.payload) }));
       }),
+      labels: call(["labels", "list"], {}).pipe(
+        Effect.flatMap((stdout) => decodeJson(LabelList, stdout)),
+        Effect.map((list) => (list.labels ?? []).map(({ id, name }) => ({ id, name }))),
+      ),
+      createLabel: (name: string) =>
+        call(["labels", "create"], {}, { name, labelListVisibility: "labelShow", messageListVisibility: "show" }).pipe(
+          Effect.flatMap((stdout) => decodeJson(CreatedLabel, stdout)),
+          Effect.map(({ id }) => ({ id })),
+        ),
+      modifyLabels: (id: string, change: { add: ReadonlyArray<string>; remove: ReadonlyArray<string> }) =>
+        call(["messages", "modify"], { id }, { addLabelIds: change.add, removeLabelIds: change.remove }).pipe(Effect.asVoid),
       archive: (id: string) => call(["messages", "modify"], { id }, { removeLabelIds: ["INBOX", "UNREAD"] }).pipe(Effect.asVoid),
       // messages.trash を使わない理由: 本文のない POST を gws が Content-Length なしで送って Gmail が 411 で断り、
       // gws はこのメソッドに本文（--json）を付けさせない。ラベルの付け替えでゴミ箱に入れる

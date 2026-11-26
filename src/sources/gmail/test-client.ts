@@ -13,6 +13,8 @@ export function makeTestGmail(initial: ReadonlyArray<GmailMessage> = []) {
     fetched: [] as string[],
     trashed: [] as string[],
     archived: [] as string[],
+    labels: [] as Array<{ id: string; name: string }>,
+    modified: [] as Array<{ id: string; add: ReadonlyArray<string>; remove: ReadonlyArray<string> }>,
   };
   const client = GmailClient.of({
     historyId: Effect.sync(() => state.historyId),
@@ -38,6 +40,19 @@ export function makeTestGmail(initial: ReadonlyArray<GmailMessage> = []) {
           .toSorted((a, b) => a.receivedAt - b.receivedAt)
           .map((message): GmailThreadMessage => ({ ...message, text: state.texts.get(message.id) ?? "" })),
       ),
+    labels: Effect.sync(() => state.labels),
+    createLabel: (name) =>
+      Effect.sync(() => {
+        const id = `Label_${state.labels.length + 1}`;
+        state.labels.push({ id, name });
+        return { id };
+      }),
+    modifyLabels: (id, change) =>
+      Effect.sync(() => {
+        state.modified.push({ id, ...change });
+        const message = state.messages.get(id);
+        if (message !== undefined) state.messages.set(id, { ...message, labelIds: [...message.labelIds.filter((label) => !change.remove.includes(label)), ...change.add] });
+      }),
     archive: (id) =>
       Effect.sync(() => {
         state.archived.push(id);

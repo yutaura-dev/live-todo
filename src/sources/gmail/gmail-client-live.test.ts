@@ -130,6 +130,25 @@ describe("GmailClientLive（gws でGmail を読む）", () => {
       assert.isTrue(Option.isNone(yield* (yield* client).calendar("m1")));
     }).pipe(Effect.provide(fakeGws(() => ok({ id: "m1", threadId: "t1", internalDate: "1", payload: { mimeType: "text/plain", body: { data: b64("x") } } })).layer)));
 
+  it.effect("ラベルの一覧を名前と id で返し、ラベルを作り、ラベルを付け外しする", () => {
+    const fake = fakeGws((args) =>
+      args[2] === "labels" && args[3] === "list"
+        ? ok({ labels: [{ id: "INBOX", name: "INBOX", type: "system" }, { id: "Label_1", name: "レシート", type: "user" }] })
+        : args[2] === "labels" && args[3] === "create"
+          ? ok({ id: "Label_2", name: "新しい" })
+          : ok({ id: "m1" }),
+    );
+    return Effect.gen(function* () {
+      const gmail = yield* client;
+      assert.deepStrictEqual(yield* gmail.labels, [{ id: "INBOX", name: "INBOX" }, { id: "Label_1", name: "レシート" }]);
+      assert.deepStrictEqual(yield* gmail.createLabel("新しい"), { id: "Label_2" });
+      assert.deepInclude(JSON.parse(fake.calls[1]![fake.calls[1]!.indexOf("--json") + 1]!), { name: "新しい" });
+      yield* gmail.modifyLabels("m1", { add: ["Label_1"], remove: ["UNREAD"] });
+      assert.deepStrictEqual(fake.calls[2]!.slice(0, 4), ["gmail", "users", "messages", "modify"]);
+      assert.deepStrictEqual(JSON.parse(fake.calls[2]![fake.calls[2]!.indexOf("--json") + 1]!), { addLabelIds: ["Label_1"], removeLabelIds: ["UNREAD"] });
+    }).pipe(Effect.provide(fake.layer));
+  });
+
   it.effect("ゴミ箱に入れる", () => {
     const fake = fakeGws(() => ok({ id: "m1" }));
     return Effect.gen(function* () {

@@ -60,6 +60,12 @@ export class GmailClient extends Context.Service<GmailClient, {
   calendar(id: string): Effect.Effect<Option.Option<string>, GmailClientError>;
   /** スレッドのメール（古い順、本文つき） */
   thread(threadId: string): Effect.Effect<ReadonlyArray<GmailThreadMessage>, GmailClientError>;
+  /** ラベルの一覧（名前と id） */
+  readonly labels: Effect.Effect<ReadonlyArray<{ id: string; name: string }>, GmailClientError>;
+  /** ラベルを作る（外部への書き込み。利用者が決めたルールか、承認を経てからだけ呼ぶ） */
+  createLabel(name: string): Effect.Effect<{ id: string }, GmailClientError>;
+  /** ラベルを付け外しする（外部への書き込み。利用者が決めたルールか、承認を経てからだけ呼ぶ） */
+  modifyLabels(id: string, change: { add: ReadonlyArray<string>; remove: ReadonlyArray<string> }): Effect.Effect<void, GmailClientError>;
   /** 確認済みにする: 受信トレイから外して（アーカイブ）既読にする（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ） */
   archive(id: string): Effect.Effect<void, GmailClientError>;
   /** ゴミ箱に入れる（外部への書き込み。ユーザーの承認を経てからだけ呼ぶ） */
