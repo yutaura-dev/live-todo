@@ -43,8 +43,13 @@ export type RequestedBy =
       taskId: string;
       actionItemId: string;
     }
-  /** ルール（ユーザーが作ったルールか、ユーザーが有効にした組み込みのルール）。ルールを決めたことが承認になる */
-  | { type: "rule"; ruleId: string };
+  /** ルール（ユーザーが作ったルールか、ユーザーが有効にした組み込みのルール）を当てた記録。ルールを決めたことが承認になる。同じものに二重に書き込まないことは、記録（Rule Run）が一度だけ当てることで守る */
+  | {
+      type: "rule";
+      /** @ref rule */
+      ruleId: string;
+      runId: string;
+    };
 
 /** 書き込めなかった理由 */
 export type Failure = {
@@ -88,9 +93,9 @@ type Request =
       way: "ルール";
       /** ルールが有効か（組み込みのルールは、ユーザーが有効にしたときだけ） */
       rule: "有効" | "止めてある";
-      /** ルールの範囲の操作か（ラベル・既読・アーカイブ など） */
+      /** 頼む操作が、そのルールの操作に含まれるか */
       inScope: boolean;
-      /** 同じものに、同じルールでもう書き込んだか */
+      /** その記録（Rule Run）から、同じ操作をもう頼んだか */
       alreadyWritten: boolean;
     };
 
@@ -118,8 +123,8 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
     ensure(!request.openWrite, "その Action Item に、終わっていない書き込みがないときだけ");
   } else {
     ensure(request.rule === "有効", "有効なルールだけ（組み込みのルールは、ユーザーが有効にしたものだけ）");
-    ensure(request.inScope, "ルールの範囲の操作だけ");
-    ensure(!request.alreadyWritten, "同じものに同じルールで書き込むのは一度だけ");
+    ensure(request.inScope, "そのルールの操作だけ");
+    ensure(!request.alreadyWritten, "ルールを 1 回当てた記録から頼むのは、操作ごとに一度だけ");
   }
   const byRule = request.way === "ルール";
   return {
@@ -131,7 +136,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
     params: { method: "squash", title: "axios を 1.8 に上げる (#42)" },
     version: "abc1234",
     summary: "squash で merge する",
-    requestedBy: byRule ? { type: "rule", ruleId: "r1" } : { type: "actionItem", taskId: "t1", actionItemId: "a3" },
+    requestedBy: byRule ? { type: "rule", ruleId: "r1", runId: "rr1" } : { type: "actionItem", taskId: "t1", actionItemId: "a3" },
     failure: null,
     finishedAt: null,
   };
@@ -289,8 +294,8 @@ export const scenarios = {
     { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
   ],
   "止めたルール（初めの組み込みのルール）では書き込まない": [{ do: initial, by: "アプリ", input: "止めたルール", denied: "有効なルールだけ（組み込みのルールは、ユーザーが有効にしたものだけ）" }],
-  "ルールの範囲の外の操作は、ルールでは書き込まない": [{ do: initial, by: "アプリ", input: "範囲の外", denied: "ルールの範囲の操作だけ" }],
-  "同じものに同じルールで二度は書き込まない": [{ do: initial, by: "アプリ", input: "書き込み済み", denied: "同じものに同じルールで書き込むのは一度だけ" }],
+  "そのルールの操作でないものは、ルールでは書き込まない": [{ do: initial, by: "アプリ", input: "範囲の外", denied: "そのルールの操作だけ" }],
+  "ルールを 1 回当てた記録から、二重には書き込まない": [{ do: initial, by: "アプリ", input: "書き込み済み", denied: "ルールを 1 回当てた記録から頼むのは、操作ごとに一度だけ" }],
   "Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー、ルールからはアプリだけ" }],
   "ルールからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "ルールから", denied: "Action Item からはユーザー、ルールからはアプリだけ" }],
   "書き込みは決まった人と段階でだけ進む": [
