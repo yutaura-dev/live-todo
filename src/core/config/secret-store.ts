@@ -2,7 +2,11 @@ import { Config, ConfigProvider, Context, Effect, Layer, Option, type Redacted, 
 
 export class MissingSecretError extends Schema.TaggedError<MissingSecretError>()("MissingSecretError", {
   key: Schema.String,
-}) {}
+}) {
+  override get message() {
+    return `秘密情報「${this.key}」が登録されていない`;
+  }
+}
 
 export class SecretStore extends Context.Service<SecretStore, {
   /** key の例: "github.work.token"。値は Redacted なので、ログやエラーに出しても中身は出ない */

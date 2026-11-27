@@ -45,3 +45,11 @@ describe("EnvSecretStore", () => {
       assert.strictEqual(error.key, "github.work.token");
     }).pipe(withEnv({})));
 });
+
+describe("MissingSecretError", () => {
+  it("メッセージに、どの秘密情報がないかを含める（画面に出したときに、何を保存すればよいか分かるように）", () => {
+    const error = new MissingSecretError({ key: "llm.anthropic.api_key" });
+
+    assert.include(error.message, "llm.anthropic.api_key");
+  });
+});
