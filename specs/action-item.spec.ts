@@ -29,7 +29,7 @@ export type ItemStatus = (typeof ItemStatus)[keyof typeof ItemStatus];
 
 /** 果たされ方ごとの進み具合。中身の果たされ方（definition.how.type）と同じ種類を持つ */
 export type Progress =
-  /** 進み具合を持たない（人・承認で果たされる） */
+  /** 進み具合を持たない（人・書き込みで果たされる） */
   | { type: "none" }
   /** Claude Code にやらせた進み具合 */
   | { type: "claude"; run: Run; report: string | null }
@@ -87,7 +87,7 @@ const decision: ActionDefinition = {
     type: "decision",
     question: "型エラーが出ている。直してから merge するか",
     options: [
-      { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", completes: false, how: { type: "approval", approvalId: "ap1" } }] } } },
+      { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, operation: "github.merge" } }] } } },
       { label: "ひとまず調査する", then: { type: "planLater", direction: "型エラーの原因と影響範囲を調べる" } },
     ],
   },
@@ -99,13 +99,13 @@ export const inputs = {
     頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null } }],
     自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null } }],
     条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, name: "github.merged", afterStart: false, label: "PR #42 が merge される" } } }],
-    承認で果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "approval", approvalId: "ap1" } }],
+    書き込みで果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, operation: "github.merge" } }],
     分かれ道: [decision],
   },
   complete: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   finishByCondition: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   observeCondition: { 成り立った: ["成り立った"], 達成できない: ["達成できない"] },
-  completeByApproval: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
+  completeByWrite: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   autoStart: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   choose: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   rechoose: { 作業なし: ["作業なし"], 作業中: ["作業中"] },
@@ -157,12 +157,12 @@ export function resetCondition(item: ActionItem, actor: Actor): ActionItem {
   return { ...item, progress: { ...item.progress, observed: "まだ" } };
 }
 
-/** 承認した書き込みが成功して果たされる（Approval が成功を知らせる） */
-export function completeByApproval(item: ActionItem, actor: Actor, turn: Turn): ActionItem {
+/** 承認した書き込みが成功して果たされる（書き込みが、成功を知らせる） */
+export function completeByWrite(item: ActionItem, actor: Actor, turn: Turn): ActionItem {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(turn === "番が来ている", "番が来ているときだけ");
-  ensure(item.definition.how.type === "approval", "承認で果たされる Action Item だけ");
+  ensure(item.definition.how.type === "write", "書き込みで果たされる Action Item だけ");
   return { ...item, status: "done" };
 }
 
@@ -282,7 +282,7 @@ export const reviewed = {
 export const links = [
   { from: complete, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
   { from: finishByCondition, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
-  { from: completeByApproval, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
+  { from: completeByWrite, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
   { from: succeed, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
   { from: reopen, to: "task", action: "addPendingCriteria", label: "完了条件の Action Item なら、まだの完了条件ができる" },
   { from: reopen, to: "task", action: "reopen", label: "やり終えた Task なら、やり直す" },
@@ -297,11 +297,12 @@ export const links = [
   { from: observeCondition, to: "task", label: "達成できなくなったら、Task が受け取る（AI が計画を立て直すか、ユーザーに知らせる）" },
   { from: complete, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
   { from: succeed, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
-  { from: completeByApproval, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: completeByWrite, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
   { from: finishByCondition, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
   { from: choose, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
   { from: skip, to: "watch-target", action: "removeWaiter", label: "待つ条件の Action Item をやらなくなったら、その対象を待つのをやめる（まだ待っていたなら）" },
   { from: resetCondition, to: "watch-target", action: "addWaiter", label: "また待つので、その対象を待つ" },
+  { from: skip, to: "write", action: "withdraw", label: "書き込みで果たされる Action Item をやらなくなったら、確認中の書き込みを取りやめる" },
   { to: "watch-target", action: "addWaiter", label: "待つ条件の Action Item を作ったら、その対象を待つ（見張っていなければ見張りを始める）" },
   { from: autoStart, to: "task", action: "startWork", label: "AI が作業中になる" },
 ];
@@ -312,7 +313,7 @@ export const scenarios = {
     { do: initial, by: "AI", input: "人がやる" },
     { do: complete, by: "ユーザー", input: "番待ち", denied: "番が来ているときだけ" },
     { do: choose, by: "ユーザー", input: "番が来ている", denied: "分かれ道だけ" },
-    { do: completeByApproval, by: "アプリ", input: "番が来ている", denied: "承認で果たされる Action Item だけ" },
+    { do: completeByWrite, by: "アプリ", input: "番が来ている", denied: "書き込みで果たされる Action Item だけ" },
     { do: finishByCondition, by: "同期", input: "番が来ている", denied: "待つ条件が成り立ったときだけ" },
     { do: request, by: "ユーザー", denied: "Claude Code が果たす Action Item だけ" },
     { do: complete, by: "ユーザー", input: "番が来ている", expect: { status: "done" } },
@@ -354,11 +355,11 @@ export const scenarios = {
     { do: finishByCondition, by: "同期", input: "番が来ている", expect: { status: "done" } },
     { do: reopen, by: "ユーザー", denied: "人か Claude Code が果たす Action Item だけ" },
   ],
-  "承認で果たされる Action Item は、番が来て書き込めたら済む": [
-    { do: initial, by: "AI", input: "承認で果たす" },
-    { do: completeByApproval, by: "ユーザー", input: "番が来ている", denied: "アプリだけ" },
-    { do: completeByApproval, by: "アプリ", input: "番待ち", denied: "番が来ているときだけ" },
-    { do: completeByApproval, by: "アプリ", input: "番が来ている", expect: { status: "done" } },
+  "書き込みで果たされる Action Item は、番が来て書き込めたら済む": [
+    { do: initial, by: "AI", input: "書き込みで果たす" },
+    { do: completeByWrite, by: "ユーザー", input: "番が来ている", denied: "アプリだけ" },
+    { do: completeByWrite, by: "アプリ", input: "番待ち", denied: "番が来ているときだけ" },
+    { do: completeByWrite, by: "アプリ", input: "番が来ている", expect: { status: "done" } },
   ],
   "自動でやる Action Item を、番が来たら一度だけ動かしてやり遂げる": [
     { do: initial, by: "AI", input: "自動でやる" },
@@ -406,7 +407,7 @@ export const scenarios = {
     { do: complete, by: "ユーザー", input: "番が来ている" },
     { do: complete, by: "ユーザー", input: "番が来ている", denied: "まだのときだけ" },
     { do: choose, by: "ユーザー", input: "番が来ている", denied: "まだのときだけ" },
-    { do: completeByApproval, by: "アプリ", input: "番が来ている", denied: "まだのときだけ" },
+    { do: completeByWrite, by: "アプリ", input: "番が来ている", denied: "まだのときだけ" },
     { do: finishByCondition, by: "同期", input: "番が来ている", denied: "まだのときだけ" },
     { do: request, by: "ユーザー", denied: "まだのときだけ" },
     { do: autoStart, by: "AI", input: "番が来ている", denied: "まだのときだけ" },

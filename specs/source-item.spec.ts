@@ -135,6 +135,8 @@ export const links = [
   { from: update, to: "routing", action: "factChanged", label: "事実が変わったことを、振り分けに伝える（振り分けが、持ち主の Task に伝えるか、振り分け直す）" },
   { from: remove, to: "routing", action: "factChanged", label: "事実が消えたことを、振り分けに伝える" },
   { from: restore, to: "routing", action: "factChanged", label: "事実がまた現れたことを、振り分けに伝える" },
+  { from: update, to: "write", action: "withdraw", label: "対象が閉じたなら（PR が閉じられた など）、確認中の書き込みを取りやめる" },
+  { from: remove, to: "write", action: "withdraw", label: "対象が消えたら、確認中の書き込みを取りやめる" },
 ];
 
 export const inputs = {
