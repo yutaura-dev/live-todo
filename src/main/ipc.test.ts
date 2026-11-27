@@ -111,7 +111,7 @@ describe("decodeTaskId", () => {
 });
 
 describe("decodeSecretKey", () => {
-  it.effect.each(["github.work.token", "github.my-account.token", "llm.anthropic.api_key", "llm.openai.api_key", "slack.home.token", "slack.home.cookie", "notion.notes.token"])(
+  it.effect.each(["github.work.token", "github.my-account.token", "llm.anthropic.api_key", "llm.openai.api_key", "llm.azure-openai.api_key", "slack.home.token", "slack.home.cookie", "notion.notes.token"])(
     "アプリが使う秘密情報のキーを受け取る: %s",
     (key) =>
       Effect.gen(function* () {

@@ -93,12 +93,13 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 - `src/core/judge/llm-classifier.ts`（`LlmStructuredClassifier`）: `effect/ai` の `LanguageModel.generateObject` で verdict（todo / not_todo / uncertain）と理由を受け取る。provider は LanguageModel を提供する側で決める
 - 出力が Schema に合わない・内容のポリシーで拒否された場合は、同期を止めずに要確認に回す（同じ入力なら次も同じ結果になりやすく、同期を失敗にすると 1 件で詰まるため）。接続・レート制限・認証などの失敗は `JudgeRequestError` にして、次の周期でやり直す
 - 評価対象（通知のタイトルなど）は外部から来たデータなので、プロンプトでは区切りの中に入れ、指示として従わないよう明示する
-- `src/app/llm.ts`（`makeStructuredClassifier`）: LLM Profile から classifier を作る。対応済みは `none`（LLM を使わない）・`anthropic`・`openai`。API キーは `SecretStore` の `llm.<provider>.api_key`
+- `src/app/llm.ts`（`makeStructuredClassifier`）: LLM Profile から classifier を作る。対応済みは `none`（LLM を使わない）・`anthropic`・`openai`・`azure-openai`。API キーは `SecretStore` の `llm.<provider>.api_key`
+  - `azure-openai` は OpenAI 互換の v1 API（`<azure.endpoint>/openai/v1`）に `OpenAiClient` の接続先を向けて使う。`model` には deployment 名を書く。判定では Claude と同じく推論を切り（`reasoning.effort: "none"`）、出力トークンに上限（1024）を付ける。エンドポイントは API キーを送る先なので、設定ファイルの検証で Azure のホストだけを受け付ける
 - classifier は**アカウントごと**に作り、そのアカウントのジョブにだけ渡す（会社のデータを許可外の LLM に送らないため）
 - **Decisions provider**（`src/core/judge/decision-model-provider.ts`）: `effect/ai` の `DecisionModel` で確率付きの todo 判定（Probability）をする。LLM Profile に `decisions` があるアカウントだけ使い、ないアカウントは structured output で判定する（ADR-0003）
   - 評価対象（外部から来た文字列）は判定の input、質問と信頼できる情報は instructions に入れる
   - `decideSettled` で答えが返らなかったもの（拒否・欠落・不正）は refusal として要確認に回す
-  - 対応済みは OpenAI（`gpt-6-luna`）。Jev・Gemini Decisions は `DecisionModel.make` で足す
+  - 対応済みは OpenAI と Azure OpenAI（どちらも `gpt-6-luna`。Azure は同じ名前の deployment を既定にし、LLM Profile の `azure.endpoint` のリソースを使う）。Microsoft Foundry の Microsoft-Decision（`microsoft-decision`。`src/core/judge/microsoft-decision-model.ts`）は、`DecisionModel.make` で `<azure.endpoint>/providers/microsoft/v1/systemone` を呼ぶ。Azure OpenAI と同じリソース・同じ API キーで、既定の deployment 名は `Decision-1.1`。score（Rate）は答えの形が effect/ai に合わないので未対応。Jev・Gemini Decisions も `DecisionModel.make` で足す
   - ラベル・優先度・カスタムラベル（Classify / Rate）は、Task に保存する項目を作るときに同じ `decide` にまとめる
 
 ## 定期実行

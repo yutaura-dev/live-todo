@@ -5,7 +5,7 @@ import { decodeAppConfig, InvalidAppConfigError, loadAppConfigFile, loadAppConfi
 
 const validConfig = {
   llmProfiles: {
-    work: { provider: "azure-openai", model: "gpt-5" },
+    work: { provider: "azure-openai", model: "gpt-5", azure: { endpoint: "https://acme.openai.azure.com" } },
     personal: { provider: "anthropic", model: "claude-sonnet-5-5", decisions: { provider: "openai" } },
   },
   defaultLlmProfile: "work",
@@ -40,6 +40,48 @@ describe("decodeAppConfig", () => {
 
       assert.isTrue(config.accounts[0]?.reviewDependencyPrs);
     }));
+
+  it.effect("Azure OpenAI を使うなら、リソースのエンドポイントを LLM Profile に書く", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig(validConfig);
+
+      assert.deepStrictEqual(config.llmProfiles["work"]?.azure, { endpoint: "https://acme.openai.azure.com" });
+    }));
+
+  it.effect("Azure OpenAI を使うのにエンドポイントがなければエラーにする", () =>
+    Effect.gen(function* () {
+      const message = yield* invalidReason({ ...validConfig, llmProfiles: { ...validConfig.llmProfiles, work: { provider: "azure-openai", model: "gpt-5" } } });
+
+      assert.include(message, "llmProfiles.work.azure.endpoint");
+    }));
+
+  it.effect("Decisions だけ Azure OpenAI を使う場合も、エンドポイントがなければエラーにする", () =>
+    Effect.gen(function* () {
+      const message = yield* invalidReason({
+        ...validConfig,
+        llmProfiles: { ...validConfig.llmProfiles, personal: { provider: "anthropic", model: "claude-haiku-5-5", decisions: { provider: "azure-openai" } } },
+      });
+
+      assert.include(message, "llmProfiles.personal.azure.endpoint");
+    }));
+
+  it.effect("Decisions に Microsoft-Decision を使う場合も、Azure のエンドポイントがなければエラーにする", () =>
+    Effect.gen(function* () {
+      const message = yield* invalidReason({
+        ...validConfig,
+        llmProfiles: { ...validConfig.llmProfiles, personal: { provider: "anthropic", model: "claude-haiku-5-5", decisions: { provider: "microsoft-decision" } } },
+      });
+
+      assert.include(message, "llmProfiles.personal.azure.endpoint");
+    }));
+
+  it.effect.each(["https://acme.example.com", "http://acme.openai.azure.com", "https://acme.openai.azure.com/openai/v1", "https://acme.openai.azure.com.evil.example"])(
+    "Azure のエンドポイントでない URL（%s）はエラーにする（API キーをほかへ送らないため）",
+    (endpoint) =>
+      Effect.gen(function* () {
+        yield* invalidReason({ ...validConfig, llmProfiles: { ...validConfig.llmProfiles, work: { provider: "azure-openai", model: "gpt-5", azure: { endpoint } } } });
+      }),
+  );
 
   it.effect("対応していない LLM のプロバイダはエラーにする", () =>
     Effect.gen(function* () {

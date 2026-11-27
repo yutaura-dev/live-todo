@@ -33,6 +33,18 @@ describe("judgeSettingOf", () => {
   });
 });
 
+describe("judgeSettingOf（Azure OpenAI）", () => {
+  it("Azure OpenAI のプロファイルなら、エンドポイントも読む", () => {
+    const azure: ConfigDocument = {
+      ...config,
+      accounts: [],
+      llmProfiles: { personal: { provider: "azure-openai", model: "my-gpt", azure: { endpoint: "https://acme.openai.azure.com" }, decisions: { provider: "azure-openai" } } },
+    };
+
+    assert.deepStrictEqual(judgeSettingOf(azure), { provider: "azure-openai", model: "my-gpt", azureEndpoint: "https://acme.openai.azure.com", probabilities: true });
+  });
+});
+
 describe("hasAccountOverrides", () => {
   it("アカウントによって使うプロファイルが違えば true", () => {
     assert.isTrue(hasAccountOverrides(config));
@@ -69,6 +81,31 @@ describe("withJudgeSetting", () => {
 
     const off = withJudgeSetting(on, { provider: "anthropic", model: "claude-haiku-5-5", probabilities: false });
     assert.isUndefined(off.llmProfiles["default"]?.decisions);
+  });
+
+  it("Azure OpenAI なら、エンドポイントを書き、確率は同じ Azure のリソースの Microsoft-Decision で出す", () => {
+    const next = withJudgeSetting(config, { provider: "azure-openai", model: "my-gpt", azureEndpoint: "https://acme.openai.azure.com", probabilities: true });
+
+    assert.deepStrictEqual(next.llmProfiles["default"], {
+      provider: "azure-openai",
+      model: "my-gpt",
+      azure: { endpoint: "https://acme.openai.azure.com" },
+      decisions: { provider: "microsoft-decision", model: "Decision-1.1" },
+    });
+  });
+
+  it("Azure ポータルからコピーした末尾のスラッシュは外して書く", () => {
+    const next = withJudgeSetting(config, { provider: "azure-openai", model: "my-gpt", azureEndpoint: " https://acme.openai.azure.com/ ", probabilities: false });
+
+    assert.deepStrictEqual(next.llmProfiles["default"]?.azure, { endpoint: "https://acme.openai.azure.com" });
+  });
+
+  it("Azure OpenAI をやめたら、エンドポイントは残さない", () => {
+    const azure = withJudgeSetting(config, { provider: "azure-openai", model: "my-gpt", azureEndpoint: "https://acme.openai.azure.com", probabilities: false });
+
+    const next = withJudgeSetting(azure, { provider: "anthropic", model: "claude-haiku-5-5", probabilities: false });
+
+    assert.isUndefined(next.llmProfiles["default"]?.azure);
   });
 
   it("LLM を使わないなら、モデルは空でないダミーにする（設定ファイルの検証を通すため）", () => {

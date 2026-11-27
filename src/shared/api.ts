@@ -31,7 +31,10 @@ export type LlmProvider = "none" | "anthropic" | "openai" | "gemini" | "azure-op
 
 /** 設定ファイル（config.json）の形。画面で編集し、main で Schema 検証してから保存する */
 export type ConfigDocument = {
-  llmProfiles: Record<string, { provider: LlmProvider; model: string; decisions?: { provider: "jev" | "openai" | "gemini"; model?: string } }>;
+  llmProfiles: Record<
+    string,
+    { provider: LlmProvider; model: string; azure?: { endpoint: string }; decisions?: { provider: "jev" | "openai" | "azure-openai" | "microsoft-decision" | "gemini"; model?: string } }
+  >;
   defaultLlmProfile: string;
   accounts: Array<{
     kind: "github";

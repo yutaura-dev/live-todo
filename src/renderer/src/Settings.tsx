@@ -804,10 +804,11 @@ function AddAccount(props: { existing: string[]; onAdd: (id: string) => void; la
   );
 }
 
-const JUDGE_OPTIONS: { value: "none" | "anthropic" | "openai"; label: string; hint: string }[] = [
+const JUDGE_OPTIONS: { value: "none" | "anthropic" | "openai" | "azure-openai"; label: string; hint: string }[] = [
   { value: "none", label: "LLM を使わない", hint: "規則で決まらない通知は、すべて要確認に入ります。費用はかかりません" },
   { value: "anthropic", label: "Claude", hint: "通知ごとに Anthropic の API を呼びます" },
   { value: "openai", label: "OpenAI", hint: "通知ごとに OpenAI の API を呼びます" },
+  { value: "azure-openai", label: "Azure OpenAI", hint: "通知ごとに、自分の Azure OpenAI のリソースを呼びます" },
 ];
 
 function JudgeEditor(props: {
@@ -856,6 +857,24 @@ function JudgeEditor(props: {
           <input value={setting.model} placeholder="例: gpt-5.2" onChange={(event) => props.onChange({ ...setting, model: event.target.value })} />
         </label>
       )}
+      {setting.provider === "azure-openai" && (
+        <>
+          <label className="field">
+            <span className="field-label">エンドポイント</span>
+            <span className="field-hint">Azure ポータルの「キーとエンドポイント」にある URL</span>
+            <input
+              value={setting.azureEndpoint ?? ""}
+              placeholder="例: https://my-resource.openai.azure.com"
+              onChange={(event) => props.onChange({ ...setting, azureEndpoint: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">deployment 名</span>
+            <span className="field-hint">モデル名ではなく、Azure でデプロイしたときに付けた名前</span>
+            <input value={setting.model} placeholder="例: gpt-5-2" onChange={(event) => props.onChange({ ...setting, model: event.target.value })} />
+          </label>
+        </>
+      )}
       {setting.provider === "anthropic" && (
         <SecretField label="Anthropic の API キー" secretKey="llm.anthropic.api_key" status={props.secrets["llm.anthropic.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
       )}
@@ -866,12 +885,17 @@ function JudgeEditor(props: {
           <span>
             <span className="judge-option-label">確率も出す</span>
             <span className="field-hint">
-              OpenAI Decisions で「自分の対応が要る確率」を出し、カードに表示します。OpenAI の API キーが要ります
+              {setting.provider === "azure-openai"
+                ? "同じリソースの Microsoft-Decision で「自分の対応が要る確率」を出し、カードに表示します。Microsoft-Decision-1.1 を、deployment 名 Decision-1.1 で用意してください"
+                : "OpenAI Decisions で「自分の対応が要る確率」を出し、カードに表示します。OpenAI の API キーが要ります"}
             </span>
           </span>
         </label>
       )}
-      {(setting.provider === "openai" || setting.probabilities) && (
+      {setting.provider === "azure-openai" && (
+        <SecretField label="Azure OpenAI の API キー" secretKey="llm.azure-openai.api_key" status={props.secrets["llm.azure-openai.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
+      )}
+      {(setting.provider === "openai" || (setting.probabilities && setting.provider !== "azure-openai")) && (
         <SecretField label="OpenAI の API キー" secretKey="llm.openai.api_key" status={props.secrets["llm.openai.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
       )}
     </div>

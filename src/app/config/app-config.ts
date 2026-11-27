@@ -11,13 +11,22 @@ const AccountId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/));
 
 const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
 
+// Azure OpenAI のリソースのエンドポイント。API キーを送る先なので、Azure のホストだけを受け付ける（パスは付けず、v1 API のパスはこちらで足す）
+const AzureEndpoint = Schema.String.check(
+  Schema.isPattern(/^https:\/\/[a-z0-9][a-z0-9-]*\.(openai\.azure\.com|cognitiveservices\.azure\.com|services\.ai\.azure\.com)$/),
+);
+
 const LlmProfile = Schema.Struct({
   // none: LLM を使わない（規則で決まらないものはすべて要確認）。API キーがまだない環境でも動かせるようにするため。
   provider: Schema.Literals(["none", "anthropic", "openai", "gemini", "azure-openai", "bedrock"]),
+  // azure-openai では deployment 名を書く
   model: Schema.NonEmptyString,
+  // provider / decisions.provider で Azure（azure-openai・microsoft-decision）を使うときに要る。判定と Decisions で同じリソース
+  azure: Schema.optional(Schema.Struct({ endpoint: AzureEndpoint })),
   decisions: Schema.optional(
     Schema.Struct({
-      provider: Schema.Literals(["jev", "openai", "gemini"]),
+      // microsoft-decision: Microsoft Foundry の Microsoft-Decision。azure と同じリソース・同じ API キーで呼ぶ
+      provider: Schema.Literals(["jev", "openai", "azure-openai", "microsoft-decision", "gemini"]),
       model: Schema.optional(Schema.String),
       thresholds: Schema.optional(Schema.Struct({ todo: Probability, review: Probability })),
     }),
@@ -154,6 +163,14 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
   // 問題を 1 つずつではなくまとめて返し、設定を直す往復を減らす。
   const issues: string[] = [];
   const profileOf = (name: string) => file.llmProfiles[name];
+
+  for (const [name, profile] of Object.entries(file.llmProfiles)) {
+    const usesAzure =
+      profile.provider === "azure-openai" || profile.decisions?.provider === "azure-openai" || profile.decisions?.provider === "microsoft-decision";
+    if (usesAzure && profile.azure === undefined) {
+      issues.push(`llmProfiles.${name}.azure.endpoint: Azure OpenAI を使うので、リソースのエンドポイント（例: https://<リソース名>.openai.azure.com）を書いてください`);
+    }
+  }
 
   if (profileOf(file.defaultLlmProfile) === undefined) {
     issues.push(`defaultLlmProfile: "${file.defaultLlmProfile}" は llmProfiles にない`);

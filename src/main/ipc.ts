@@ -14,7 +14,7 @@ export const decodeTaskId = Schema.decodeUnknownEffect(TaskId);
 
 // renderer から書き換えられる秘密情報を、アプリが読むキーだけに絞る（任意の名前で保存させない）
 const SecretKey = Schema.String.check(
-  Schema.isPattern(/^(github\.[a-z0-9][a-z0-9-]*\.token|slack\.[a-z0-9][a-z0-9-]*\.(token|cookie)|notion\.[a-z0-9][a-z0-9-]*\.token|llm\.(anthropic|openai)\.api_key)$/),
+  Schema.isPattern(/^(github\.[a-z0-9][a-z0-9-]*\.token|slack\.[a-z0-9][a-z0-9-]*\.(token|cookie)|notion\.[a-z0-9][a-z0-9-]*\.token|llm\.(anthropic|openai|azure-openai)\.api_key)$/),
 );
 export const decodeSecretKey = Schema.decodeUnknownEffect(SecretKey);
 

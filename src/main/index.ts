@@ -124,7 +124,7 @@ const DEPENDENCY_REVIEW_BUDGET_USD = 2;
 // 同時に調べる数。並列にすると早く終わるが、増やしすぎると Claude Code の使用量の枠をすぐに使い切る
 const DEPENDENCY_REVIEW_CONCURRENCY = 4;
 const AGENT_JOB_INTERVAL = "1 minute" as const;
-const LLM_SECRET_KEYS = ["llm.anthropic.api_key", "llm.openai.api_key"] as const;
+const LLM_SECRET_KEYS = ["llm.anthropic.api_key", "llm.openai.api_key", "llm.azure-openai.api_key"] as const;
 
 // safeStorage は app の ready 後でないと使えないので、呼ばれた時点で確かめる
 const keychainCipher: SecretCipher = {
