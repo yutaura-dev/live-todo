@@ -10,12 +10,8 @@ import type { Subject } from "./condition.value.ts";
  * 確かめても変わらなければ確認の間隔を倍に延ばし（最初 5 分、上限 1 日）、変わったら最初に戻す。確かめない間は、前に確かめた結果を引き継ぐ。
  */
 export type WatchTarget = {
-  /** 見張っているか。理由が 1 つもなくなったら、最後に確かめてから見張らなくなる */
-  watching: Watching;
-  /** 困った状態を見張るか。自分が関わる開いている対象の一覧（GitHub なら、自分が作った PR・自分にレビュー依頼が来ている PR）に載っている間は見張る */
-  watchProblems: boolean;
-  /** 待っている Action Item があるか（どの Action Item かは waitingItemIds に持つ） */
-  waiters: Waiters;
+  /** なぜ見張っているか（見張っていなければ「見張らない」） */
+  reason: Reason;
   /** 次に確かめるまでの間隔（ミリ秒）。決め方は判断表「次の確認の間隔」 */
   intervalMs: number;
   /** 見張る対象（1 つの項目・検索・ワークフローの実行も、provider が決めた識別子で表す） */
@@ -30,21 +26,19 @@ export type WatchTarget = {
   nextCheckAt: string;
 };
 
-export const Watching = {
-  /** 見張っている */
-  on: "見張っている",
-  /** 見張らない（自分の対象でも、待っている Action Item もない） */
-  off: "やめた",
+export const Reason = {
+  /** 自分が関わる開いている対象の一覧（GitHub なら、自分が作った PR・自分にレビュー依頼が来ている PR）に載っている。困った状態を見張る */
+  problems: "困った状態",
+  /** 待っている Action Item がある（一覧には載っていない） */
+  waiting: "待っている",
+  /** 一覧に載っていて、待っている Action Item もある */
+  both: "両方",
+  /** 一覧から外れた。待っている Action Item もないので、最後にもう一度確かめたら見張らない（merge されて一覧から消えたのを、取りこぼさないため） */
+  lastCheck: "最後に確かめる",
+  /** 見張らない */
+  none: "見張らない",
 } as const;
-export type Watching = (typeof Watching)[keyof typeof Watching];
-
-export const Waiters = {
-  /** 待っている Action Item はない */
-  none: "なし",
-  /** 待っている Action Item がある */
-  some: "あり",
-} as const;
-export type Waiters = (typeof Waiters)[keyof typeof Waiters];
+export type Reason = (typeof Reason)[keyof typeof Reason];
 
 /** 確かめて分かった、対象の変化（間隔を決めるためのもの。条件が成り立ったかの判定は、届け先が受け取る） */
 type Change = "変わらない" | "変わった" | "分からない条件がある";
@@ -59,16 +53,17 @@ export const actors: Record<string, Actor> = {
 const NOW = "2026-11-28T00:00:00Z";
 const INITIAL_MS = 5 * 60 * 1000;
 const MAX_MS = 24 * 60 * 60 * 1000;
-const START = { watching: "見張っている", intervalMs: INITIAL_MS, nextCheckAt: NOW } as const;
-const hasReason = (t: WatchTarget) => t.watchProblems || t.waiters === "あり";
+const RESTART = { intervalMs: INITIAL_MS, nextCheckAt: NOW } as const;
+
+const inList = (reason: Reason) => reason === "困った状態" || reason === "両方";
+const waiting = (reason: Reason) => reason === "待っている" || reason === "両方";
 
 /** 見張りを始める（自分の対象が一覧に初めて現れた・待つ条件の Action Item ができた） */
-export function initial(actor: Actor, reason: "自分の対象" | "待っている"): WatchTarget {
+export function initial(actor: Actor, reason: "困った状態" | "待っている"): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
   return {
-    ...START,
-    watchProblems: reason === "自分の対象",
-    waiters: reason === "待っている" ? "あり" : "なし",
+    reason,
+    ...RESTART,
     subject: { accountId: "github-work", uri: "github:acme/app/pull/42" },
     waitingItemIds: reason === "待っている" ? ["a1"] : [],
     revision: null,
@@ -79,59 +74,54 @@ export function initial(actor: Actor, reason: "自分の対象" | "待ってい�
 /** 自分の対象として、一覧に現れる（見張っていなければ、また見張る） */
 export function listed(target: WatchTarget, actor: Actor): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(!target.watchProblems, "一覧にないときだけ");
-  return target.watching === "やめた" ? { ...target, ...START, watchProblems: true } : { ...target, watchProblems: true };
+  ensure(!inList(target.reason), "一覧に載っていないときだけ");
+  return waiting(target.reason) ? { ...target, reason: "両方" } : { ...target, ...RESTART, reason: "困った状態" };
 }
 
 /**
  * 自分の対象の一覧から外れる（閉じた PR など）
  *
- * すぐには見張りをやめず、最後にもう一度確かめる（merge されて一覧から消えたのを、取りこぼさないため）。
+ * 待っている Action Item がなければ、すぐには見張りをやめず、最後にもう一度確かめる（次に確かめる時刻をすぐに前倒しする）。
  */
 export function unlisted(target: WatchTarget, actor: Actor): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(target.watchProblems, "一覧にあるときだけ");
-  return { ...target, watchProblems: false, nextCheckAt: NOW };
+  ensure(inList(target.reason), "一覧に載っているときだけ");
+  return target.reason === "両方" ? { ...target, reason: "待っている" } : { ...target, reason: "最後に確かめる", nextCheckAt: NOW };
 }
 
 /** 待つ Action Item が増える（見張っていなければ、また見張る） */
 export function addWaiter(target: WatchTarget, actor: Actor): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
-  const waiting: WatchTarget = { ...target, waiters: "あり", waitingItemIds: [...target.waitingItemIds, "a2"] };
-  return target.watching === "やめた" ? { ...waiting, ...START } : waiting;
+  if (target.reason === "見張らない") return { ...target, ...RESTART, reason: "待っている", waitingItemIds: [...target.waitingItemIds, "a2"] };
+  return { ...target, reason: inList(target.reason) ? "両方" : "待っている", waitingItemIds: [...target.waitingItemIds, "a2"] };
 }
 
-/**
- * 待つ Action Item が減る（待つ条件で果たされた・やらなくなった）
- *
- * ほかに待っている Action Item がなく、自分の対象でもなければ、見張らなくなる。
- */
+/** 待つ Action Item が減る（待つ条件で果たされた・やらなくなった） */
 export function removeWaiter(target: WatchTarget, actor: Actor, remaining: "ほかにも待っている" | "もういない"): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(target.waiters === "あり", "待っている Action Item があるときだけ");
-  const waiters: Waiters = remaining === "ほかにも待っている" ? "あり" : "なし";
-  const next = { ...target, waiters };
-  return hasReason(next) ? next : { ...next, watching: "やめた" };
+  ensure(waiting(target.reason), "待っている Action Item があるときだけ");
+  if (remaining === "ほかにも待っている") return { ...target };
+  return { ...target, reason: target.reason === "両方" ? "困った状態" : "見張らない" };
 }
 
 /** 一覧の更新を表す値が変わる（次に確かめる時刻をすぐに前倒しし、間隔を最初に戻す。一覧で取る自分の対象だけ） */
 export function revisionChanged(target: WatchTarget, actor: Actor): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(target.watchProblems, "一覧にある自分の対象だけ");
-  return { ...target, nextCheckAt: NOW, intervalMs: INITIAL_MS };
+  ensure(inList(target.reason), "一覧に載っている自分の対象だけ");
+  return { ...target, ...RESTART };
 }
 
 /**
  * 詳細を取って確かめる
  *
- * 次の間隔は、判断表「次の確認の間隔」で決める。
- * 見張る理由がもうなければ（一覧から外れたあとの最後の確認）、確かめたあと見張らなくなる。
+ * 次の間隔は、判断表「次の確認の間隔」で決める。最後に確かめる対象は、確かめたら見張らなくなる。
+ * 困った状態を見張っているなら、困った状態を事実の行として Source Item に届ける。待っているなら、待つ条件が成り立ったかを Action Item に知らせる。
  */
 export function check(target: WatchTarget, actor: Actor, timing: Timing, _change: Change): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(target.watching === "見張っている", "見張っているときだけ");
+  ensure(target.reason !== "見張らない", "見張っているときだけ");
   ensure(timing === "次に確かめる時刻を過ぎた", "次に確かめる時刻を過ぎたときだけ");
-  return { ...target, nextCheckAt: "2026-11-28T01:00:00Z", watching: hasReason(target) ? "見張っている" : "やめた" };
+  return { ...target, nextCheckAt: "2026-11-28T01:00:00Z", reason: target.reason === "最後に確かめる" ? "見張らない" : target.reason };
 }
 
 /** 次の確認の間隔 */
@@ -164,7 +154,7 @@ export const decisions = {
 };
 
 export const inputs = {
-  initial: { 自分の対象: ["自分の対象"], 待っている: ["待っている"] },
+  initial: { 困った状態: ["困った状態"], 待っている: ["待っている"] },
   check: {
     変わらない: ["次に確かめる時刻を過ぎた", "変わらない"],
     変わった: ["次に確かめる時刻を過ぎた", "変わった"],
@@ -175,7 +165,6 @@ export const inputs = {
 };
 
 export const invariants = {
-  "見張りをやめたのは、見張る理由が 1 つもないときだけ": (target: WatchTarget) => target.watching === "見張っている" || !hasReason(target),
   "見張る対象は、作ったあと変わらない": (before: WatchTarget, after: WatchTarget) => before.subject.accountId === after.subject.accountId && before.subject.uri === after.subject.uri,
 };
 
@@ -186,34 +175,41 @@ export const links = [
 
 export const scenarios = {
   "確かめる時刻が来たら確かめる": [
-    { do: initial, by: "同期", input: "自分の対象", expect: { watching: "見張っている", watchProblems: true } },
+    { do: initial, by: "同期", input: "困った状態", expect: { reason: "困った状態" } },
     { do: check, by: "同期", input: "まだ時刻前", denied: "次に確かめる時刻を過ぎたときだけ" },
-    { do: check, by: "同期", input: "変わらない", expect: { watching: "見張っている" } },
+    { do: check, by: "同期", input: "変わらない", expect: { reason: "困った状態" } },
     { do: revisionChanged, by: "同期" },
     { do: check, by: "同期", input: "分からない" },
   ],
   "一覧から外れた自分の PR は、最後に確かめてから見張らない": [
-    { do: initial, by: "同期", input: "自分の対象" },
-    { do: listed, by: "同期", denied: "一覧にないときだけ" },
-    { do: unlisted, by: "同期", expect: { watchProblems: false, watching: "見張っている" } },
-    { do: unlisted, by: "同期", denied: "一覧にあるときだけ" },
-    { do: revisionChanged, by: "同期", denied: "一覧にある自分の対象だけ" },
-    { do: check, by: "同期", input: "変わった", expect: { watching: "やめた" } },
+    { do: initial, by: "同期", input: "困った状態" },
+    { do: listed, by: "同期", denied: "一覧に載っていないときだけ" },
+    { do: unlisted, by: "同期", expect: { reason: "最後に確かめる" } },
+    { do: unlisted, by: "同期", denied: "一覧に載っているときだけ" },
+    { do: revisionChanged, by: "同期", denied: "一覧に載っている自分の対象だけ" },
+    { do: check, by: "同期", input: "変わった", expect: { reason: "見張らない" } },
     { do: check, by: "同期", input: "変わった", denied: "見張っているときだけ" },
-    { do: listed, by: "同期", expect: { watching: "見張っている", watchProblems: true } },
+    { do: listed, by: "同期", expect: { reason: "困った状態" } },
   ],
   "待っている対象は、待つ Action Item がいなくなったら見張らない": [
-    { do: initial, by: "同期", input: "待っている", expect: { waiters: "あり" } },
-    { do: addWaiter, by: "同期", expect: { waiters: "あり" } },
-    { do: removeWaiter, by: "同期", input: "ほかにも待っている", expect: { watching: "見張っている" } },
-    { do: removeWaiter, by: "同期", input: "もういない", expect: { watching: "やめた", waiters: "なし" } },
+    { do: initial, by: "同期", input: "待っている", expect: { reason: "待っている" } },
+    { do: addWaiter, by: "同期", expect: { reason: "待っている" } },
+    { do: removeWaiter, by: "同期", input: "ほかにも待っている", expect: { reason: "待っている" } },
+    { do: removeWaiter, by: "同期", input: "もういない", expect: { reason: "見張らない" } },
     { do: removeWaiter, by: "同期", input: "もういない", denied: "待っている Action Item があるときだけ" },
-    { do: addWaiter, by: "同期", expect: { watching: "見張っている", waiters: "あり" } },
+    { do: addWaiter, by: "同期", expect: { reason: "待っている" } },
   ],
-  "自分の PR を待つこともある（理由が 2 つ）": [
-    { do: initial, by: "同期", input: "自分の対象" },
-    { do: addWaiter, by: "同期", expect: { watchProblems: true, waiters: "あり" } },
-    { do: removeWaiter, by: "同期", input: "もういない", expect: { watching: "見張っている" } },
+  "自分の PR を待つこともある（理由が両方）": [
+    { do: initial, by: "同期", input: "困った状態" },
+    { do: addWaiter, by: "同期", expect: { reason: "両方" } },
+    { do: unlisted, by: "同期", expect: { reason: "待っている" } },
+    { do: listed, by: "同期", expect: { reason: "両方" } },
+    { do: removeWaiter, by: "同期", input: "もういない", expect: { reason: "困った状態" } },
+  ],
+  "最後に確かめる前に、また待つことになった": [
+    { do: initial, by: "同期", input: "困った状態" },
+    { do: unlisted, by: "同期", expect: { reason: "最後に確かめる" } },
+    { do: addWaiter, by: "同期", expect: { reason: "待っている" } },
   ],
 };
 
