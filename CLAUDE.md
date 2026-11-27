@@ -60,10 +60,19 @@
 - `drizzle/` — drizzle-kit が生成するマイグレーション。手で編集せず、`src/core/db/schema.ts` を直して `pnpm db:generate` で作り直す
 - ローカル DB ファイル（場所は実装時に追記）— 実データが入っているため直接編集しない
 
+## 仕様（live-spec）
+
+- 振る舞いの仕様（どの状態で・誰が・何をできるか）の正本は `specs/*.spec.ts`。1 ファイル 1 ドメインオブジェクトで置き、書き方は live-spec-authoring skill に従う（[ADR-0015](docs/decisions/0015-adopt-live-spec.md)）
+- 振る舞いを変えるときは、実装より先に spec を直す。`pnpm spec:check` を通し、生成した図と一覧（`pnpm spec`）をユーザーに見せて振る舞いが決まってから実装する。実装に合わせて spec を書き換えない
+- spec からコードを指さない（live-spec-from-code skill で書き起こすときも同じ）。spec と実装の対応はテストの側から持つ。実装のテストは `describe(specOf(Spec.操作, "理由"), ...)` で spec の条件に結び、`pnpm spec:check`（`--tests src` 付き）を通す。テストで確かめられない条件は、理由を書いて spec の `reviewed` に入れる
+- 生成した仕様書（HTML / Markdown）はコミットしない
+- 人の判断が要ることは推測で埋めず、spec の `questions` に書く。決まった理由を残したいときは ADR に書く
+
 ## 開発環境
 
 - **ツールを追加するとき**: `flake.nix` の `devShells.default` の `packages` へ追加する。グローバルインストールはしない
 - **npm 依存を追加するとき**: `pnpm add` を使う。pnpm の設定は `pnpm-workspace.yaml` に書き、`.npmrc` や `package.json` の `"pnpm"` フィールドには書かない。`ERR_PNPM_IGNORED_BUILDS` が出たら、ビルドが本当に必要か判断してから `pnpm approve-builds <pkg>` する
+- **@yutaura/live-spec を上げるとき**: 作者自身のパッケージなので、確認せずに最新版へ上げてよい。公開から 24 時間たっていなければ、`pnpm-workspace.yaml` の `minimumReleaseAgeExclude` に完全な版（`"@yutaura/live-spec@x.y.z"`）で書き、前の版の行は消す（名前だけ・範囲では書かない）
 - **環境変数を増やすとき**: `.env.example` にキーと説明だけを追記する（非秘匿値は `.env`、秘匿値は `.env.local`）
 - **worktree で足りないファイルがあるとき**: `.worktreeinclude` に追記する
 

@@ -76,6 +76,7 @@ import { makeTokenInfoStore } from "../app/settings/token-info-store.js";
 import { missingRecommendedScopes, tokenExpiryWarning, verifyGitHubToken } from "../app/settings/verify-github-token.js";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
+import { RunInterrupts } from "../core/agent/run-interrupts.js";
 import { backfillNextActions, recoverInterruptedAgentRuns, requestDependencyReview, runDependencyReviews } from "../core/agent/dependency-triage.js";
 import { requestReplan, runNextActionPlanning } from "../core/agent/next-action-runner.js";
 import { recoverInterruptedStepRuns, runAutoSteps, runStep, StepRunError, startStepRun } from "../app/step-runs.js";
@@ -135,7 +136,8 @@ const keychainCipher: SecretCipher = {
   decrypt: async (data) => (await safeStorage.decryptStringAsync(Buffer.from(data))).result,
 };
 
-const AppLayer = Layer.mergeAll(BoardService.layer.pipe(Layer.provideMerge(TaskRepository.layer)), SourceItemRepository.layer).pipe(
+// RunInterrupts は同期と AI の処理で同じものを使う（同期が見つけた merge を、動いている処理へ届けるため）
+const AppLayer = Layer.mergeAll(Layer.mergeAll(BoardService.layer, RunInterrupts.layer).pipe(Layer.provideMerge(TaskRepository.layer)), SourceItemRepository.layer).pipe(
   Layer.provideMerge(databaseMigrationsFrom(join(app.getAppPath(), "drizzle"))),
   Layer.provideMerge(Database.layer),
   Layer.provideMerge(SqliteClient.layer({ filename: dbPath })),

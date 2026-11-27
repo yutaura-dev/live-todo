@@ -1,0 +1,90 @@
+name: spec
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spec-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUCKET: github-actions-storage-147997134905
+  VIEWER_ORIGIN: https://d1o4fnljvujiqf.cloudfront.net
+  COMMENT_MARKER: "<!-- live-spec-preview -->"
+
+jobs:
+  publish:
+    # fork からの PR には OIDC のトークンが渡らず、保存先の role を引き受けられないので動かさない
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # live-spec は spec の .ts をそのまま実行するので、型を消して動かせる Node 22.18 以上が要る
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 仕様書を作る
+        run: pnpm exec live-spec specs/ --html --tests src --out out/spec.html
+
+      - name: 保存先を決める
+        id: dest
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then dir="pr-$PR_NUMBER"; else dir="main"; fi
+          key="$GITHUB_REPOSITORY/spec/$dir/index.html"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "url=$VIEWER_ORIGIN/$key" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@45666896f5d8e0f10ae255413f3a4cdd03bdc8f5 # v6.3.1
+        with:
+          role-to-assume: arn:aws:iam::147997134905:role/gha-storage-yutaura-dev--live-todo
+          aws-region: ap-northeast-1
+
+      - name: 仕様書を上げる
+        env:
+          KEY: ${{ steps.dest.outputs.key }}
+        # 同じ場所に上書きするので、CloudFront に古い版を返させないよう no-cache にする（既定では 1 日キャッシュされる）
+        run: aws s3 cp out/spec.html "s3://$BUCKET/$KEY" --content-type "text/html; charset=utf-8" --cache-control "no-cache"
+
+      - name: PR に URL をコメントする
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          URL: ${{ steps.dest.outputs.url }}
+        # push のたびにコメントを増やさないよう、前に付けたコメントがあれば書き換える
+        run: |
+          body="$COMMENT_MARKER
+          ### 仕様書（live-spec）
+
+          $URL
+
+          \`$HEAD_SHA\` の時点の仕様書です。見るには、許可した Google アカウントでのログインが要ります。"
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$COMMENT_MARKER\"))) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" > /dev/null
+          fi

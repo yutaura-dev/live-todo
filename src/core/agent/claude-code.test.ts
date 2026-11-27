@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
-import { childEnv, claudeArgs, decodeClaudeOutput } from "./claude-code.js";
+import { Deferred, Effect, Fiber, Option } from "effect";
+import { childEnv, type ClaudeRequest, type ClaudeResult, ClaudeCodeError, claudeArgs, decodeClaudeOutput, runStoppable } from "./claude-code.js";
 
 const request = {
   prompt: "調べて",
@@ -55,6 +55,17 @@ describe("claudeArgs", () => {
 
     assert.strictEqual(args[args.indexOf("--resume") + 1], "abc");
     assert.notInclude(claudeArgs(request), "--resume");
+  });
+
+  it("新しい会話の session id を決めて渡せる（途中で止めたあとに同じ会話を続けるため）", () => {
+    const args = claudeArgs({ ...request, sessionId: "11111111-1111-4111-8111-111111111111" });
+
+    assert.strictEqual(args[args.indexOf("--session-id") + 1], "11111111-1111-4111-8111-111111111111");
+    assert.notInclude(claudeArgs(request), "--session-id");
+  });
+
+  it("続ける会話があるときは、session id を新しく決めない", () => {
+    assert.notInclude(claudeArgs({ ...request, resumeSessionId: "abc", sessionId: "11111111-1111-4111-8111-111111111111" }), "--session-id");
   });
 
   it("モデルと予算の上限を渡せる", () => {
@@ -172,5 +183,93 @@ describe("decodeClaudeOutput", () => {
       const error = yield* Effect.flip(decodeClaudeOutput("Error: not logged in"));
 
       assert.strictEqual(error._tag, "ClaudeCodeError");
+    }));
+});
+
+describe("runStoppable", () => {
+  const SESSION = "22222222-2222-4222-8222-222222222222";
+  const answered = (structured: unknown, sessionId = SESSION): ClaudeResult => ({ sessionId, structured, costUsd: 0.1, permissionDenials: 0 });
+
+  /** 1 回目の呼び出しは止められるまで終わらず、2 回目からは answers を順に返す run */
+  const fakeRun = (answers: ReadonlyArray<ClaudeResult>, options: { firstRuns?: boolean } = {}) => {
+    const requests: ClaudeRequest[] = [];
+    const run = (next: ClaudeRequest) =>
+      Effect.suspend(() => {
+        requests.push(next);
+        if (requests.length === 1 && options.firstRuns !== true) return Effect.never;
+        return Effect.succeed(answers[requests.length - (options.firstRuns === true ? 1 : 2)]!);
+      });
+    return { requests, run };
+  };
+
+  const noticeOf = (deferred: Deferred.Deferred<string>) => ({ wait: Deferred.await(deferred), poll: Effect.map(Deferred.poll(deferred), Option.map(() => "")) });
+
+  it.effect("知らせが来なければ、決めた session id で動かし、回答をそのまま返す", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      const { requests, run } = fakeRun([answered({ plan: 1 })], { firstRuns: true });
+
+      const result = yield* runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION));
+
+      assert.deepStrictEqual(result.structured, { plan: 1 });
+      assert.strictEqual(requests[0]?.sessionId, SESSION);
+    }));
+
+  it.effect("知らせが来たら動いている claude を止め、同じ session で、やめるか続けるかを判断させる", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      const { requests, run } = fakeRun([answered({ decision: "stop", reason: "merge されたので直す意味がない" })]);
+
+      const fiber = yield* Effect.forkChild(Effect.flip(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION))));
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(deferred, "追っている PR が merge された");
+      const error = yield* Fiber.join(fiber);
+
+      assert.strictEqual(requests[1]?.resumeSessionId, SESSION);
+      assert.include(requests[1]?.prompt, "追っている PR が merge された");
+      assert.instanceOf(error, ClaudeCodeError);
+      assert.strictEqual(error.stoppedReason, "merge されたので直す意味がない");
+    }));
+
+  it.effect("続けると判断したら、元の形の回答（result）を回答として返す", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      const { run } = fakeRun([answered({ decision: "continue", reason: "別の PR でも要る修正", result: { plan: 2 } })]);
+
+      const fiber = yield* Effect.forkChild(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION)));
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(deferred, "追っている PR が merge された");
+      const result = yield* Fiber.join(fiber);
+
+      assert.deepStrictEqual(result.structured, { plan: 2 });
+    }));
+
+  it.effect("続けると答えたのに元の形の回答がなければ、やめたことにせず失敗にする", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      const { run } = fakeRun([answered({ decision: "continue", reason: "続ける" })]);
+
+      const fiber = yield* Effect.forkChild(Effect.flip(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION))));
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(deferred, "追っている PR が merge された");
+      const error = yield* Fiber.join(fiber);
+
+      assert.instanceOf(error, ClaudeCodeError);
+      assert.isUndefined(error.stoppedReason);
+    }));
+
+  it.effect("始める前に知らせが来ていたら、止めずに最初から、作業と一緒に判断も頼む", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      yield* Deferred.succeed(deferred, "追っている PR が merge された");
+      const { requests, run } = fakeRun([answered({ decision: "stop", reason: "もう要らない" })], { firstRuns: true });
+
+      const error = yield* Effect.flip(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION)));
+
+      assert.strictEqual(requests.length, 1);
+      assert.isUndefined(requests[0]?.resumeSessionId);
+      assert.include(requests[0]?.prompt, "調べて");
+      assert.include(requests[0]?.prompt, "追っている PR が merge された");
+      assert.strictEqual(error.stoppedReason, "もう要らない");
     }));
 });

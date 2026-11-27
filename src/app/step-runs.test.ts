@@ -3,6 +3,9 @@ import { Effect, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode, type ClaudeRequest } from "../core/agent/claude-code.js";
+import { RunInterrupts } from "../core/agent/run-interrupts.js";
+import { recordingInterrupts, resolveTrackedItems, STOPPED_REASON, stoppingClaude } from "../core/agent/stop-testing.js";
+import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TestDatabase } from "../core/db/test-database.js";
 import { decodePlan, type NextActionPlan } from "../core/task/next-actions.js";
 import { TaskRepository } from "../core/task/task-repository.js";
@@ -62,6 +65,26 @@ describe("Claude Code に手順をやらせる", () => {
       assert.include(h.requests[0]!.prompt, "経緯を調べてまとめる");
       assert.deepStrictEqual(h.requests[0]!.allowedTools, [...QUESTION_TOOLS]);
       assert.deepStrictEqual(h.requests[0]!.jsonSchema, STEP_JSON_SCHEMA);
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("やっている間に追う項目が片付き、Claude Code が作業をやめたら、Task を完了にして、やめた理由を報告に残す", () => {
+    const h = harness();
+    const interrupts = recordingInterrupts();
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithPlan([step("s1", "経緯を調べてまとめる", "claude_on_request")]);
+      const item = yield* (yield* SourceItemRepository).upsertItem({ source: "gmail:mail:threads", externalId: "thread", title: "依頼のメール", url: "https://mail.google.com/", state: "open", fingerprint: "v1" });
+      yield* (yield* TaskRepository).linkItem(taskId, item.id, "tracks");
+      yield* startStepRun(taskId, "s1");
+      yield* resolveTrackedItems(taskId);
+
+      yield* h.provide(runStep(taskId, "s1", {}).pipe(Effect.provideService(ClaudeCode, stoppingClaude()), Effect.provideService(RunInterrupts, interrupts.service)));
+
+      const after = yield* loaded(taskId);
+      assert.deepStrictEqual(interrupts.listened, [taskId]);
+      assert.strictEqual(after.status, "done");
+      assert.deepInclude(after.plan.steps[0], { status: "todo" });
+      assert.include(JSON.stringify(after.plan.steps[0]), STOPPED_REASON);
     }).pipe(Effect.provide(TestDatabase));
   });
 

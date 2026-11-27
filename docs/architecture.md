@@ -38,7 +38,7 @@ Source Item ──(Link: tracks / context)──▶ Task
 1. Adapter から SourceChange を取得し、triage が pending の Item を判定する（トランザクションの外）
 2. Source Item を保存し、前回との差から Activity を記録する
 3. pending の Item は判定に従って Task を作り tracks で紐づける（not_todo なら ignored）
-4. linked の Item に resolved / reopened / removed が起きたら、tracks の Item の状態から Task の status を導き直す
+4. linked の Item に resolved / reopened / removed が起きたら、tracks の Item の状態から Task の status を導き直す。処理中（agent_running）の Task は status を変えず、処理側に知らせて Claude Code に作業をやめるか続けるかを判断させる（[ADR-0016](decisions/0016-stop-agent-when-tracked-items-close.md)）
 5. Task の項目が実際に変わったときだけ Task Change を記録する
 6. カーソルを保存する（2〜6 は 1 つのトランザクション）
 

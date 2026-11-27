@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { RecurringGhost, Board, BoardCard, BoardColumnId, MovableStatus, SettingsSnapshot } from "../../shared/api.js";
+import { canUserMove } from "../../core/task/task-status.js";
 import { api, isMock } from "./api.js";
 import { Settings } from "./Settings.js";
 import { TaskDrawer } from "./TaskDrawer.js";
@@ -315,7 +316,7 @@ function Card(props: {
   onDelete: () => void;
 }) {
   const { card, inTray } = props;
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.id, data: { card } });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: card.id, data: { card }, disabled: !canUserMove(card.status) });
   const { main, repository } = splitTitle(card.title);
   // ドラッグ中は dnd-kit の動きに任せ、それ以外はカードごとの名前で、レーンを移るときに動いて見えるようにする
   const style = transform
@@ -397,7 +398,7 @@ function Card(props: {
             </button>
           </>
         )}
-        {!inTray && (
+        {!inTray && canUserMove(card.status) && (
           <button type="button" className="delete-link" onClick={props.onDelete}>
             削除
           </button>

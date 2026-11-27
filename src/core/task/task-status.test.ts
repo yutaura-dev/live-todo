@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { deriveTaskStatus } from "./task-status.js";
+import { canUserMove, deriveTaskStatus } from "./task-status.js";
 
 describe("deriveTaskStatus", () => {
   it("tracks の Item が解決したら、開いている Task を done にする", () => {
@@ -39,5 +39,15 @@ describe("deriveTaskStatus", () => {
 
   it("tracks の Item がなければ変えない", () => {
     assert.strictEqual(deriveTaskStatus("todo", []), "todo");
+  });
+});
+
+describe("canUserMove", () => {
+  it("処理中の Task はユーザーが列を移せない", () => {
+    assert.isFalse(canUserMove("agent_running"));
+  });
+
+  it("処理中でなければユーザーが列を移せる", () => {
+    for (const status of ["todo", "in_progress", "done", "needs_review", "dismissed", "archived"] as const) assert.isTrue(canUserMove(status));
   });
 });

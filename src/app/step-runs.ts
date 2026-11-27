@@ -2,6 +2,7 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { moveTask } from "../core/agent/dependency-triage.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
+import { isStopped, listenForStop, statusAfterRun } from "../core/agent/run-interrupts.js";
 import { Database } from "../core/db/database.js";
 import { agentRuns, tasks as tasksTable } from "../core/db/schema.js";
 import { type ActionStep, autoRunnableSteps, decodePlan, type NextActionPlan, type Step, type StepRun, withStepRun } from "../core/task/next-actions.js";
@@ -95,14 +96,15 @@ export const startStepRun = Effect.fnUntraced(function* (taskId: number, stepId:
   yield* moveTask(taskId, task.status, "agent_running");
 });
 
-const finishAgentRun = Effect.fnUntraced(function* (taskId: number, stepId: string, status: "succeeded" | "failed", finishedAt: string) {
+const finishAgentRun = Effect.fnUntraced(function* (taskId: number, stepId: string, failure: unknown, finishedAt: string) {
+  const status = failure === undefined ? "succeeded" : "failed";
   const db = yield* Database;
   const runs = yield* db.select().from(agentRuns).where(and(eq(agentRuns.taskId, taskId), inArray(agentRuns.status, ["queued", "running"]))).pipe(Effect.orDie);
   const mine = runs.find((run) => run.kind === STEP_KIND && Option.exists(Schema.decodeUnknownOption(StepRunRecord)(run.result), (result) => result.stepId === stepId));
   if (mine === undefined) return;
   yield* db.update(agentRuns).set({ status, finishedAt }).where(eq(agentRuns.id, mine.id)).pipe(Effect.orDie);
   if (runs.some((run) => run.id !== mine.id)) return;
-  yield* moveTask(taskId, "agent_running", mine.previousStatus as TaskStatus);
+  yield* moveTask(taskId, "agent_running", yield* statusAfterRun(taskId, mine.previousStatus as TaskStatus, failure));
 });
 
 /** 頼んだ手順を Claude Code にやらせ、やり遂げたら済みに、できなければ済みにせず、どちらも報告を残す */
@@ -126,12 +128,14 @@ export const runStep = Effect.fnUntraced(function* <R = never>(
       jsonSchema: STEP_JSON_SCHEMA,
     });
     return yield* decodeReport(result.structured).pipe(Effect.mapError((error) => new StepRunError({ message: `報告の形が想定と違う: ${error.message}` })));
-  }).pipe(Effect.result);
+  }).pipe(listenForStop(taskId), Effect.result);
   const at = DateTime.formatIso(yield* DateTime.now);
-  yield* finishAgentRun(taskId, stepId, outcome._tag === "Failure" ? "failed" : "succeeded", at);
+  yield* finishAgentRun(taskId, stepId, outcome._tag === "Failure" ? outcome.failure : undefined, at);
   const run: StepRun =
     outcome._tag === "Failure"
-      ? { state: "failed", summary: `Claude Code が手順をやれなかった: ${"message" in outcome.failure ? String(outcome.failure.message) : "原因不明"}`, at }
+      ? isStopped(outcome.failure)
+        ? { state: "failed", summary: `Claude Code が手順をやめた: ${outcome.failure.stoppedReason}`, at }
+        : { state: "failed", summary: `Claude Code が手順をやれなかった: ${"message" in outcome.failure ? String(outcome.failure.message) : "原因不明"}`, at }
       : { state: outcome.success.done ? "done" : "failed", summary: outcome.success.report, at };
   yield* saveRun(taskId, stepId, run);
 });

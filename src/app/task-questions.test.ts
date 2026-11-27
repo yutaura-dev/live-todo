@@ -5,6 +5,8 @@ import { agentRuns } from "../core/db/schema.js";
 import { TestClock } from "effect/testing";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode, type ClaudeRequest } from "../core/agent/claude-code.js";
+import { RunInterrupts } from "../core/agent/run-interrupts.js";
+import { recordingInterrupts, resolveTrackedItems, STOPPED_REASON, stoppingClaude } from "../core/agent/stop-testing.js";
 import { TestDatabase } from "../core/db/test-database.js";
 import { SourceItemRepository } from "../core/source/source-item-repository.js";
 import { TaskRepository } from "../core/task/task-repository.js";
@@ -194,6 +196,23 @@ describe("Task への質問", () => {
 
       yield* failing.provide(answerQuestion(yield* askQuestion(taskId, "場所は？"), {}));
       assert.strictEqual(yield* statusOf, "todo");
+    }).pipe(Effect.provide(TestDatabase));
+  });
+
+  it.effect("調べている間に追う項目が片付き、Claude Code が調べるのをやめたら、Task を完了にして、やめた理由を質問の失敗として残す", () => {
+    const h = harness();
+    const interrupts = recordingInterrupts();
+    return Effect.gen(function* () {
+      const taskId = yield* taskWithItem("github:work", "https://github.com/acme/app/pull/1");
+      const id = yield* askQuestion(taskId, "何を直す？");
+      yield* resolveTrackedItems(taskId);
+
+      yield* h.provide(answerQuestion(id, {}).pipe(Effect.provideService(ClaudeCode, stoppingClaude()), Effect.provideService(RunInterrupts, interrupts.service)));
+
+      assert.deepStrictEqual(interrupts.listened, [taskId]);
+      assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(taskId)).status, "done");
+      const [question] = yield* listQuestions(taskId);
+      assert.include(String(question?.error), STOPPED_REASON);
     }).pipe(Effect.provide(TestDatabase));
   });
 

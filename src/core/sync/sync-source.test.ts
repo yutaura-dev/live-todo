@@ -1,5 +1,6 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import { Effect, Option, Schema } from "effect";
+import { RunInterrupts } from "../agent/run-interrupts.js";
 import { TestDatabase } from "../db/test-database.js";
 import { JudgeRequestError, type TodoJudgment, type TodoVerdict } from "../judge/todo-judge.js";
 import { SourceItemRepository } from "../source/source-item-repository.js";
@@ -305,6 +306,53 @@ describe("失敗時", () => {
       assert.deepStrictEqual(yield* (yield* TaskRepository).listTasks, []);
       assert.isTrue(Option.isNone(yield* items.loadCursor("test")));
     }).pipe(Effect.provide(TestDatabase)));
+});
+
+describe("AI が処理中の Task", () => {
+  it.effect("追う Item が解決したら、status は処理中のままにして、処理中の作業へ知らせる（やめるか続けるかは処理側が決める）", () => {
+    const calls: Array<{ taskId: number; states: readonly string[] }> = [];
+    return Effect.gen(function* () {
+      const binding = bindingWith(batches([upserted(item())], [upserted(item({ state: "closed", version: 2 }))]));
+      yield* syncSource(binding);
+      const created = yield* taskOfItem("a");
+      yield* (yield* TaskRepository).updateTask(created!.id, { status: "agent_running" });
+
+      yield* syncSource(binding);
+
+      assert.strictEqual((yield* taskOfItem("a"))?.status, "agent_running");
+      assert.deepStrictEqual(calls, [{ taskId: created!.id, states: ["resolved"] }]);
+    }).pipe(
+      Effect.provideService(
+        RunInterrupts,
+        RunInterrupts.of({
+          listen: (_taskId, effect) => effect as never,
+          trackedClosed: (taskId, states) => Effect.sync(() => (calls.push({ taskId, states }), true)),
+        }),
+      ),
+      Effect.provide(TestDatabase),
+    );
+  });
+
+  it.effect("処理中でない Task は、処理側に知らせず、追う Item から status を導き直す", () => {
+    const calls: number[] = [];
+    return Effect.gen(function* () {
+      const binding = bindingWith(batches([upserted(item())], [upserted(item({ state: "closed", version: 2 }))]));
+
+      yield* syncTimes(binding, 2);
+
+      assert.strictEqual((yield* taskOfItem("a"))?.status, "done");
+      assert.deepStrictEqual(calls, []);
+    }).pipe(
+      Effect.provideService(
+        RunInterrupts,
+        RunInterrupts.of({
+          listen: (_taskId, effect) => effect as never,
+          trackedClosed: (taskId) => Effect.sync(() => (calls.push(taskId), true)),
+        }),
+      ),
+      Effect.provide(TestDatabase),
+    );
+  });
 });
 
 describe("事実", () => {

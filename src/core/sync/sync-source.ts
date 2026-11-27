@@ -1,5 +1,6 @@
 import { Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
+import { RunInterrupts } from "../agent/run-interrupts.js";
 import { withTransaction } from "../db/database.js";
 import type { TodoJudgment, TodoVerdict } from "../judge/todo-judge.js";
 import { detectActivities } from "../source/activities.js";
@@ -221,7 +222,14 @@ const reconcileStatus = Effect.fnUntraced(function* (item: SourceItem, summary: 
   const task = yield* tasks.findTaskByItem(item.id);
   if (Option.isNone(task)) return;
 
-  const next = deriveTaskStatus(task.value.status, yield* tasks.trackedItemStates(task.value.id));
+  const states = yield* tasks.trackedItemStates(task.value.id);
+  // 処理中の Task は status を直接変えず、処理側に知らせて、作業をやめるか続けるかを決めさせる
+  if (task.value.status === "agent_running") {
+    const interrupts = yield* Effect.serviceOption(RunInterrupts);
+    if (Option.isSome(interrupts)) yield* interrupts.value.trackedClosed(task.value.id, states);
+    return;
+  }
+  const next = deriveTaskStatus(task.value.status, states);
   if (next === task.value.status) return;
 
   yield* tasks.updateTask(task.value.id, { status: next });

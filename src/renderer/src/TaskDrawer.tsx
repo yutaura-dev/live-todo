@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ConflictResolutionView, GmailMailTargetView, TaskQuestionView, MergePlanView, MovableStatus, PullRequestFixView, Step, TaskDetail, WaitCondition } from "../../shared/api.js";
 import { linkOfStep } from "../../core/task/next-actions.js";
+import { canUserMove } from "../../core/task/task-status.js";
 import { api } from "./api.js";
 import { Markdown } from "./Markdown.js";
 import { useDrawerFocus } from "./use-drawer-focus.js";
@@ -83,6 +84,7 @@ export function TaskDrawer(props: {
               <label className="field">
                 <span className="field-label">ステータス</span>
                 <select
+                  disabled={!canUserMove(detail.status)}
                   value={MOVABLE.includes(detail.status as MovableStatus) ? detail.status : ""}
                   onChange={(event) => void props.onMove(detail.id, event.target.value as MovableStatus)}
                 >
@@ -94,7 +96,7 @@ export function TaskDrawer(props: {
                   ))}
                 </select>
               </label>
-              {detail.status !== "dismissed" && (
+              {detail.status !== "dismissed" && canUserMove(detail.status) && (
                 <button type="button" className="dismiss-button" onClick={() => void props.onDelete(detail.id)}>
                   削除
                 </button>

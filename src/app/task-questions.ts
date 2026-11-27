@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { AgentWorkspace } from "../core/agent/agent-workspace.js";
 import { ClaudeCode } from "../core/agent/claude-code.js";
+import { listenForStop, statusAfterRun } from "../core/agent/run-interrupts.js";
 import { Database } from "../core/db/database.js";
 import { agentRuns, sourceItems, taskChanges, taskLinks, taskQuestions } from "../core/db/schema.js";
 import { moveTask } from "../core/agent/dependency-triage.js";
@@ -277,10 +278,10 @@ export const answerQuestion = Effect.fnUntraced(function* <R = never>(questionId
     const cwd = prepared.cwd;
     const answer = yield* decodeAnswer(result.structured).pipe(Effect.mapError((error) => new TaskQuestionError({ message: `回答の形が想定と違う: ${error.message}` })));
     return { answer, result, cwd };
-  }).pipe(Effect.result);
+  }).pipe(listenForStop(row.taskId), Effect.result);
 
   const answeredAt = DateTime.formatIso(yield* DateTime.now);
-  yield* finishRun(row.taskId, questionId, outcome._tag === "Failure" ? "failed" : "succeeded", answeredAt);
+  yield* finishRun(row.taskId, questionId, outcome._tag === "Failure" ? outcome.failure : undefined, answeredAt);
   if (outcome._tag === "Failure") {
     yield* db.update(taskQuestions).set({ status: "failed", error: outcome.failure.message, answeredAt }).where(eq(taskQuestions.id, questionId)).pipe(Effect.orDie);
     return;
@@ -309,14 +310,15 @@ const QUESTION_KIND = "question";
 const QuestionRun = Schema.Struct({ questionId: Schema.Number });
 
 /** 質問の調べものを終わりにし、ほかの調べものが動いていなければ、Task を質問する前のレーンに戻す */
-const finishRun = Effect.fnUntraced(function* (taskId: number, questionId: number, status: "succeeded" | "failed", finishedAt: string) {
+const finishRun = Effect.fnUntraced(function* (taskId: number, questionId: number, failure: unknown, finishedAt: string) {
+  const status = failure === undefined ? "succeeded" : "failed";
   const db = yield* Database;
   const runs = yield* db.select().from(agentRuns).where(and(eq(agentRuns.taskId, taskId), inArray(agentRuns.status, ["queued", "running"]))).pipe(Effect.orDie);
   const mine = runs.find((run) => run.kind === QUESTION_KIND && Option.exists(Schema.decodeUnknownOption(QuestionRun)(run.result), (result) => result.questionId === questionId));
   if (mine === undefined) return;
   yield* db.update(agentRuns).set({ status, finishedAt }).where(eq(agentRuns.id, mine.id)).pipe(Effect.orDie);
   if (runs.some((run) => run.id !== mine.id)) return;
-  yield* moveTask(taskId, "agent_running", mine.previousStatus as TaskStatus);
+  yield* moveTask(taskId, "agent_running", yield* statusAfterRun(taskId, mine.previousStatus as TaskStatus, failure));
 });
 
 const StoredJudgment = Schema.Struct({ request: Schema.Struct({ input: Schema.String }) });

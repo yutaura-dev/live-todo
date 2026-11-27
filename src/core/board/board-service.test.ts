@@ -7,7 +7,7 @@ import { TestDatabase } from "../db/test-database.js";
 import { SourceItemRepository } from "../source/source-item-repository.js";
 import { TaskRepository } from "../task/task-repository.js";
 import type { TaskStatus } from "../task/task.js";
-import { BoardService, TaskNotFoundError } from "./board-service.js";
+import { BoardService, TaskBusyError, TaskNotFoundError } from "./board-service.js";
 
 const run = <A, E>(effect: Effect.Effect<A, E, BoardService | TaskRepository | SourceItemRepository | Database>) =>
   effect.pipe(Effect.provide(BoardService.layer), Effect.provide(TestDatabase));
@@ -126,6 +126,20 @@ describe("BoardService.moveTask", () => {
         yield* (yield* BoardService).moveTask(task.id, "todo");
 
         assert.deepStrictEqual(yield* (yield* TaskRepository).listChanges(task.id), []);
+      }),
+    ));
+
+  it.effect("処理中の Task は動かせず、status も変えない", () =>
+    run(
+      Effect.gen(function* () {
+        const task = yield* taskWithItem("a", "agent_running");
+
+        const error = yield* Effect.flip((yield* BoardService).moveTask(task.id, "todo"));
+
+        const tasks = yield* TaskRepository;
+        assert.instanceOf(error, TaskBusyError);
+        assert.strictEqual((yield* tasks.listTasks)[0]?.status, "agent_running");
+        assert.deepStrictEqual(yield* tasks.listChanges(task.id), []);
       }),
     ));
 
