@@ -279,6 +279,16 @@ export const saveAppConfigFile = Effect.fnUntraced(function* (path: string, inpu
   );
 });
 
+/** 同期を始めるための設定。初めて起動したときはまだファイルがないので none（エラーにはしない） */
+export const loadAppConfigFileIfExists = Effect.fnUntraced(function* (path: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const exists = yield* fs
+    .exists(path)
+    .pipe(Effect.mapError((error) => new InvalidAppConfigError({ message: `設定ファイルを読めない: ${path}: ${error.message}` })));
+  if (!exists) return Option.none<AppConfig>();
+  return Option.some(yield* loadAppConfigFile(path));
+});
+
 export const loadAppConfigFile = Effect.fnUntraced(function* (path: string) {
   const fs = yield* FileSystem.FileSystem;
   const text = yield* fs

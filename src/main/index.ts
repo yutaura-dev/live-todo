@@ -5,7 +5,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Redacted, Schema } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
-import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
+import { loadAppConfigFile, loadAppConfigFileIfExists, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
@@ -169,7 +169,13 @@ let syncFiber: Fiber.Fiber<unknown, unknown> | undefined;
 let syncProblem: string | undefined;
 
 const startSync = Effect.gen(function* () {
-  const config = yield* loadAppConfigFile(configPath);
+  const configFile = yield* loadAppConfigFileIfExists(configPath);
+  if (Option.isNone(configFile)) {
+    // 初めて起動したときの状態なので、エラーではなく次にやることを出す。設定を保存すると restartSync で同期が始まる
+    syncProblem = "まだ設定がありません。設定画面でアカウントを追加して保存すると、同期を始めます";
+    return;
+  }
+  const config = configFile.value;
   for (const account of config.accounts) {
     const dismissed = yield* dismissTasksOutsideFilter(account.id, account.repositories ?? {});
     if (dismissed > 0) yield* Effect.log(`フィルタで除外したリポジトリの Task を ${dismissed} 件片付けた`).pipe(Effect.annotateLogs({ account: account.id }));

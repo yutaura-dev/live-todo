@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, FileSystem, Option } from "effect";
-import { decodeAppConfig, InvalidAppConfigError, loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "./app-config.js";
+import { decodeAppConfig, InvalidAppConfigError, loadAppConfigFile, loadAppConfigFileIfExists, readAppConfigDocument, saveAppConfigFile } from "./app-config.js";
 
 const validConfig = {
   llmProfiles: {
@@ -372,5 +372,29 @@ describe("readAppConfigDocument", () => {
       const document = yield* readAppConfigDocument("/config.json");
 
       assert.deepStrictEqual(document, Option.some({ accounts: "broken" }));
+    }).pipe(Effect.provide(FileSystem.layerNoop({ exists: () => Effect.succeed(true), readFileString: () => Effect.succeed('{"accounts":"broken"}') }))));
+});
+
+describe("loadAppConfigFileIfExists", () => {
+  it.effect("設定ファイルがなければ none を返す（初めて起動したときは、まだ設定がないため）", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* loadAppConfigFileIfExists(`${yield* fs.makeTempDirectoryScoped()}/config.json`);
+
+      assert.isTrue(Option.isNone(config));
+    }).pipe(Effect.provide(NodeFileSystem.layer)));
+
+  it.effect("設定ファイルがあれば検証して返す", () =>
+    Effect.gen(function* () {
+      const config = yield* loadAppConfigFileIfExists("/config.json");
+
+      assert.strictEqual(Option.getOrThrow(config).defaultLlmProfile, "work");
+    }).pipe(Effect.provide(FileSystem.layerNoop({ exists: () => Effect.succeed(true), readFileString: () => Effect.succeed(JSON.stringify(validConfig)) }))));
+
+  it.effect("設定ファイルがあっても検証に通らなければエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(loadAppConfigFileIfExists("/config.json"));
+
+      assert.instanceOf(error, InvalidAppConfigError);
     }).pipe(Effect.provide(FileSystem.layerNoop({ exists: () => Effect.succeed(true), readFileString: () => Effect.succeed('{"accounts":"broken"}') }))));
 });
