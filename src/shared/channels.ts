@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   gmailMailTarget: "board:gmail-mail-target",
   taskQuestions: "board:task-questions",
   interpretRule: "settings:interpret-rule",
+  decomposeRule: "settings:decompose-rule",
   openStepLink: "board:open-step-link",
   applyRuleToExisting: "settings:apply-rule-to-existing",
   askTask: "board:ask-task",

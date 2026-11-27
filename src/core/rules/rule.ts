@@ -1,5 +1,7 @@
+import type { RuleCondition } from "./rule-condition.js";
+
 /**
- * 利用者が決めたルール（ADR-0014）。「どういう時」と「何をする」を言葉で書き、どちらも Decisions でアプリの判定・操作に結びつける。
+ * 利用者が決めたルール（ADR-0014、ADR-0019）。「どういう時」と「何をする」を言葉で書き、どちらも Decisions でアプリの判定・操作に結びつける。
  * ルールの中身はアプリに組み込まず、設定に持つ。操作は Source ごとに決める（今は Gmail のラベル・既読・アーカイブだけ）
  */
 export type Rule = {
@@ -10,10 +12,14 @@ export type Rule = {
   createdAt: string;
   /** どういう時（言葉で書く。届いたものごとに Decisions で当てはまるかを判定する） */
   when: string;
+  /** when を分けた問い。Task に当てるときは、文を読み直さずにこれで判定する（ADR-0019） */
+  condition?: RuleCondition | undefined;
+  /** condition を分けた when の文。when を書き換えたら分け直す */
+  conditionFrom?: string | undefined;
   /** 何をする（言葉で書く。保存するときに Decisions でアプリの操作に結びつけ、actions に持つ） */
   then: string;
   /** then から読み取ったアプリの操作。当てるときはこれを使い、文を読み直さない */
-  actions: { gmail?: GmailRuleActions | undefined };
+  actions: { task?: "done" | "dismissed" | "todo" | undefined; gmail?: GmailRuleActions | undefined };
   /** actions を読み取った then の文。then を書き換えたら読み取り直す */
   interpretedFrom: string;
 };

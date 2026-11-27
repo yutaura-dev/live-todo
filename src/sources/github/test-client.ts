@@ -12,6 +12,7 @@ export const gitHubClientStub = (overrides: Partial<GitHubClient["Service"]> = {
     listReviews: () => Effect.succeed<unknown>([]),
     getComment: () => Effect.succeed(Option.none()),
     getViewer: Effect.succeed<unknown>({ login: "me" }),
+    listMyTeams: Effect.succeed([]),
     inspectToken: Effect.succeed({ viewer: { login: "me" }, scopes: ["repo"], expiresAt: undefined }),
     getRepository: () => Effect.succeed({ allowSquashMerge: true, allowMergeCommit: true, allowRebaseMerge: true }),
     mergePullRequest: () => Effect.succeed({ sha: "merged" }),

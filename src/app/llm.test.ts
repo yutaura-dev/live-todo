@@ -1,10 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer } from "effect";
+import { LanguageModel } from "effect/ai";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { EnvSecretStore, MissingSecretError } from "../core/config/secret-store.js";
 import { Option } from "effect";
 import type { LlmProfile } from "./config/app-config.js";
-import { judgeThresholdsFor, makeDecisionsProvider, makeMailClassifier, makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
+import { judgeThresholdsFor, makeDecisionModel, makeDecisionsProvider, makeLanguageModel, makeMailClassifier, makeStructuredClassifier, UnsupportedLlmProviderError } from "./llm.js";
 
 const AZURE_PROFILE: LlmProfile = { provider: "azure-openai", model: "my-gpt-deployment", azure: { endpoint: "https://acme.openai.azure.com" } };
 const AZURE_DECISIONS_PROFILE: LlmProfile = { provider: "none", model: "-", azure: { endpoint: "https://acme.openai.azure.com" }, decisions: { provider: "azure-openai" } };
@@ -256,5 +257,37 @@ describe("judgeThresholdsFor", () => {
       judgeThresholdsFor({ provider: "none", model: "-", decisions: { provider: "openai", thresholds: { todo: 0.7, review: 0.3 } } }),
       { todo: 0.7, review: 0.3 },
     );
+  });
+});
+
+describe("makeLanguageModel / makeDecisionModel（ルールの分解と判定に使う）", () => {
+  it.effect("LLM を使わない LLM Profile では、LanguageModel を作れない理由を示すエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(makeLanguageModel({ provider: "none", model: "-" }));
+
+      assert.instanceOf(error, UnsupportedLlmProviderError);
+    }).pipe(withEnv({})));
+
+  it.effect("decisions のない LLM Profile では、DecisionModel を作れない理由を示すエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(makeDecisionModel({ provider: "anthropic", model: "claude-haiku-5-5" }));
+
+      assert.instanceOf(error, UnsupportedLlmProviderError);
+    }).pipe(withEnv({})));
+
+  it.effect("Azure OpenAI の LLM Profile から、推論を切った LanguageModel を作る", () => {
+    const { http, requests } = recordingHttp();
+    return Effect.gen(function* () {
+      const layer = yield* makeLanguageModel(AZURE_PROFILE);
+
+      yield* Effect.exit(
+        Effect.gen(function* () {
+          const model = yield* LanguageModel.LanguageModel;
+          return yield* model.generateText({ prompt: "x" });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      assert.deepInclude(requests[0]?.body, { model: "my-gpt-deployment", reasoning: { effort: "none" } });
+    }).pipe(withHttp(http, { LIVE_TODO_SECRET_LLM_AZURE_OPENAI_API_KEY: "az-test" }));
   });
 });

@@ -1,5 +1,6 @@
 import { Effect, Option, Ref, Schema } from "effect";
 import { DEFAULT_TODO_THRESHOLDS, type JudgeInput, makeTodoJudge, type TodoJudgeThresholds } from "../../core/judge/todo-judge.js";
+import type { ItemFact } from "../../core/source/source-item.js";
 import type { ItemDraft, SourceBinding } from "../../core/sync/sync-source.js";
 import {
   BODY_EXCERPT_LENGTH,
@@ -73,6 +74,54 @@ function describeGitHubItem(item: GitHubItem, context: Context): JudgeInput {
   return { context: withOwnershipNote(trusted.join("\n")), input: untrusted.join("\n") };
 }
 
+type FactContext = { viewer: Option.Option<string>; myTeams: Option.Option<ReadonlySet<string>> };
+
+/** 自分（または所属チーム）へのレビュー依頼。自分に関わる結論はアプリが決めて 1 行で書く（ADR-0019 の spike） */
+function reviewRequestLines(item: GitHubItem, context: FactContext): string[] {
+  if (item.requestedReviewers === undefined && item.requestedTeams === undefined) return [];
+  const reviewers = item.requestedReviewers ?? [];
+  const teams = item.requestedTeams ?? [];
+  const viewer = Option.getOrUndefined(context.viewer);
+  const toMe = [
+    ...(viewer !== undefined && reviewers.includes(viewer) ? ["あなた個人"] : []),
+    ...Option.match(context.myTeams, { onNone: () => [], onSome: (mine) => teams.filter((team) => mine.has(team)).map((team) => `チーム @${team}`) }),
+  ];
+  const others = reviewers.filter((login) => login !== viewer).length + Option.match(context.myTeams, { onNone: () => teams.length, onSome: (mine) => teams.filter((team) => !mine.has(team)).length });
+  // 所属チームが分からないままチームにだけ依頼が来ているなら、依頼なしと決めつけない（ルールで誤って完了にしないため）
+  const unknown = toMe.length === 0 && teams.length > 0 && Option.isNone(context.myTeams);
+  return [
+    `あなた（または所属チーム）へのレビュー依頼: ${unknown ? "不明（所属チームを取得できない）" : toMe.length === 0 ? "なし" : `あり（${toMe.join("、")}）`}`,
+    `ほかの人・チームへのレビュー依頼: ${others === 0 ? "なし" : `${others} 件`}`,
+  ];
+}
+
+function stateLine(item: GitHubItem): string[] {
+  if (item.subjectType === "PullRequest") {
+    return [`PR の状態: ${item.state === "merged" ? "マージ済み" : item.state === "closed" ? "マージされずに閉じた" : item.state === "open" ? "open" : "不明"}`];
+  }
+  if (item.subjectType === "Issue") return [`Issue の状態: ${item.state === "closed" ? "閉じた" : item.state === "open" ? "open" : "不明"}`];
+  return [];
+}
+
+/**
+ * Item が表す事実（ADR-0019）。値がなくても「なし」と書き、状態は Source の言葉で書く。
+ * どちらも、書かれていないことや粗い状態から判定のモデルが読み違えたため（spike）
+ */
+export function githubFactOf(item: GitHubItem, context: FactContext): ItemFact {
+  return {
+    trusted: [
+      ...Option.match(context.viewer, { onNone: () => [], onSome: (login) => [`あなた（ユーザー本人）の GitHub アカウント: @${login}`] }),
+      `種類: GitHub の ${item.subjectType}`,
+      `リポジトリ: ${item.repository}`,
+      `通知の理由: ${item.reason}`,
+      ...(item.author === undefined ? [] : [`作成者: @${item.author}`]),
+      ...reviewRequestLines(item, context),
+      ...stateLine(item),
+    ],
+    body: [`タイトル: ${item.title}`, ...(item.bodyExcerpt === undefined ? [] : ["本文（冒頭）:", item.bodyExcerpt])].join("\n"),
+  };
+}
+
 /**
  * 自分のアカウントで作った PR なら、本人が merge まで進める PR だと信頼できる情報に書き足す。
  * 足す理由: 理由が author の通知は対応が要るかを決めきれず、judge:eval で 6 件中 5 件が要確認になっていた。
@@ -121,6 +170,28 @@ export const makeGitHubBinding = Effect.fnUntraced(function* (options: GitHubBin
       ),
     );
 
+  // 所属チームも、成功したときだけ覚える（取れないままのときは「不明」と書き、次の事実でまた取りに行く）
+  const myTeamsCache = yield* Ref.make(Option.none<ReadonlySet<string>>());
+  const myTeams = Effect.gen(function* () {
+    const cached = yield* Ref.get(myTeamsCache);
+    if (Option.isSome(cached)) return cached;
+    const fetched = yield* client.listMyTeams.pipe(
+      Effect.map((teams) => Option.some<ReadonlySet<string>>(new Set(teams))),
+      Effect.catch((error) =>
+        Effect.logWarning("所属チームを取得できないため、チームへのレビュー依頼を不明として書く").pipe(
+          Effect.annotateLogs({ reason: error.message }),
+          Effect.as(Option.none<ReadonlySet<string>>()),
+        ),
+      ),
+    );
+    if (Option.isSome(fetched)) yield* Ref.set(myTeamsCache, fetched);
+    return fetched;
+  });
+  const describeFact = (item: GitHubItem) =>
+    Effect.gen(function* () {
+      return githubFactOf(item, { viewer: yield* viewer, myTeams: yield* myTeams });
+    });
+
   const describe = (item: GitHubItem) =>
     Effect.gen(function* () {
       const comment = item.latestCommentUrl === undefined ? Option.none() : yield* latestComment(item.latestCommentUrl);
@@ -140,5 +211,6 @@ export const makeGitHubBinding = Effect.fnUntraced(function* (options: GitHubBin
     externalIdOf: (item: GitHubItem) => item.externalId,
     toItemDraft: githubItemDraft,
     judge,
+    describeFact,
   } satisfies SourceBinding<GitHubItem, typeof GitHubCursor.Type, unknown, unknown, unknown>;
 });

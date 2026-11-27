@@ -72,7 +72,17 @@ export const mockApi: LiveTodoApi = {
   taskQuestions: async () => [],
   openStepLink: async () => {},
   applyRuleToExisting: async () => ({ ok: true, applied: 0, alreadyApplied: 0, notMatched: 0 }),
-  interpretRule: async () => ({ ok: true, actions: { gmail: { labels: ["レシート"], markRead: true } } }),
+  interpretRule: async () => ({ ok: true, actions: { task: "done" } }),
+  decomposeRule: async () => ({
+    ok: true,
+    condition: {
+      combine: "all",
+      clauses: [
+        { question: "紐づく事実に GitHub の PR があるか", expect: true, about: "metadata" },
+        { question: "その PR の作成者は YutaUra か", expect: false, about: "metadata" },
+      ],
+    },
+  }),
   askTask: async () => ({ ok: true }),
   runStepWithClaude: async () => ({ ok: true }),
   acceptSuggestion: async () => ({ ok: true }),

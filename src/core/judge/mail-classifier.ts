@@ -18,16 +18,6 @@ export const MAIL_TOPIC_LABELS: Record<MailTopic, string> = {
   other: "その他",
 };
 
-export type ActionInterpretation = {
-  markRead: number | undefined;
-  archive: number | undefined;
-  addLabel: number | undefined;
-  /** 付けるラベルの名前（候補から選んだもの）。選べなければ undefined */
-  label: string | undefined;
-  /** アプリにできない操作（ゴミ箱・削除・返信・送信・転送など）を求めている確率 */
-  unsupported: number | undefined;
-};
-
 /** probability が undefined（fallback）なら、判定できなかったので対応が要るものとして扱う */
 export type ActionJudgment = { probability: number | undefined; method: "decisions" | "fallback"; topic: MailTopic };
 
@@ -39,11 +29,6 @@ export class MailClassifier extends Context.Service<MailClassifier, {
   needsAction(request: { input: string; context: string }): Effect.Effect<ActionJudgment, JudgeRequestError>;
   /** 利用者が言葉で書いたルールの条件（「請求書に関するメール」など）に当てはまるか。答えが返らなければ probability なし */
   matchesCondition(request: { input: string; context: string; condition: string }): Effect.Effect<{ probability: number | undefined }, JudgeRequestError>;
-  /**
-   * 利用者が言葉で書いた「何をする」を、アプリの操作（既読・アーカイブ・ラベル）に結びつける。ラベルの名前は labels から選ぶ。
-   * 答えが返らなかった項目は undefined
-   */
-  interpretActions(request: { instruction: string; labels: ReadonlyArray<string> }): Effect.Effect<ActionInterpretation, JudgeRequestError>;
 }>()("live-todo/core/judge/MailClassifier") {}
 
 const MailInput = Schema.Struct({ mail: Schema.String });
@@ -156,43 +141,6 @@ export const DecisionModelMailClassifier = Layer.effect(
       return { probability: Result.isFailure(outcome) ? undefined : outcome.success.probability };
     });
 
-    const InstructionInput = Schema.Struct({ instruction: Schema.String });
-    const interpretActions = Effect.fn("DecisionModelMailClassifier.interpretActions")(function* (request: { instruction: string; labels: ReadonlyArray<string> }) {
-      const keys = request.labels.map((_, index) => `l${index}`);
-      const labelCriteria = Object.fromEntries([...request.labels.map((name, index) => [keys[index]!, `ラベル「${name}」`] as const), ["none", "ラベルを付けない、または上のどれでもない"] as const]);
-      const definition = Decision.make({
-        input: InstructionInput,
-        decisions: {
-          markRead: Decision.probability({ instructions: "この指示は、メールを既読にすることを含むか。", criteria: { true: "既読にする", false: "既読にしない" } }),
-          archive: Decision.probability({ instructions: "この指示は、メールをアーカイブする（受信トレイから外す）ことを含むか。", criteria: { true: "アーカイブする", false: "アーカイブしない" } }),
-          addLabel: Decision.probability({ instructions: "この指示は、メールにラベルを付けることを含むか。", criteria: { true: "ラベルを付ける", false: "ラベルを付けない" } }),
-          label: Decision.classify({ instructions: "この指示で付けるラベルはどれか。", criteria: labelCriteria }),
-          unsupported: Decision.probability({
-            instructions: "この指示は、既読・アーカイブ・ラベルを付ける以外の操作（ゴミ箱に入れる・削除・返信・送信・転送・迷惑メールにするなど）を含むか。",
-            criteria: { true: "ほかの操作を含む", false: "既読・アーカイブ・ラベルだけ" },
-          }),
-        },
-      });
-      const response = yield* model
-        .decideSettled(definition, { input: { instruction: request.instruction } })
-        .pipe(Effect.mapError((error) => new JudgeRequestError({ message: `Decisions の呼び出しに失敗した（${error.reason._tag}）` })));
-      const probabilityOf = (outcome: (typeof response.outcomes)["markRead"]) => (Result.isFailure(outcome) ? undefined : outcome.success.probability);
-      const labelOutcome = response.outcomes.label;
-      const label = (() => {
-        if (Result.isFailure(labelOutcome)) return undefined;
-        const [key, probability] = (Object.entries(labelOutcome.success.probabilities) as Array<[string, number]>).reduce((best, entry) => (entry[1] > best[1] ? entry : best));
-        const index = keys.indexOf(key);
-        return index === -1 || probability < 0.5 ? undefined : request.labels[index];
-      })();
-      return {
-        markRead: probabilityOf(response.outcomes.markRead),
-        archive: probabilityOf(response.outcomes.archive),
-        addLabel: probabilityOf(response.outcomes.addLabel),
-        label,
-        unsupported: probabilityOf(response.outcomes.unsupported),
-      } satisfies ActionInterpretation;
-    });
-
-    return MailClassifier.of({ classify, needsAction, matchesCondition, interpretActions });
+    return MailClassifier.of({ classify, needsAction, matchesCondition });
   }),
 );

@@ -14,7 +14,10 @@ import { sourceItems, taskLinks } from "../core/db/schema.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
 import { applyGmailRules } from "../sources/gmail/gmail-rule-runner.js";
 import { MailClassifier } from "../core/judge/mail-classifier.js";
-import { makeMailClassifier } from "../app/llm.js";
+import { makeDecisionModel, makeLanguageModel, makeMailClassifier } from "../app/llm.js";
+import { readRuleActions } from "../app/rule-settings.js";
+import { applyTaskRules } from "../app/task-rules.js";
+import { decomposeCondition } from "../core/rules/rule-condition.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
 import {
   acceptSuggestion,
@@ -26,7 +29,6 @@ import {
   TaskQuestionError,
   type TaskSuggestion,
 } from "../app/task-questions.js";
-import { actionsFromInterpretation, labelCandidatesOf } from "../core/rules/interpret.js";
 import { decodePlan, stepLinkOf } from "../core/task/next-actions.js";
 import { gmailMailTarget, gmailProcess, gmailRunStep, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
@@ -357,8 +359,29 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...microsoftJobs, ...calendarJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(microsoftJobs), runJobs(calendarJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
+  // 利用者が決めたルールを Task に当てる（ADR-0019）。Task への操作をするルールがあるときだけ動かす
+  const taskRuleJobs: SyncJob<never, Database | TaskRepository | HttpClient.HttpClient>[] = [];
+  if (config.rules.some((rule) => rule.enabled && rule.actions.task !== undefined)) {
+    const decisions = yield* makeDecisionModel(defaultProfileOf(config)).pipe(
+      Effect.map(Option.some),
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          syncProblem = `ルールを Task に当てられない: ${errorMessage(error)}`;
+          return Option.none();
+        }),
+      ),
+    );
+    if (Option.isSome(decisions)) {
+      taskRuleJobs.push({
+        name: "app:task-rules",
+        interval: AGENT_JOB_INTERVAL,
+        run: applyTaskRules(config.rules).pipe(Effect.provide(decisions.value), Effect.asVoid),
+        backoffUntil: () => Option.none<DateTime.Utc>(),
+      });
+    }
+  }
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...microsoftJobs, ...calendarJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob, ...taskRuleJobs].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(microsoftJobs), runJobs(calendarJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob, ...taskRuleJobs]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
     concurrency: 8,
     discard: true,
   });
@@ -716,23 +739,34 @@ const claudeOptionsForTask = (taskId: number) =>
     Effect.orElseSucceed(() => undefined),
   );
 
-/** ルールの「何をする」を、Decisions でアプリの操作に読み取る（ADR-0014）。ラベルの名前は、文の中の名前と Gmail にあるラベルから選ばせる */
-const interpretRuleActions = (then: string) =>
+/** 設定の既定の LLM Profile（ルールは Task に当てるので、アカウントではなく PC の LLM Profile で判定する。charter の 1 台 1 Profile の運用） */
+const defaultProfileOf = (config: { llmProfiles: Record<string, import("../app/config/app-config.js").LlmProfile>; defaultLlmProfile: string }) => config.llmProfiles[config.defaultLlmProfile]!;
+
+/** ルールの「何をする」を、Decisions でアプリの操作に読み取る（ADR-0019）。ラベルの名前は、文の中の名前と Gmail にあるラベルから選ばせる */
+const interpretRuleActionsOf = (then: string) =>
   Effect.gen(function* () {
     const config = yield* loadAppConfigFile(configPath);
+    const decisions = yield* makeDecisionModel(defaultProfileOf(config));
     const account = config.gmailAccounts[0];
-    if (account === undefined) return { ok: false as const, reason: "Gmail のアカウントを設定してから読み取ってください" };
-    const classifier = yield* makeMailClassifier(account.resolvedLlmProfile);
-    const existing = yield* gmailClientFor(account.id).pipe(
-      Effect.flatMap((client) => client.labels),
-      // システムのラベル（INBOX・CATEGORY_* など）は候補にしない
-      Effect.map((labels) => labels.filter((label) => label.id.startsWith("Label_")).map((label) => label.name)),
-      Effect.orElseSucceed(() => [] as string[]),
-    );
-    const candidates = [...new Set([...labelCandidatesOf(then), ...existing])].slice(0, MAX_LABEL_CANDIDATES);
-    return actionsFromInterpretation(yield* classifier.interpretActions({ instruction: then, labels: candidates }));
+    const labels =
+      account === undefined
+        ? []
+        : yield* gmailClientFor(account.id).pipe(
+            Effect.flatMap((client) => client.labels),
+            // システムのラベル（INBOX・CATEGORY_* など）は候補にしない
+            Effect.map((found) => found.filter((label) => label.id.startsWith("Label_")).map((label) => label.name)),
+            Effect.orElseSucceed(() => [] as string[]),
+          );
+    return yield* readRuleActions(then, { available: account !== undefined, labels }).pipe(Effect.provide(decisions));
   });
-const MAX_LABEL_CANDIDATES = 30;
+
+/** ルールの「どういう時」を、判定に使う問いに分ける（ADR-0019）。保存する前に、分けた問いを利用者に確かめてもらう */
+const decomposeRuleCondition = (when: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const model = yield* makeLanguageModel(defaultProfileOf(config));
+    return { ok: true as const, condition: yield* decomposeCondition(when).pipe(Effect.provide(model)) };
+  });
 
 function registerTaskQuestions() {
   // 外部への書き込み。設定画面で確かめてから押したときだけ呼ばれる（ルールの範囲の書き込みで、ADR-0014）
@@ -774,7 +808,15 @@ function registerTaskQuestions() {
   ipcMain.handle(IPC_CHANNELS.interpretRule, (_event, input: unknown) =>
     runtime.runPromise(
       Schema.decodeUnknownEffect(Schema.Struct({ then: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(500)) }))(input).pipe(
-        Effect.flatMap((request) => interpretRuleActions(request.then)),
+        Effect.flatMap((request) => interpretRuleActionsOf(request.then)),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, reason: errorMessage(error) })),
+      ),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.decomposeRule, (_event, input: unknown) =>
+    runtime.runPromise(
+      Schema.decodeUnknownEffect(Schema.Struct({ when: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(500)) }))(input).pipe(
+        Effect.flatMap((request) => decomposeRuleCondition(request.when)),
         Effect.catch((error) => Effect.succeed({ ok: false as const, reason: errorMessage(error) })),
       ),
     ),

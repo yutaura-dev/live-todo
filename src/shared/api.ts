@@ -85,7 +85,13 @@ export type ConfigDocument = {
   rules?: Array<RuleDraft>;
 };
 
-export type RuleActions = { gmail?: { labels?: string[]; markRead?: boolean; archive?: boolean } };
+export type RuleActions = { task?: "done" | "dismissed" | "todo"; gmail?: { labels?: string[]; markRead?: boolean; archive?: boolean } };
+
+/** 「どういう時」を分けた問い（ADR-0019）。about: metadata はアプリの情報で、content は内容を読んで答える */
+export type RuleCondition = {
+  combine: "all" | "any";
+  clauses: Array<{ question: string; expect: boolean; about: "metadata" | "content" }>;
+};
 
 export type RuleDraft = {
   id: string;
@@ -94,6 +100,10 @@ export type RuleDraft = {
   createdAt: string;
   /** どういう時（言葉で書く） */
   when: string;
+  /** when を分けた問い。Task への操作をするルールに要る */
+  condition?: RuleCondition;
+  /** condition を分けた when の文 */
+  conditionFrom?: string;
   /** 何をする（言葉で書く） */
   then: string;
   /** then から読み取った操作 */
@@ -208,6 +218,8 @@ export interface LiveTodoApi {
   applyRuleToExisting(ruleId: string): Promise<{ ok: true; applied: number; alreadyApplied: number; notMatched: number } | { ok: false; reason: string }>;
   /** ルールの「何をする」を、Decisions でアプリの操作に読み取る */
   interpretRule(then: string): Promise<{ ok: true; actions: RuleActions } | { ok: false; reason: string }>;
+  /** ルールの「どういう時」を、判定に使う問いに分ける（LLM。保存する前に利用者が確かめる） */
+  decomposeRule(when: string): Promise<{ ok: true; condition: RuleCondition } | { ok: false; reason: string }>;
   /** Task についての質問と回答（古い順） */
   taskQuestions(taskId: number): Promise<TaskQuestionView[]>;
   /** 手順を Claude Code に頼む（調べて報告するだけ。外への書き込みはさせない） */

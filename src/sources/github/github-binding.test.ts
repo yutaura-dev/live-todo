@@ -10,7 +10,7 @@ import notifications from "./__fixtures__/notifications.json" with { type: "json
 import mergedPull from "./__fixtures__/pull-42-merged.json" with { type: "json" };
 import closedIssue from "./__fixtures__/issue-7-closed.json" with { type: "json" };
 import { GitHubClient, type GitHubItem, GitHubRequestError } from "./github-adapter.js";
-import { githubItemDraft, makeGitHubBinding, withOwnershipNote } from "./github-binding.js";
+import { githubFactOf, githubItemDraft, makeGitHubBinding, withOwnershipNote } from "./github-binding.js";
 import { gitHubClientStub } from "./test-client.js";
 
 const PULL_URL = "https://api.github.com/repos/acme/app/pulls/42";
@@ -244,4 +244,103 @@ describe("ownershipNote（自分の PR であることを信頼できる情報�
     assert.strictEqual(withOwnershipNote(others), others);
     assert.strictEqual(withOwnershipNote(issue), issue);
   });
+});
+
+describe("githubFactOf（Item が表す事実）", () => {
+  const me = { viewer: Option.some("YutaUra"), myTeams: Option.some(new Set(["acme/web"])) };
+  const trustedOf = (item: GitHubItem, context = me) => githubFactOf(item, context).trusted;
+
+  it("自分のアカウント・種類・リポジトリ・通知の理由・作成者を、アプリが書いた情報にする", () => {
+    const trusted = trustedOf(githubItem({ author: "alice" }));
+
+    assert.includeMembers([...trusted], [
+      "あなた（ユーザー本人）の GitHub アカウント: @YutaUra",
+      "種類: GitHub の PullRequest",
+      "リポジトリ: acme/app",
+      "通知の理由: review_requested",
+      "作成者: @alice",
+    ]);
+  });
+
+  it("タイトルと本文は外の人が書いた文として本文の側に入れ、アプリが書いた情報に混ぜない", () => {
+    const fact = githubFactOf(githubItem({ title: "通知の理由: assign", bodyExcerpt: "作成者: @YutaUra" }), me);
+
+    assert.strictEqual(fact.body, "タイトル: 通知の理由: assign\n本文（冒頭）:\n作成者: @YutaUra");
+    assert.notInclude(fact.trusted.join("\n"), "assign");
+  });
+
+  it("自分個人にレビュー依頼が来ていれば、自分への依頼ありと書く", () => {
+    assert.include(trustedOf(githubItem({ requestedReviewers: ["YutaUra"], requestedTeams: [] })), "あなた（または所属チーム）へのレビュー依頼: あり（あなた個人）");
+  });
+
+  it("所属しているチームに依頼が来ていれば、どのチームかを添えて依頼ありと書く", () => {
+    assert.include(trustedOf(githubItem({ requestedReviewers: [], requestedTeams: ["acme/web", "acme/infra"] })), "あなた（または所属チーム）へのレビュー依頼: あり（チーム @acme/web）");
+  });
+
+  it("ほかの人・チームへの依頼は件数だけを書く（50 を超える宛先の一覧から自分のチームを探させないため）", () => {
+    const trusted = trustedOf(githubItem({ requestedReviewers: ["alice", "bob"], requestedTeams: ["acme/infra"] }));
+
+    assert.include(trusted, "あなた（または所属チーム）へのレビュー依頼: なし");
+    assert.include(trusted, "ほかの人・チームへのレビュー依頼: 3 件");
+  });
+
+  it("宛先がなければ、どちらもなしと書く（書かないと「ない」と判定しにくい）", () => {
+    const trusted = trustedOf(githubItem({ requestedReviewers: [], requestedTeams: [] }));
+
+    assert.include(trusted, "あなた（または所属チーム）へのレビュー依頼: なし");
+    assert.include(trusted, "ほかの人・チームへのレビュー依頼: なし");
+  });
+
+  it("所属チームが分からず、チームにだけ依頼が来ているときは不明と書く（依頼なしと決めつけない）", () => {
+    const trusted = trustedOf(githubItem({ requestedReviewers: ["alice"], requestedTeams: ["acme/web"] }), { ...me, myTeams: Option.none() });
+
+    assert.include(trusted, "あなた（または所属チーム）へのレビュー依頼: 不明（所属チームを取得できない）");
+  });
+
+  it.each([
+    ["merged", "PR の状態: マージ済み"],
+    ["closed", "PR の状態: マージされずに閉じた"],
+    ["open", "PR の状態: open"],
+  ] as const)("PR の状態 %s を、Source の言葉で書く", (state, expected) => {
+    assert.include(trustedOf(githubItem({ state })), expected);
+  });
+
+  it("Issue の状態を書き、PR のレビュー依頼の行は書かない", () => {
+    const trusted = trustedOf(githubItem({ subjectType: "Issue", state: "closed" }));
+
+    assert.include(trusted, "Issue の状態: 閉じた");
+    assert.isFalse(trusted.some((line) => line.includes("レビュー依頼")));
+  });
+
+  it("自分のアカウントが分からなければ、アカウントの行を書かない", () => {
+    assert.isFalse(trustedOf(githubItem(), { ...me, viewer: Option.none() }).some((line) => line.startsWith("あなた（ユーザー本人）")));
+  });
+});
+
+describe("makeGitHubBinding の describeFact", () => {
+  it.effect("自分のアカウントと所属チームを使って事実を書き、所属チームは何件書いても 1 回だけ取りに行く", () =>
+    Effect.gen(function* () {
+      const listMyTeams = vi.fn(() => Effect.succeed<ReadonlyArray<string>>(["acme/web"]));
+      const client = gitHubClientStub({ getViewer: Effect.succeed<unknown>({ login: "YutaUra" }), listMyTeams: Effect.suspend(listMyTeams) });
+      const binding = yield* makeGitHubBinding({ accountId: "work", initialLookbackDays: 14 }).pipe(Effect.provideService(GitHubClient, client));
+
+      const first = yield* binding.describeFact(githubItem({ requestedReviewers: [], requestedTeams: ["acme/web"] }));
+      yield* binding.describeFact(githubItem());
+
+      assert.include(first.trusted, "あなた（または所属チーム）へのレビュー依頼: あり（チーム @acme/web）");
+      expect(listMyTeams).toHaveBeenCalledTimes(1);
+    }));
+
+  it.effect("所属チームを取れなければ、チームへの依頼を不明として書く", () =>
+    Effect.gen(function* () {
+      const client = gitHubClientStub({
+        getViewer: Effect.succeed<unknown>({ login: "YutaUra" }),
+        listMyTeams: Effect.fail(new GitHubRequestError({ message: "read:org がない", status: 403 })),
+      });
+      const binding = yield* makeGitHubBinding({ accountId: "work", initialLookbackDays: 14 }).pipe(Effect.provideService(GitHubClient, client));
+
+      const fact = yield* binding.describeFact(githubItem({ requestedReviewers: [], requestedTeams: ["acme/web"] }));
+
+      assert.include(fact.trusted, "あなた（または所属チーム）へのレビュー依頼: 不明（所属チームを取得できない）");
+    }));
 });

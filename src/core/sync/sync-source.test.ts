@@ -306,3 +306,26 @@ describe("失敗時", () => {
       assert.isTrue(Option.isNone(yield* items.loadCursor("test")));
     }).pipe(Effect.provide(TestDatabase)));
 });
+
+describe("事実", () => {
+  it.effect("Source の作りが事実の書き方を持っていれば、届いた Item に事実を残す", () =>
+    Effect.gen(function* () {
+      const binding = {
+        ...bindingWith(batches([upserted(item({ title: "README の誤字を直す" }))])),
+        describeFact: (value: Item) => Effect.succeed({ trusted: ["種類: テスト"], body: `タイトル: ${value.title}` }),
+      };
+
+      yield* syncSource(binding);
+
+      const saved = yield* (yield* SourceItemRepository).findItem("test", "a");
+      assert.deepStrictEqual(Option.map(saved, (found) => found.fact), Option.some({ trusted: ["種類: テスト"], body: "タイトル: README の誤字を直す" }));
+    }).pipe(Effect.provide(TestDatabase)));
+
+  it.effect("事実の書き方を持たない Source の Item は、事実なしで保存する", () =>
+    Effect.gen(function* () {
+      yield* syncSource(bindingWith(batches([upserted(item())])));
+
+      const saved = yield* (yield* SourceItemRepository).findItem("test", "a");
+      assert.deepStrictEqual(Option.map(saved, (found) => found.fact), Option.some(null));
+    }).pipe(Effect.provide(TestDatabase)));
+});

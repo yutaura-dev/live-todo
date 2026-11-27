@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { ACTIVITY_KINDS, ITEM_STATES, ITEM_TRIAGES } from "../source/source-item.js";
+import { ACTIVITY_KINDS, ITEM_STATES, ITEM_TRIAGES, type ItemFact } from "../source/source-item.js";
 import { CHANGE_ACTORS, LINK_ROLES, TASK_CHANGE_KINDS, TASK_STATUSES } from "../task/task.js";
 
 export const sourceItems = sqliteTable(
@@ -18,6 +18,8 @@ export const sourceItems = sqliteTable(
     triage: text({ enum: ITEM_TRIAGES }).notNull(),
     /** 仕分けたときの判定（方法・確率・理由・LLM に渡した入力）。対象外にしたものも後から見直せるようにする */
     judgment: text({ mode: "json" }),
+    /** この Item が表す事実（アプリが書いた情報と本文）。ルールの判定と振り分けの材料（ADR-0019） */
+    fact: text({ mode: "json" }).$type<ItemFact>(),
     firstSeenAt: text("first_seen_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
@@ -279,4 +281,32 @@ export const gmailRuleRuns = sqliteTable(
     executedAt: text("executed_at").notNull(),
   },
   (table) => [uniqueIndex("gmail_rule_runs_message_rule").on(table.accountId, table.messageId, table.ruleId, table.ruleFingerprint)],
+);
+
+export const TASK_RULE_RUN_STATUSES = ["applied", "skipped"] as const;
+
+/**
+ * 利用者が決めたルールを Task に当てた記録（ADR-0019）。同じ Task に同じ中身のルールを、同じきっかけで判定するのは一度だけ。
+ * 何で当たったかを後から追えるよう、確率と操作を残す
+ */
+export const taskRuleRuns = sqliteTable(
+  "task_rule_runs",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id),
+    ruleId: text("rule_id").notNull(),
+    ruleName: text("rule_name").notNull(),
+    /** 判定したときのルールの中身（分けた問いと操作）。書き換えたルールは判定し直す */
+    ruleFingerprint: text("rule_fingerprint").notNull(),
+    /** 判定のきっかけ（Task の変化か、紐づく事実の出来事）。新しいきっかけがあれば判定し直す */
+    triggerKey: text("trigger_key").notNull(),
+    status: text({ enum: TASK_RULE_RUN_STATUSES }).notNull(),
+    /** 条件に当てはまる確率（答えが返らなければ null） */
+    probability: real(),
+    action: text().notNull(),
+    executedAt: text("executed_at").notNull(),
+  },
+  (table) => [uniqueIndex("task_rule_runs_once").on(table.taskId, table.ruleId, table.ruleFingerprint, table.triggerKey)],
 );

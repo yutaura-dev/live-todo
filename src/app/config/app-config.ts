@@ -1,6 +1,7 @@
 import { Effect, FileSystem, Option, Schema } from "effect";
 import { isRepositoryPattern } from "../../sources/github/repository-filter.js";
 import { NOTION_ORIGINS } from "../../sources/notion/notion-client-live.js";
+import { RuleCondition } from "../../core/rules/rule-condition.js";
 
 export class InvalidAppConfigError extends Schema.TaggedError<InvalidAppConfigError>()("InvalidAppConfigError", {
   message: Schema.String,
@@ -98,10 +99,15 @@ const Rule = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
   createdAt: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T/)),
   when: Schema.String.check(Schema.isMaxLength(500)),
+  // when を分けた問い（ADR-0019）。Task に当てるときは、文を読み直さずにこれで判定する
+  condition: Schema.optional(RuleCondition),
+  conditionFrom: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   then: Schema.String.check(Schema.isMaxLength(500)),
   interpretedFrom: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   // then から読み取った操作。決めたものだけ書ける（ゴミ箱に入れる・送るなどは書けない）
   actions: Schema.Struct({
+    // Task への操作はアプリの中の変更なので、どの Source の Task にも当てられる（ADR-0019）
+    task: Schema.optional(Schema.Literals(["done", "dismissed", "todo"])),
     gmail: Schema.optional(
       Schema.Struct({
         labels: Schema.optional(Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(100)))),
@@ -262,8 +268,12 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
     if (rule.then.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書いてください`);
     else if (rule.interpretedFrom !== rule.then) issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書き換えたので、読み取り直してください`);
     const gmail = rule.actions.gmail;
-    if (rule.then.trim() !== "" && (gmail === undefined || ((gmail.labels ?? []).length === 0 && gmail.markRead !== true && gmail.archive !== true))) {
+    const hasGmail = gmail !== undefined && ((gmail.labels ?? []).length > 0 || gmail.markRead === true || gmail.archive === true);
+    if (rule.then.trim() !== "" && !hasGmail && rule.actions.task === undefined) {
       issues.push(`rules[${at}]（${rule.name}）: 「何をする」から操作を読み取れていません`);
+    }
+    if (rule.actions.task !== undefined && rule.when.trim() !== "" && (rule.condition === undefined || rule.conditionFrom !== rule.when)) {
+      issues.push(`rules[${at}]（${rule.name}）: 「どういう時」を確かめてください（判定に使う問いに分け直す必要があります）`);
     }
   });
 

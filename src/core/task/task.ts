@@ -8,6 +8,9 @@ export type TaskChangeKind = (typeof TASK_CHANGE_KINDS)[number];
 export const LINK_ROLES = ["tracks", "context"] as const;
 export type LinkRole = (typeof LINK_ROLES)[number];
 
-/** filter: フィルタで除外したリポジトリの Task を片付けた（ユーザーの判断ではないので、判定の正解には使わない） */
-export const CHANGE_ACTORS = ["sync", "user", "filter", "agent"] as const;
+/**
+ * filter: フィルタで除外したリポジトリの Task を片付けた（ユーザーの判断ではないので、判定の正解には使わない）。
+ * rule: 利用者が決めたルールで変えた（ADR-0019）
+ */
+export const CHANGE_ACTORS = ["sync", "user", "filter", "agent", "rule"] as const;
 export type ChangeActor = (typeof CHANGE_ACTORS)[number];

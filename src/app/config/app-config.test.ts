@@ -312,6 +312,49 @@ describe("ルール", () => {
       yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, actions: { gmail: { trash: true } } }] });
       yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, actions: { slack: { post: true } } }] });
     }));
+
+  const completeRule = {
+    id: "r2",
+    name: "他人の PR は完了",
+    createdAt: "2026-11-27T00:00:00.000Z",
+    when: "YutaUra 以外が作った PR で、YutaUra にレビュー依頼がないもの",
+    condition: {
+      combine: "all",
+      clauses: [
+        { question: "紐づく事実に GitHub の PR があるか", expect: true, about: "metadata" },
+        { question: "その PR の作成者は YutaUra か", expect: false, about: "metadata" },
+      ],
+    },
+    conditionFrom: "YutaUra 以外が作った PR で、YutaUra にレビュー依頼がないもの",
+    then: "完了にする",
+    actions: { task: "done" },
+    interpretedFrom: "完了にする",
+  };
+
+  it.effect("Task への操作（完了・対象外・todo）と、分けた条件を持つルールを書ける", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig({ ...validConfig, rules: [completeRule] });
+
+      assert.deepInclude(config.rules[0], { actions: { task: "done" } });
+      assert.lengthOf(config.rules[0]?.condition?.clauses ?? [], 2);
+    }));
+
+  it.effect("Task への操作をするルールは、条件を分けていなければエラーにする（Task に当てるときは分けた問いで判定するため）", () =>
+    Effect.gen(function* () {
+      const { condition: _condition, conditionFrom: _from, ...withoutCondition } = completeRule;
+
+      assert.include(yield* invalidReason({ ...validConfig, rules: [withoutCondition] }), "どういう時」を確かめて");
+    }));
+
+  it.effect("条件を分けたあとに「どういう時」を書き換えたら、分け直すまでエラーにする", () =>
+    Effect.gen(function* () {
+      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...completeRule, when: "bot の PR" }] }), "どういう時」を確かめて");
+    }));
+
+  it.effect("決めていない Task への操作は、エラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({ ...validConfig, rules: [{ ...completeRule, actions: { task: "delete" } }] });
+    }));
 });
 
 describe("Decisions の閾値", () => {

@@ -10,7 +10,7 @@ import type {
 } from "../../shared/api.js";
 import { api } from "./api.js";
 import { RecurringSettings } from "./Recurring.js";
-import { describeActions, existingTargetsOf, isInterpreted, newRule } from "./gmail-rules.js";
+import { describeActions, describeCondition, existingTargetsOf, isConditionChecked, isInterpreted, needsCondition, newRule } from "./rules.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
@@ -247,7 +247,7 @@ export function Settings() {
             ルール
           </h3>
           <p className="field-hint">
-            条件に当てはまるものが届いたら、決めた操作を自動で行います。当てはまるかは条件の文から判定し、確かなときだけ当てます。ルールを作る前に届いたものには当てません
+            条件に当てはまる Task に、決めた操作を自動で行います。Task の操作（完了・対象外・todo）はどの Source の Task にも当てられます。当てはまるかは条件を分けた問いで判定し、確かなときだけ当てます。ルールを作る前にできた Task・届いたメールには当てません
           </p>
           {(draft.rules ?? []).map((rule, index) => (
             <RuleEditor
@@ -991,6 +991,16 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
   const { rule } = props;
   const id = useId();
   const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; reason: string }>({ kind: "idle" });
+  const [conditionState, setConditionState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; reason: string }>({ kind: "idle" });
+  const decompose = async () => {
+    if (rule.when.trim() === "" || isConditionChecked(rule)) return;
+    setConditionState({ kind: "busy" });
+    const result = await api.decomposeRule(rule.when);
+    if (result.ok) {
+      props.onChange({ ...rule, condition: result.condition, conditionFrom: rule.when });
+      setConditionState({ kind: "idle" });
+    } else setConditionState({ kind: "failed", reason: result.reason });
+  };
   const interpret = async () => {
     if (rule.then.trim() === "" || isInterpreted(rule)) return;
     setState({ kind: "busy" });
@@ -1011,15 +1021,39 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
       </legend>
       <label className="field" htmlFor={`${id}-when`}>
         どういう時
-        <textarea id={`${id}-when`} rows={2} value={rule.when} placeholder="請求書や領収書に関するメールが届いた時" onChange={(event) => props.onChange({ ...rule, when: event.target.value })} />
+        <textarea
+          id={`${id}-when`}
+          rows={2}
+          value={rule.when}
+          placeholder="YutaUra 以外が作った GitHub の PR で、YutaUra（または YutaUra を含むチーム）にレビュー依頼が来ていないもの"
+          onChange={(event) => props.onChange({ ...rule, when: event.target.value })}
+          onBlur={() => void decompose()}
+        />
       </label>
+      <div className="step-actions">
+        {isConditionChecked(rule) && rule.condition !== undefined ? (
+          <div className="field-hint">
+            この問いで判定します（すべて当てはまるときに当てます）:
+            <ul>
+              {describeCondition(rule.condition).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <button type="button" className="quiet-button" disabled={conditionState.kind === "busy" || rule.when.trim() === ""} onClick={() => void decompose()}>
+            {conditionState.kind === "busy" ? "確かめています…" : "どういう時かを確かめる"}
+          </button>
+        )}
+      </div>
+      {conditionState.kind === "failed" && <p className="problem">{conditionState.reason}</p>}
       <label className="field" htmlFor={`${id}-then`}>
         何をする
         <textarea
           id={`${id}-then`}
           rows={2}
           value={rule.then}
-          placeholder="レシート ラベルをつけて既読にする"
+          placeholder="完了にする（メールなら「レシート ラベルをつけて既読にする」）"
           onChange={(event) => props.onChange({ ...rule, then: event.target.value })}
           onBlur={() => void interpret()}
         />
@@ -1034,6 +1068,9 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
         )}
       </div>
       {state.kind === "failed" && <p className="problem">{state.reason}</p>}
+      {needsCondition(rule) && !isConditionChecked(rule) && (
+        <p className="problem">Task の操作をするルールは、「どういう時」を確かめてから保存してください</p>
+      )}
       <ApplyToExisting rule={rule} />
       <button type="button" className="dismiss-button" onClick={props.onRemove}>
         このルールを消す

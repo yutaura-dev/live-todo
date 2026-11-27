@@ -36,6 +36,7 @@ const api: LiveTodoApi = {
   gmailMailTarget: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.gmailMailTarget, { taskId }),
   taskQuestions: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.taskQuestions, { taskId }),
   interpretRule: (then) => ipcRenderer.invoke(IPC_CHANNELS.interpretRule, { then }),
+  decomposeRule: (when) => ipcRenderer.invoke(IPC_CHANNELS.decomposeRule, { when }),
   openStepLink: (taskId, stepId) => ipcRenderer.invoke(IPC_CHANNELS.openStepLink, { taskId, stepId }),
   applyRuleToExisting: (ruleId) => ipcRenderer.invoke(IPC_CHANNELS.applyRuleToExisting, { ruleId }),
   askTask: (taskId, question) => ipcRenderer.invoke(IPC_CHANNELS.askTask, { taskId, question }),

@@ -58,6 +58,17 @@ describe("SourceItemRepository", () => {
       assert.isNull(withoutAuthor.author);
     }).pipe(Effect.provide(TestDatabase)));
 
+  it.effect("事実（アプリが書いた情報と本文）を保存し、渡さずに保存し直したときは前の事実を残す", () =>
+    Effect.gen(function* () {
+      const items = yield* SourceItemRepository;
+      const fact = { trusted: ["種類: GitHub の PullRequest", "作成者: @alice"], body: "タイトル: README の誤字を直す" };
+
+      yield* items.upsertItem(draft({ fact }));
+      const saved = yield* items.upsertItem(draft({ title: "README の誤字を直す（2）" }));
+
+      assert.deepStrictEqual(saved.fact, fact);
+    }).pipe(Effect.provide(TestDatabase)));
+
   it.effect("記録した Activity を Item ごとに古い順で取得できる", () =>
     Effect.gen(function* () {
       const repo = yield* SourceItemRepository;

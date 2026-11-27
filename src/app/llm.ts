@@ -40,47 +40,39 @@ const buildClassifier = <E, R>(layer: Layer.Layer<StructuredClassifier, E, R>) =
     return yield* StructuredClassifier;
   }).pipe(Effect.provide(layer));
 
-/** LLM Profile から StructuredClassifier を作る。アカウントごとに呼び、そのアカウントのジョブにだけ渡す */
-export const makeStructuredClassifier = Effect.fnUntraced(function* (profile: LlmProfile) {
+/**
+ * LLM Profile から LanguageModel を作る。判定・ルールの条件の分解に使う。どの provider でも、思考・推論を切り、出力トークンに上限を付ける
+ * （答えは短い構造化出力で、考えた分の出力トークンにも料金がかかるため）
+ */
+export const makeLanguageModel = Effect.fnUntraced(function* (profile: LlmProfile) {
   const secrets = yield* SecretStore;
   switch (profile.provider) {
-    case "none":
-      return yield* buildClassifier(ConservativeClassifier);
     case "anthropic": {
       const apiKey = yield* secrets.require("llm.anthropic.api_key");
-      return yield* buildClassifier(
-        LlmStructuredClassifier.pipe(
-          Layer.provide(
-            AnthropicLanguageModel.model(profile.model, { max_tokens: MAX_JUDGMENT_OUTPUT_TOKENS, thinking: JUDGMENT_THINKING }),
-          ),
-          Layer.provide(AnthropicClient.layer({ apiKey })),
-        ),
+      return AnthropicLanguageModel.model(profile.model, { max_tokens: MAX_JUDGMENT_OUTPUT_TOKENS, thinking: JUDGMENT_THINKING }).pipe(
+        Layer.provide(AnthropicClient.layer({ apiKey })),
       );
     }
     case "openai": {
       const apiKey = yield* secrets.require("llm.openai.api_key");
-      return yield* buildClassifier(
-        LlmStructuredClassifier.pipe(
-          Layer.provide(OpenAiLanguageModel.model(profile.model)),
-          Layer.provide(OpenAiClient.layer({ apiKey })),
-        ),
-      );
+      return OpenAiLanguageModel.model(profile.model).pipe(Layer.provide(OpenAiClient.layer({ apiKey })));
     }
     case "azure-openai": {
       const apiKey = yield* secrets.require(AZURE_API_KEY);
-      return yield* buildClassifier(
-        LlmStructuredClassifier.pipe(
-          Layer.provide(
-            OpenAiLanguageModel.model(profile.model, { max_output_tokens: MAX_JUDGMENT_OUTPUT_TOKENS, reasoning: JUDGMENT_REASONING }),
-          ),
-          Layer.provide(yield* azureClientLayer(profile, apiKey)),
-        ),
+      return OpenAiLanguageModel.model(profile.model, { max_output_tokens: MAX_JUDGMENT_OUTPUT_TOKENS, reasoning: JUDGMENT_REASONING }).pipe(
+        Layer.provide(yield* azureClientLayer(profile, apiKey)),
       );
     }
     default:
-      // Gemini（@effect/ai-google が v4 に未対応）・Bedrock は、使うときに足す
+      // none は LLM を使わない。Gemini（@effect/ai-google が v4 に未対応）・Bedrock は、使うときに足す
       return yield* new UnsupportedLlmProviderError({ provider: profile.provider });
   }
+});
+
+/** LLM Profile から StructuredClassifier を作る。アカウントごとに呼び、そのアカウントのジョブにだけ渡す */
+export const makeStructuredClassifier = Effect.fnUntraced(function* (profile: LlmProfile) {
+  if (profile.provider === "none") return yield* buildClassifier(ConservativeClassifier);
+  return yield* buildClassifier(LlmStructuredClassifier.pipe(Layer.provide(yield* makeLanguageModel(profile))));
 });
 
 // Azure では deployment 名。Azure の手順書の例がモデル名と同じ deployment 名なので、同じ既定値にする
@@ -107,6 +99,12 @@ const decisionModelLayer = Effect.fnUntraced(function* (profile: LlmProfile, dec
       // Jev・Gemini Decisions は effect/ai の provider がないので、使うときに DecisionModel.make で足す
       return yield* new UnsupportedLlmProviderError({ provider: decisions.provider });
   }
+});
+
+/** LLM Profile の decisions から DecisionModel を作る。ルールの条件の判定・「何をする」の読み取りに使う */
+export const makeDecisionModel = Effect.fnUntraced(function* (profile: LlmProfile) {
+  if (profile.decisions === undefined) return yield* new UnsupportedLlmProviderError({ provider: `${profile.provider}（decisions なし）` });
+  return yield* decisionModelLayer(profile, profile.decisions);
 });
 
 /**
