@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
-> **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0009](decisions/0009-adaptive-watch-frequency.md)
+> **最終更新**: 2026-11-27
+> **直近の変更 ADR**: [ADR-0019](decisions/0019-task-first-model.md)
 
 # Architecture — live-todo
 
@@ -42,6 +42,18 @@ Source Item ──(Link: tracks / context)──▶ Task
 5. Task の項目が実際に変わったときだけ Task Change を記録する
 6. カーソルを保存する（2〜6 は 1 つのトランザクション）
 
+### Task 起点（ADR-0019）
+
+Task が主で、Source Item は Task についての事実。届いた事実をどの Task のものかに振り分け、ルールは Task に当てる（振り分けは段階的に作っている。今は同期の triage が Item ごとに Task を作るまま）。
+
+- **事実**（`source_items.fact`）: Source Item が表す事実を、アプリが書いた情報（`trusted`）と外の人が書いた文（`body`）に分けて持つ。同期で Source ごとの `describeFact` が書く（今は GitHub の通知だけ。ほかの Source の Item は、Source の名前・作成者・タイトルで代わりにする）
+  - 値がなくても書く（「レビュー依頼: なし」）、状態は Source の言葉で書く（「マージ済み」）、自分に関わる結論はアプリが決めて 1 行で書く（「あなた（または所属チーム）へのレビュー依頼: あり（チーム @x）」）
+- **dossier**（`src/core/task/dossier.ts`）: Task の情報（状態・作られ方・事実の数）と、紐づく事実をまとめたもの。判定に渡すときは、アプリの情報だけで答える問いには title・brief・本文を渡さない
+- **ルール**: 「どういう時」は保存するときに LLM で判定しやすい問いに分け（`src/core/rules/rule-condition.ts`）、利用者に見せて確かめてもらう。「何をする」は Decisions で Task の操作・メールの操作に読み取る（`rule-actions.ts`）。条件が混ざっていたら保存させない
+  - Task への操作（完了・対象外・todo）は `app:task-rules` のジョブ（`src/app/task-rules.ts`）が、Task ができた・事実が紐づいた・紐づく事実に出来事があったときに、ルールを作ったあとのものだけ当てる。記録は `task_rule_runs`
+  - メールへの操作（ラベル・既読・アーカイブ）は、今は Gmail の同期の中でメールに当てる（`gmail-rule-runner.ts`、ADR-0014 のまま）。Task に紐づくメールに当てる形に寄せる
+- spike とベンチマークは `spike/task-first/`（実データの評価用データは gitignore の `data/`）
+
 ### 見張り（Watcher）
 
 経緯は [ADR-0008](decisions/0008-watchers.md)。`src/core/watch/` が Source を知らない共通部分、Source 側は WatchProvider（見張る対象の一覧）と固有の Condition を持つ。
@@ -63,6 +75,7 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 | `tasks` | Task（title / brief / status） |
 | `task_links` | Link。`source_item_id` で一意 |
 | `task_changes` | Task Change。`seen_at` が NULL のものが更新マーク |
+| `task_rule_runs` | ルールを Task に当てた記録。Task・ルールの中身・きっかけごとに一度だけ |
 | `sync_cursors` | Source ごとのカーソル |
 
 ## 設定と秘密情報
@@ -93,12 +106,13 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 - `src/core/judge/llm-classifier.ts`（`LlmStructuredClassifier`）: `effect/ai` の `LanguageModel.generateObject` で verdict（todo / not_todo / uncertain）と理由を受け取る。provider は LanguageModel を提供する側で決める
 - 出力が Schema に合わない・内容のポリシーで拒否された場合は、同期を止めずに要確認に回す（同じ入力なら次も同じ結果になりやすく、同期を失敗にすると 1 件で詰まるため）。接続・レート制限・認証などの失敗は `JudgeRequestError` にして、次の周期でやり直す
 - 評価対象（通知のタイトルなど）は外部から来たデータなので、プロンプトでは区切りの中に入れ、指示として従わないよう明示する
-- `src/app/llm.ts`（`makeStructuredClassifier`）: LLM Profile から classifier を作る。対応済みは `none`（LLM を使わない）・`anthropic`・`openai`。API キーは `SecretStore` の `llm.<provider>.api_key`
+- `src/app/llm.ts`（`makeStructuredClassifier`）: LLM Profile から classifier を作る。対応済みは `none`（LLM を使わない）・`anthropic`・`openai`・`azure-openai`。API キーは `SecretStore` の `llm.<provider>.api_key`
+  - `azure-openai` は OpenAI 互換の v1 API（`<azure.endpoint>/openai/v1`）に `OpenAiClient` の接続先を向けて使う。`model` には deployment 名を書く。判定では Claude と同じく推論を切り（`reasoning.effort: "none"`）、出力トークンに上限（1024）を付ける。エンドポイントは API キーを送る先なので、設定ファイルの検証で Azure のホストだけを受け付ける
 - classifier は**アカウントごと**に作り、そのアカウントのジョブにだけ渡す（会社のデータを許可外の LLM に送らないため）
 - **Decisions provider**（`src/core/judge/decision-model-provider.ts`）: `effect/ai` の `DecisionModel` で確率付きの todo 判定（Probability）をする。LLM Profile に `decisions` があるアカウントだけ使い、ないアカウントは structured output で判定する（ADR-0003）
   - 評価対象（外部から来た文字列）は判定の input、質問と信頼できる情報は instructions に入れる
   - `decideSettled` で答えが返らなかったもの（拒否・欠落・不正）は refusal として要確認に回す
-  - 対応済みは OpenAI（`gpt-6-luna`）。Jev・Gemini Decisions は `DecisionModel.make` で足す
+  - 対応済みは OpenAI と Azure OpenAI（どちらも `gpt-6-luna`。Azure は同じ名前の deployment を既定にし、LLM Profile の `azure.endpoint` のリソースを使う）。Microsoft Foundry の Microsoft-Decision（`microsoft-decision`。`src/core/judge/microsoft-decision-model.ts`）は、`DecisionModel.make` で `<azure.endpoint>/providers/microsoft/v1/systemone` を呼ぶ。Azure OpenAI と同じリソース・同じ API キーで、既定の deployment 名は `Decision-1.1`。score（Rate）は答えの形が effect/ai に合わないので未対応。Jev・Gemini Decisions も `DecisionModel.make` で足す
   - ラベル・優先度・カスタムラベル（Classify / Rate）は、Task に保存する項目を作るときに同じ `decide` にまとめる
 
 ## 定期実行
@@ -119,7 +133,7 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 | UI | React + Vite | |
 | カンバン | dnd-kit | |
 | データストア | SQLite（`@effect/sql-sqlite-node`）+ Drizzle ORM 1.0 rc（`drizzle-orm/effect-sqlite-node`） | ローカル完結。テーブル定義から型を導く。[ADR-0006](decisions/0006-drizzle-on-effect-sql.md) |
-| LLM 抽象 | `effect/ai`（`LanguageModel`）+ `@effect/ai-*` | 複数プロバイダと tool calling を共通 API で扱える。Decisions provider は `effect/http` で自前実装 |
+| LLM 抽象 | `effect/ai`（`LanguageModel`）+ `@effect/ai-*` | 複数プロバイダと tool calling を共通 API で扱える。Decisions provider は `effect/ai` の `DecisionModel`（OpenAI / Azure OpenAI は `@effect/ai-openai`、Microsoft-Decision は `DecisionModel.make` で自前実装） |
 | 秘匿情報 | Electron `safeStorage`（macOS Keychain） | トークンを平文の設定ファイルに置かない |
 | テスト | Vitest + `@effect/vitest`（UI の E2E は必要に応じて Playwright） | |
 | パッケージ管理 | pnpm 12（`packageManager` で固定、corepack で起動） | |
@@ -182,7 +196,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 | Slack API | メッセージ・メンション・スレッドの取得 | レート制限、ワークスペース側のアプリ承認が要る場合がある |
 | Gmail API / Google Calendar API / Google Drive API | メール・予定・Docs のコメントの取得 | Google OAuth の審査範囲、トークンの有効期限 |
 | GitHub API | Issue / PR / レビュー依頼 / 通知の取得 | レート制限 |
-| Notion API | ページ・メンション・割り当ての取得 | インテグレーションへのページ共有が必要 |
+| Notion の Web クライアントの API（非公開） | 受信トレイ（メンション・コメント・リマインダー）の取得（[ADR-0015](decisions/0015-notion-session-and-inbox.md)） | ブラウザのセッション（token_v2）が要る。予告なく仕様が変わる |
 | Microsoft Graph | Outlook（Mail・Calendar）・Teams の取得 | 会社テナントでのアプリ同意が必要な場合がある |
 | LLM API（Claude / OpenAI / Gemini / Azure OpenAI / Bedrock） | fallback の判定、Epic の名前付け、Agent、Pre-work | 従量課金のコスト、会社ポリシー上の利用可否 |
 | Drizzle ORM / drizzle-kit 1.0 rc | クエリとマイグレーション | rc のため正式版までに API が変わる可能性がある |

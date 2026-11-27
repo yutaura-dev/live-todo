@@ -1,10 +1,11 @@
 import { join } from "node:path";
-import { NodeServices } from "@effect/platform-node";
+// まとめた入口（"@effect/platform-node"）から読まない理由: 使わない NodeRedis まで読み込み、配る版に入らない redis（省略できる依存）を探して起動に失敗するため
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Cache, Cause, DateTime, Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Redacted, Schema } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
-import { loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
+import { loadAppConfigFile, loadAppConfigFileIfExists, readAppConfigDocument, saveAppConfigFile } from "../app/config/app-config.js";
 import { dismissTasksOutsideFilter } from "../app/filter-cleanup.js";
 import { makeGitHubJobs } from "../app/github-jobs.js";
 import { makeSlackJobs } from "../app/slack-jobs.js";
@@ -13,7 +14,10 @@ import { sourceItems, taskLinks } from "../core/db/schema.js";
 import { makeGmailJobs } from "../app/gmail-jobs.js";
 import { applyGmailRules } from "../sources/gmail/gmail-rule-runner.js";
 import { MailClassifier } from "../core/judge/mail-classifier.js";
-import { makeMailClassifier } from "../app/llm.js";
+import { makeDecisionModel, makeLanguageModel, makeMailClassifier } from "../app/llm.js";
+import { readRuleActions } from "../app/rule-settings.js";
+import { applyTaskRules } from "../app/task-rules.js";
+import { decomposeCondition } from "../core/rules/rule-condition.js";
 import { runGmailThreadTriage } from "../app/gmail-conversations.js";
 import {
   acceptSuggestion,
@@ -25,13 +29,21 @@ import {
   TaskQuestionError,
   type TaskSuggestion,
 } from "../app/task-questions.js";
-import { actionsFromInterpretation, labelCandidatesOf } from "../core/rules/interpret.js";
 import { decodePlan, stepLinkOf } from "../core/task/next-actions.js";
 import { gmailMailTarget, gmailProcess, gmailRunStep, GmailWriteError } from "../app/gmail-write.js";import { GmailClient } from "../sources/gmail/gmail-client.js";
 import { GmailClientLive, Gws } from "../sources/gmail/gmail-client-live.js";
 import { withSlackSession } from "../app/slack-session.js";
 import { releaseUntouchedInboxTasks, runSlackConversationTriage } from "../app/slack-conversations.js";
 import { captureSlackSession } from "./slack-connect.js";
+import { captureNotionSession } from "./notion-connect.js";
+import { withNotionSession } from "../app/notion-session.js";
+import { makeNotionJobs, notionTokenKey } from "../app/notion-jobs.js";
+import { makeCalendarJobs } from "../app/calendar-jobs.js";
+import { loginShellPath, mergePath } from "../app/login-shell-path.js";
+import { graphClientFor, makeMicrosoftJobs, microsoftAppOf, microsoftRefreshTokenKey } from "../app/microsoft-jobs.js";
+import { type DeviceCode, type MicrosoftApp, pollDeviceToken, requestDeviceCode } from "../sources/microsoft/microsoft-auth.js";
+import { NotionClient, NotionRequestError } from "../sources/notion/notion-client.js";
+import { NotionClientLive } from "../sources/notion/notion-client-live.js";
 import { SlackClient, SlackRequestError } from "../sources/slack/slack-client.js";
 import { slackWrite } from "../app/slack-write.js";
 import {
@@ -115,7 +127,7 @@ const DEPENDENCY_REVIEW_BUDGET_USD = 2;
 // 同時に調べる数。並列にすると早く終わるが、増やしすぎると Claude Code の使用量の枠をすぐに使い切る
 const DEPENDENCY_REVIEW_CONCURRENCY = 4;
 const AGENT_JOB_INTERVAL = "1 minute" as const;
-const LLM_SECRET_KEYS = ["llm.anthropic.api_key", "llm.openai.api_key"] as const;
+const LLM_SECRET_KEYS = ["llm.anthropic.api_key", "llm.openai.api_key", "llm.azure-openai.api_key"] as const;
 
 // safeStorage は app の ready 後でないと使えないので、呼ばれた時点で確かめる
 const keychainCipher: SecretCipher = {
@@ -161,7 +173,13 @@ let syncFiber: Fiber.Fiber<unknown, unknown> | undefined;
 let syncProblem: string | undefined;
 
 const startSync = Effect.gen(function* () {
-  const config = yield* loadAppConfigFile(configPath);
+  const configFile = yield* loadAppConfigFileIfExists(configPath);
+  if (Option.isNone(configFile)) {
+    // 初めて起動したときの状態なので、エラーではなく次にやることを出す。設定を保存すると restartSync で同期が始まる
+    syncProblem = "まだ設定がありません。設定画面でアカウントを追加して保存すると、同期を始めます";
+    return;
+  }
+  const config = configFile.value;
   for (const account of config.accounts) {
     const dismissed = yield* dismissTasksOutsideFilter(account.id, account.repositories ?? {});
     if (dismissed > 0) yield* Effect.log(`フィルタで除外したリポジトリの Task を ${dismissed} 件片付けた`).pipe(Effect.annotateLogs({ account: account.id }));
@@ -181,9 +199,50 @@ const startSync = Effect.gen(function* () {
       ),
     )
   ).flat();
+  // Notion も、1 つのアカウントのセッションが切れても、ほかの同期は止めない
+  const notionJobs = (
+    yield* Effect.forEach(config.notionAccounts, (account) =>
+      makeNotionJobs(account).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Notion（${account.id}）の同期を始められない: ${errorMessage(error)}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
+  // 終日の予定の日付は、この PC のタイムゾーンで読む（Graph のタイムゾーン名は Windows の名前で、IANA に直す表が要るため）
+  const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const microsoftJobs = (
+    yield* Effect.forEach(config.microsoftAccounts, (account) =>
+      makeMicrosoftJobs(account, { timeZone: localTimeZone }).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Microsoft（${account.id}）の同期を始められない: ${errorMessage(error)}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
+  const calendarJobs = (
+    yield* Effect.forEach(
+      config.gmailAccounts.filter((account) => account.calendar),
+      (account) =>
+      makeCalendarJobs(account).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            syncProblem = `Calendar（${account.id}）の同期を始められない: ${errorMessage(error)}`;
+            return [];
+          }),
+        ),
+      ),
+    )
+  ).flat();
   const gmailJobs = (
     yield* Effect.forEach(config.gmailAccounts, (account) =>
-      makeGmailJobs(account, config.rules).pipe(
+      makeGmailJobs(account, config.rules, { invitesHandledByCalendar: account.calendar }).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
             syncProblem = `Gmail（${account.id}）の同期を始められない: ${errorMessage(error)}`;
@@ -302,8 +361,29 @@ const startSync = Effect.gen(function* () {
     run: localToday.pipe(Effect.flatMap(runRecurringTasks)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
-  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob].map((job) => job.name).join(", ")}`);
-  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
+  // 利用者が決めたルールを Task に当てる（ADR-0019）。Task への操作をするルールがあるときだけ動かす
+  const taskRuleJobs: SyncJob<never, Database | TaskRepository | HttpClient.HttpClient>[] = [];
+  if (config.rules.some((rule) => rule.enabled && rule.actions.task !== undefined)) {
+    const decisions = yield* makeDecisionModel(defaultProfileOf(config)).pipe(
+      Effect.map(Option.some),
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          syncProblem = `ルールを Task に当てられない: ${errorMessage(error)}`;
+          return Option.none();
+        }),
+      ),
+    );
+    if (Option.isSome(decisions)) {
+      taskRuleJobs.push({
+        name: "app:task-rules",
+        interval: AGENT_JOB_INTERVAL,
+        run: applyTaskRules(config.rules).pipe(Effect.provide(decisions.value), Effect.asVoid),
+        backoffUntil: () => Option.none<DateTime.Utc>(),
+      });
+    }
+  }
+  yield* Effect.log(`同期を始める: ${[...jobs, ...slackJobs, ...notionJobs, ...microsoftJobs, ...calendarJobs, ...gmailJobs, ...agentJobs, ...conversationJobs, ...gmailThreadJobs, conflictPlanJob, recurringJob, autoStepJob, ...taskRuleJobs].map((job) => job.name).join(", ")}`);
+  return yield* Effect.all([runJobs(jobs), runJobs(slackJobs), runJobs(notionJobs), runJobs(microsoftJobs), runJobs(calendarJobs), runJobs(gmailJobs), runJobs(agentJobs), runJobs([conflictPlanJob, recurringJob, ...taskRuleJobs]), runJobs(conversationJobs), runJobs(gmailThreadJobs), runJobs([autoStepJob])], {
     concurrency: 8,
     discard: true,
   });
@@ -357,12 +437,22 @@ const settingsSnapshot = Effect.gen(function* () {
     Option.map((loaded) => loaded.slackAccounts.map((account) => account.id)),
     Option.getOrElse((): string[] => []),
   );
+  const notionIds = loadedConfig.pipe(
+    Option.map((loaded) => loaded.notionAccounts.map((account) => account.id)),
+    Option.getOrElse((): string[] => []),
+  );
+  const microsoftIds = loadedConfig.pipe(
+    Option.map((loaded) => loaded.microsoftAccounts.map((account) => account.id)),
+    Option.getOrElse((): string[] => []),
+  );
   const stored = new Set(yield* (yield* SecretVault).storedKeys);
   const store = yield* SecretStore;
   const secrets: Record<string, SecretStatus> = {};
   for (const key of [
     ...accountIds.map((id) => `github.${id}.token`),
     ...slackIds.flatMap((id) => [`slack.${id}.token`, `slack.${id}.cookie`]),
+    ...notionIds.map(notionTokenKey),
+    ...microsoftIds.map(microsoftRefreshTokenKey),
     ...LLM_SECRET_KEYS,
   ]) {
     secrets[key] = stored.has(key) ? "saved" : Option.isSome(yield* store.get(key)) ? "env" : "missing";
@@ -531,6 +621,22 @@ const slackClientFor = (accountId: string) =>
     );
   });
 
+/** 保存した設定と秘密情報で、Notion のクライアントを作る（接続の確認のため） */
+const notionClientFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const account = config.notionAccounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) return yield* new NotionRequestError({ message: `設定に Notion のアカウント「${accountId}」がない` });
+    const token = yield* (yield* SecretStore).require(notionTokenKey(accountId));
+    const http = yield* HttpClient.HttpClient;
+    return yield* Effect.gen(function* () {
+      return yield* NotionClient;
+    }).pipe(
+      Effect.provide(NotionClientLive({ token, userId: account.userId, userAgent: account.userAgent, origin: account.origin })),
+      Effect.provideService(HttpClient.HttpClient, http),
+    );
+  });
+
 /** 保存した設定で、Gmail のクライアントを作る（承認した書き込みのため。認証は gws に任せる） */
 const gmailClientFor = (accountId: string) =>
   Effect.gen(function* () {
@@ -635,23 +741,34 @@ const claudeOptionsForTask = (taskId: number) =>
     Effect.orElseSucceed(() => undefined),
   );
 
-/** ルールの「何をする」を、Decisions でアプリの操作に読み取る（ADR-0014）。ラベルの名前は、文の中の名前と Gmail にあるラベルから選ばせる */
-const interpretRuleActions = (then: string) =>
+/** 設定の既定の LLM Profile（ルールは Task に当てるので、アカウントではなく PC の LLM Profile で判定する。charter の 1 台 1 Profile の運用） */
+const defaultProfileOf = (config: { llmProfiles: Record<string, import("../app/config/app-config.js").LlmProfile>; defaultLlmProfile: string }) => config.llmProfiles[config.defaultLlmProfile]!;
+
+/** ルールの「何をする」を、Decisions でアプリの操作に読み取る（ADR-0019）。ラベルの名前は、文の中の名前と Gmail にあるラベルから選ばせる */
+const interpretRuleActionsOf = (then: string) =>
   Effect.gen(function* () {
     const config = yield* loadAppConfigFile(configPath);
+    const decisions = yield* makeDecisionModel(defaultProfileOf(config));
     const account = config.gmailAccounts[0];
-    if (account === undefined) return { ok: false as const, reason: "Gmail のアカウントを設定してから読み取ってください" };
-    const classifier = yield* makeMailClassifier(account.resolvedLlmProfile);
-    const existing = yield* gmailClientFor(account.id).pipe(
-      Effect.flatMap((client) => client.labels),
-      // システムのラベル（INBOX・CATEGORY_* など）は候補にしない
-      Effect.map((labels) => labels.filter((label) => label.id.startsWith("Label_")).map((label) => label.name)),
-      Effect.orElseSucceed(() => [] as string[]),
-    );
-    const candidates = [...new Set([...labelCandidatesOf(then), ...existing])].slice(0, MAX_LABEL_CANDIDATES);
-    return actionsFromInterpretation(yield* classifier.interpretActions({ instruction: then, labels: candidates }));
+    const labels =
+      account === undefined
+        ? []
+        : yield* gmailClientFor(account.id).pipe(
+            Effect.flatMap((client) => client.labels),
+            // システムのラベル（INBOX・CATEGORY_* など）は候補にしない
+            Effect.map((found) => found.filter((label) => label.id.startsWith("Label_")).map((label) => label.name)),
+            Effect.orElseSucceed(() => [] as string[]),
+          );
+    return yield* readRuleActions(then, { available: account !== undefined, labels }).pipe(Effect.provide(decisions));
   });
-const MAX_LABEL_CANDIDATES = 30;
+
+/** ルールの「どういう時」を、判定に使う問いに分ける（ADR-0019）。保存する前に、分けた問いを利用者に確かめてもらう */
+const decomposeRuleCondition = (when: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const model = yield* makeLanguageModel(defaultProfileOf(config));
+    return { ok: true as const, condition: yield* decomposeCondition(when).pipe(Effect.provide(model)) };
+  });
 
 function registerTaskQuestions() {
   // 外部への書き込み。設定画面で確かめてから押したときだけ呼ばれる（ルールの範囲の書き込みで、ADR-0014）
@@ -693,7 +810,15 @@ function registerTaskQuestions() {
   ipcMain.handle(IPC_CHANNELS.interpretRule, (_event, input: unknown) =>
     runtime.runPromise(
       Schema.decodeUnknownEffect(Schema.Struct({ then: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(500)) }))(input).pipe(
-        Effect.flatMap((request) => interpretRuleActions(request.then)),
+        Effect.flatMap((request) => interpretRuleActionsOf(request.then)),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, reason: errorMessage(error) })),
+      ),
+    ),
+  );
+  ipcMain.handle(IPC_CHANNELS.decomposeRule, (_event, input: unknown) =>
+    runtime.runPromise(
+      Schema.decodeUnknownEffect(Schema.Struct({ when: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(500)) }))(input).pipe(
+        Effect.flatMap((request) => decomposeRuleCondition(request.when)),
         Effect.catch((error) => Effect.succeed({ ok: false as const, reason: errorMessage(error) })),
       ),
     ),
@@ -837,6 +962,97 @@ function registerSlackSettings() {
         const accountId = yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)))(input);
         const me = yield* (yield* slackClientFor(accountId)).authTest;
         return { user: me.user, team: me.team };
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+}
+
+const pendingMicrosoftSignIns = new Map<string, { app: MicrosoftApp; code: DeviceCode }>();
+
+const microsoftAccountFor = (accountId: string) =>
+  Effect.gen(function* () {
+    const config = yield* loadAppConfigFile(configPath);
+    const account = config.microsoftAccounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) return yield* Effect.fail(new Error(`保存した設定に Microsoft のアカウント「${accountId}」がない。先に設定を保存してください`));
+    return account;
+  });
+
+function registerMicrosoftSettings() {
+  const AccountIdInput = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/));
+  // 外部への書き込みではない（自分のサインインを済ませるだけ）。コードとトークンはログに出さない
+  ipcMain.handle(IPC_CHANNELS.startMicrosoftSignIn, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const accountId = yield* Schema.decodeUnknownEffect(AccountIdInput)(input);
+        const app = microsoftAppOf(yield* microsoftAccountFor(accountId));
+        const code = yield* requestDeviceCode(app);
+        pendingMicrosoftSignIns.set(accountId, { app, code });
+        if (isAllowedExternalUrl(code.verificationUri)) void shell.openExternal(code.verificationUri);
+        return { userCode: code.userCode, verificationUri: code.verificationUri, expiresInSeconds: code.expiresInSeconds };
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.finishMicrosoftSignIn, (_event, input: unknown) =>
+    runtime
+      .runPromise(
+        Effect.gen(function* () {
+          const accountId = yield* Schema.decodeUnknownEffect(AccountIdInput)(input);
+          const pending = pendingMicrosoftSignIns.get(accountId);
+          if (pending === undefined) return { error: "サインインを始めていない" };
+          const tokens = yield* pollDeviceToken(pending.app, pending.code).pipe(Effect.ensuring(Effect.sync(() => pendingMicrosoftSignIns.delete(accountId))));
+          yield* (yield* SecretVault).set(microsoftRefreshTokenKey(accountId), tokens.refreshToken);
+          const me = (yield* (yield* graphClientFor(yield* microsoftAccountFor(accountId))).get("/me", { query: { $select: "displayName,mail" } })) as { displayName?: string; mail?: string };
+          return { user: me.displayName ?? me.mail ?? "" };
+        }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+      )
+      .then(async (result) => {
+        if (!("error" in result)) await restartSync();
+        return result;
+      }),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.testMicrosoft, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const accountId = yield* Schema.decodeUnknownEffect(AccountIdInput)(input);
+        const me = (yield* (yield* graphClientFor(yield* microsoftAccountFor(accountId))).get("/me", { query: { $select: "displayName,mail" } })) as { displayName?: string; mail?: string };
+        return { user: me.displayName ?? me.mail ?? "" };
+      }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
+    ),
+  );
+}
+
+function registerNotionSettings() {
+  // 外部への書き込みではない（自分のセッションを読み取るだけ）。読み取った値は暗号化して保存し、ログに出さない
+  ipcMain.handle(IPC_CHANNELS.connectNotion, async (_event, input: unknown) => {
+    const request = await runtime
+      .runPromise(Schema.decodeUnknownEffect(Schema.Struct({ accountId: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)) }))(input))
+      .catch(() => undefined);
+    if (request === undefined) return { error: "アカウントの名前が正しくない" };
+    const captured = await captureNotionSession().catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+    if (typeof captured === "string") return { error: captured };
+    const outcome = await outcomeOf(
+      Effect.gen(function* () {
+        yield* (yield* SecretVault).set(notionTokenKey(request.accountId), Redacted.make(captured.token));
+        const document = yield* readAppConfigDocument(configPath);
+        yield* saveAppConfigFile(
+          configPath,
+          withNotionSession(Option.getOrElse(document, () => ({})), { id: request.accountId, userId: captured.userId, userAgent: captured.userAgent, origin: captured.origin }),
+        );
+      }),
+    );
+    if (!outcome.ok) return { error: outcome.message };
+    await restartSync();
+    return { user: captured.userId };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.testNotion, (_event, input: unknown) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const accountId = yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/)))(input);
+        const me = yield* (yield* notionClientFor(accountId)).me;
+        return { user: me.name, spaces: me.spaces.map((space) => space.name) };
       }).pipe(Effect.catch((error) => Effect.succeed({ error: errorMessage(error) }))),
     ),
   );
@@ -1165,10 +1381,20 @@ void app.whenReady().then(() => {
   registerReplan();
   registerTasksAndRecurring();
   registerSlackSettings();
+  registerNotionSettings();
+  registerMicrosoftSettings();
   registerGmailActions();
   registerTaskQuestions();
   createWindow();
-  if (!smokeTest && screenshotPath === undefined) void restartSync();
+  if (smokeTest || screenshotPath !== undefined) return;
+  void (async () => {
+    // 配る版は Finder から起動され、PATH が狭くて gws・claude・gh を見つけられないので、同期の前にログインシェルの PATH を読む
+    if (app.isPackaged && process.platform === "darwin") {
+      const path = await runtime.runPromise(loginShellPath(process.env["SHELL"] ?? "/bin/zsh"));
+      if (Option.isSome(path)) process.env["PATH"] = mergePath(process.env["PATH"], path.value);
+    }
+    await restartSync();
+  })();
 });
 
 app.on("window-all-closed", () => {

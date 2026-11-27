@@ -1,11 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, FileSystem, Option } from "effect";
-import { decodeAppConfig, InvalidAppConfigError, loadAppConfigFile, readAppConfigDocument, saveAppConfigFile } from "./app-config.js";
+import { decodeAppConfig, InvalidAppConfigError, loadAppConfigFile, loadAppConfigFileIfExists, readAppConfigDocument, saveAppConfigFile } from "./app-config.js";
 
 const validConfig = {
   llmProfiles: {
-    work: { provider: "azure-openai", model: "gpt-5" },
+    work: { provider: "azure-openai", model: "gpt-5", azure: { endpoint: "https://acme.openai.azure.com" } },
     personal: { provider: "anthropic", model: "claude-sonnet-5-5", decisions: { provider: "openai" } },
   },
   defaultLlmProfile: "work",
@@ -40,6 +40,48 @@ describe("decodeAppConfig", () => {
 
       assert.isTrue(config.accounts[0]?.reviewDependencyPrs);
     }));
+
+  it.effect("Azure OpenAI を使うなら、リソースのエンドポイントを LLM Profile に書く", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig(validConfig);
+
+      assert.deepStrictEqual(config.llmProfiles["work"]?.azure, { endpoint: "https://acme.openai.azure.com" });
+    }));
+
+  it.effect("Azure OpenAI を使うのにエンドポイントがなければエラーにする", () =>
+    Effect.gen(function* () {
+      const message = yield* invalidReason({ ...validConfig, llmProfiles: { ...validConfig.llmProfiles, work: { provider: "azure-openai", model: "gpt-5" } } });
+
+      assert.include(message, "llmProfiles.work.azure.endpoint");
+    }));
+
+  it.effect("Decisions だけ Azure OpenAI を使う場合も、エンドポイントがなければエラーにする", () =>
+    Effect.gen(function* () {
+      const message = yield* invalidReason({
+        ...validConfig,
+        llmProfiles: { ...validConfig.llmProfiles, personal: { provider: "anthropic", model: "claude-haiku-5-5", decisions: { provider: "azure-openai" } } },
+      });
+
+      assert.include(message, "llmProfiles.personal.azure.endpoint");
+    }));
+
+  it.effect("Decisions に Microsoft-Decision を使う場合も、Azure のエンドポイントがなければエラーにする", () =>
+    Effect.gen(function* () {
+      const message = yield* invalidReason({
+        ...validConfig,
+        llmProfiles: { ...validConfig.llmProfiles, personal: { provider: "anthropic", model: "claude-haiku-5-5", decisions: { provider: "microsoft-decision" } } },
+      });
+
+      assert.include(message, "llmProfiles.personal.azure.endpoint");
+    }));
+
+  it.effect.each(["https://acme.example.com", "http://acme.openai.azure.com", "https://acme.openai.azure.com/openai/v1", "https://acme.openai.azure.com.evil.example"])(
+    "Azure のエンドポイントでない URL（%s）はエラーにする（API キーをほかへ送らないため）",
+    (endpoint) =>
+      Effect.gen(function* () {
+        yield* invalidReason({ ...validConfig, llmProfiles: { ...validConfig.llmProfiles, work: { provider: "azure-openai", model: "gpt-5", azure: { endpoint } } } });
+      }),
+  );
 
   it.effect("対応していない LLM のプロバイダはエラーにする", () =>
     Effect.gen(function* () {
@@ -90,6 +132,96 @@ describe("decodeAppConfig", () => {
       });
 
       assert.include(message, "acme");
+    }));
+});
+
+describe("Microsoft のアカウント", () => {
+  const microsoft = {
+    kind: "microsoft",
+    id: "corp",
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    clientId: "22222222-2222-4222-8222-222222222222",
+    llmProfile: "work",
+  };
+
+  it.effect("テナント ID・client ID・使う機能（既定はどれも使わない）で書ける。書かなければ空", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).microsoftAccounts, []);
+
+      const config = yield* decodeAppConfig({ ...validConfig, microsoftAccounts: [microsoft, { ...microsoft, id: "corp2", tenantId: "contoso.onmicrosoft.com", calendar: true }] });
+
+      assert.deepInclude(config.microsoftAccounts[0], { id: "corp", calendar: false });
+      assert.deepInclude(config.microsoftAccounts[1], { tenantId: "contoso.onmicrosoft.com", calendar: true });
+      assert.strictEqual(config.microsoftAccounts[0]?.resolvedLlmProfile.provider, "azure-openai");
+    }));
+
+  it.effect("会社のデータを扱うので、LLM Profile を書いていなければエラーにする（既定の LLM Profile に黙って流さない）", () =>
+    Effect.gen(function* () {
+      const { llmProfile: _omitted, ...withoutProfile } = microsoft;
+
+      const reason = yield* invalidReason({ ...validConfig, microsoftAccounts: [withoutProfile] });
+
+      assert.include(reason, "microsoftAccounts[0].llmProfile");
+    }));
+
+  it.effect("UUID でない client ID・テナントの形でないテナント ID・ほかと重なる id はエラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({ ...validConfig, microsoftAccounts: [{ ...microsoft, clientId: "x" }] });
+      yield* invalidReason({ ...validConfig, microsoftAccounts: [{ ...microsoft, tenantId: "evil/../x" }] });
+      assert.include(yield* invalidReason({ ...validConfig, microsoftAccounts: [{ ...microsoft, id: "work" }] }), "重複");
+    }));
+});
+
+describe("Google Calendar（Gmail のアカウントで見る）", () => {
+  it.effect("Gmail のアカウントごとに、同じ Google アカウントの Calendar も見るかを書ける。既定は見ない", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig({
+        ...validConfig,
+        gmailAccounts: [
+          { kind: "gmail", id: "mail", llmProfile: "personal", calendar: true },
+          { kind: "gmail", id: "other", llmProfile: "personal" },
+        ],
+      });
+
+      assert.deepStrictEqual(config.gmailAccounts.map((account) => [account.id, account.calendar]), [
+        ["mail", true],
+        ["other", false],
+      ]);
+    }));
+});
+
+describe("Notion のアカウント", () => {
+  const notion = { kind: "notion", id: "notes", userId: "11111111-1111-4111-8111-111111111111", userAgent: "Mozilla/5.0 TestBrowser" };
+
+  it.effect("ユーザー ID とブラウザの User-Agent で Notion のアカウントを書ける。接続先は既定で www.notion.so。書かなければ空", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual((yield* decodeAppConfig(validConfig)).notionAccounts, []);
+
+      const config = yield* decodeAppConfig({ ...validConfig, notionAccounts: [notion] });
+
+      assert.deepInclude(config.notionAccounts[0], { id: "notes", origin: "https://www.notion.so" });
+      assert.strictEqual(config.notionAccounts[0]?.resolvedLlmProfile.provider, "azure-openai");
+    }));
+
+  it.effect("UUID でないユーザー ID・空の User-Agent・Notion でない接続先はエラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, userId: "me" }] });
+      yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, userAgent: "" }] });
+      yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, origin: "https://evil.example" }] });
+    }));
+
+  it.effect("id はほかのアカウントとも重ならないようにする", () =>
+    Effect.gen(function* () {
+      const reason = yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, id: "work" }] });
+
+      assert.include(reason, "重複");
+    }));
+
+  it.effect("書いた LLM Profile がなければエラーにする", () =>
+    Effect.gen(function* () {
+      const reason = yield* invalidReason({ ...validConfig, notionAccounts: [{ ...notion, llmProfile: "missing" }] });
+
+      assert.include(reason, "notionAccounts[0].llmProfile");
     }));
 });
 
@@ -179,6 +311,49 @@ describe("ルール", () => {
       assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, then: "アーカイブする" }] }), "読み取り直して");
       yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, actions: { gmail: { trash: true } } }] });
       yield* invalidReason({ ...validConfig, rules: [{ ...receiptRule, actions: { slack: { post: true } } }] });
+    }));
+
+  const completeRule = {
+    id: "r2",
+    name: "他人の PR は完了",
+    createdAt: "2026-11-27T00:00:00.000Z",
+    when: "YutaUra 以外が作った PR で、YutaUra にレビュー依頼がないもの",
+    condition: {
+      combine: "all",
+      clauses: [
+        { question: "紐づく事実に GitHub の PR があるか", expect: true, about: "metadata" },
+        { question: "その PR の作成者は YutaUra か", expect: false, about: "metadata" },
+      ],
+    },
+    conditionFrom: "YutaUra 以外が作った PR で、YutaUra にレビュー依頼がないもの",
+    then: "完了にする",
+    actions: { task: "done" },
+    interpretedFrom: "完了にする",
+  };
+
+  it.effect("Task への操作（完了・対象外・todo）と、分けた条件を持つルールを書ける", () =>
+    Effect.gen(function* () {
+      const config = yield* decodeAppConfig({ ...validConfig, rules: [completeRule] });
+
+      assert.deepInclude(config.rules[0], { actions: { task: "done" } });
+      assert.lengthOf(config.rules[0]?.condition?.clauses ?? [], 2);
+    }));
+
+  it.effect("Task への操作をするルールは、条件を分けていなければエラーにする（Task に当てるときは分けた問いで判定するため）", () =>
+    Effect.gen(function* () {
+      const { condition: _condition, conditionFrom: _from, ...withoutCondition } = completeRule;
+
+      assert.include(yield* invalidReason({ ...validConfig, rules: [withoutCondition] }), "どういう時」を確かめて");
+    }));
+
+  it.effect("条件を分けたあとに「どういう時」を書き換えたら、分け直すまでエラーにする", () =>
+    Effect.gen(function* () {
+      assert.include(yield* invalidReason({ ...validConfig, rules: [{ ...completeRule, when: "bot の PR" }] }), "どういう時」を確かめて");
+    }));
+
+  it.effect("決めていない Task への操作は、エラーにする", () =>
+    Effect.gen(function* () {
+      yield* invalidReason({ ...validConfig, rules: [{ ...completeRule, actions: { task: "delete" } }] });
     }));
 });
 
@@ -282,5 +457,29 @@ describe("readAppConfigDocument", () => {
       const document = yield* readAppConfigDocument("/config.json");
 
       assert.deepStrictEqual(document, Option.some({ accounts: "broken" }));
+    }).pipe(Effect.provide(FileSystem.layerNoop({ exists: () => Effect.succeed(true), readFileString: () => Effect.succeed('{"accounts":"broken"}') }))));
+});
+
+describe("loadAppConfigFileIfExists", () => {
+  it.effect("設定ファイルがなければ none を返す（初めて起動したときは、まだ設定がないため）", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* loadAppConfigFileIfExists(`${yield* fs.makeTempDirectoryScoped()}/config.json`);
+
+      assert.isTrue(Option.isNone(config));
+    }).pipe(Effect.provide(NodeFileSystem.layer)));
+
+  it.effect("設定ファイルがあれば検証して返す", () =>
+    Effect.gen(function* () {
+      const config = yield* loadAppConfigFileIfExists("/config.json");
+
+      assert.strictEqual(Option.getOrThrow(config).defaultLlmProfile, "work");
+    }).pipe(Effect.provide(FileSystem.layerNoop({ exists: () => Effect.succeed(true), readFileString: () => Effect.succeed(JSON.stringify(validConfig)) }))));
+
+  it.effect("設定ファイルがあっても検証に通らなければエラーにする", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(loadAppConfigFileIfExists("/config.json"));
+
+      assert.instanceOf(error, InvalidAppConfigError);
     }).pipe(Effect.provide(FileSystem.layerNoop({ exists: () => Effect.succeed(true), readFileString: () => Effect.succeed('{"accounts":"broken"}') }))));
 });

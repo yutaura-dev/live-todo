@@ -35,6 +35,8 @@ export class GitHubClient extends Context.Service<GitHubClient, {
   getComment(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
   /** トークンの持ち主（自分）のアカウント */
   readonly getViewer: Effect.Effect<unknown, GitHubClientError>;
+  /** 自分が所属するチーム（組織/チーム名）。トークンに read:org がないと取れない */
+  readonly listMyTeams: Effect.Effect<ReadonlyArray<string>, GitHubClientError>;
   /** 対象が削除された・見られなくなったときは Option.none を返す */
   getPullRequest(apiUrl: string): Effect.Effect<Option.Option<unknown>, GitHubClientError>;
   listCheckRuns(repository: string, sha: string): Effect.Effect<unknown, GitHubClientError>;
@@ -80,6 +82,9 @@ const GitHubSubjectDetail = Schema.Struct({
   html_url: Schema.String,
   body: Schema.optional(Schema.NullOr(Schema.String)),
   user: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
+  // PR だけが持つ。レビューを済ませた人は外れ、まだの人とチームだけが載る
+  requested_reviewers: Schema.optional(Schema.NullOr(Schema.Array(Schema.Struct({ login: Schema.String })))),
+  requested_teams: Schema.optional(Schema.NullOr(Schema.Array(Schema.Struct({ slug: Schema.String })))),
 });
 type GitHubSubjectDetail = typeof GitHubSubjectDetail.Type;
 
@@ -106,6 +111,10 @@ export type GitHubItem = {
   author?: string;
   bodyExcerpt?: string;
   latestCommentUrl?: string;
+  /** PR のレビューをまだ頼まれている人（login）。PR でなければ持たない */
+  requestedReviewers?: ReadonlyArray<string>;
+  /** PR のレビューをまだ頼まれているチーム（組織/チーム名）。PR でなければ持たない */
+  requestedTeams?: ReadonlyArray<string>;
 };
 
 // LLM に渡す本文を冒頭に絞る理由: 判定には冒頭で足りることが多く、長い PR の説明をそのまま渡すと料金が増えるため。
@@ -181,6 +190,7 @@ export const makeGitHubAdapter = Effect.fnUntraced(function* (options: GitHubAda
         ...(detail.body == null || detail.body === "" ? {} : { bodyExcerpt: detail.body.slice(0, BODY_EXCERPT_LENGTH) }),
         // 新しい PR の通知では latest_comment_url が対象そのものを指す（コメントがまだない）ので持たせない
         ...(latestCommentUrl == null || latestCommentUrl === apiUrl ? {} : { latestCommentUrl }),
+        ...requestedOf(detail, notification.repository.full_name),
       },
     } satisfies SourceChange<GitHubItem>;
   });
@@ -249,6 +259,16 @@ export const makeGitHubAdapter = Effect.fnUntraced(function* (options: GitHubAda
   };
   return adapter;
 });
+
+function requestedOf(detail: GitHubSubjectDetail, repository: string) {
+  if (detail.requested_reviewers == null && detail.requested_teams == null) return {};
+  // チームは組織ごとに名前がつくので、組織を添えて自分の所属チームと照らし合わせられるようにする
+  const org = repository.split("/")[0] ?? "";
+  return {
+    requestedReviewers: (detail.requested_reviewers ?? []).map((reviewer) => reviewer.login),
+    requestedTeams: (detail.requested_teams ?? []).map((team) => `${org}/${team.slug}`),
+  };
+}
 
 function stateOf(detail: GitHubSubjectDetail): GitHubItemState {
   if (detail.merged === true) return "merged";

@@ -10,12 +10,14 @@ import type {
 } from "../../shared/api.js";
 import { api } from "./api.js";
 import { RecurringSettings } from "./Recurring.js";
-import { describeActions, existingTargetsOf, isInterpreted, newRule } from "./gmail-rules.js";
+import { describeActions, describeCondition, existingTargetsOf, isConditionChecked, isInterpreted, needsCondition, newRule } from "./rules.js";
 import { hasAccountOverrides, type JudgeSetting, judgeSettingOf, MODEL_CHOICES, withJudgeSetting } from "./judge-settings.js";
 
 type Account = ConfigDocument["accounts"][number];
 type SlackAccountDraft = NonNullable<ConfigDocument["slackAccounts"]>[number];
 type GmailAccountDraft = NonNullable<ConfigDocument["gmailAccounts"]>[number];
+type NotionAccountDraft = NonNullable<ConfigDocument["notionAccounts"]>[number];
+type MicrosoftAccountDraft = NonNullable<ConfigDocument["microsoftAccounts"]>[number];
 
 const PREVIEW_DELAY_MS = 400;
 
@@ -42,6 +44,8 @@ function toDocument(config: unknown): ConfigDocument {
     slackAccounts: Array.isArray(draft.slackAccounts) ? draft.slackAccounts : [],
     // 画面で扱わない項目も落とさない（ここで落とすと、保存したときに設定ファイルから消える）
     gmailAccounts: Array.isArray(draft.gmailAccounts) ? draft.gmailAccounts : [],
+    notionAccounts: Array.isArray(draft.notionAccounts) ? draft.notionAccounts : [],
+    microsoftAccounts: Array.isArray(draft.microsoftAccounts) ? draft.microsoftAccounts : [],
     rules: Array.isArray(draft.rules) ? draft.rules : [],
   };
 }
@@ -148,6 +152,73 @@ export function Settings() {
           />
         </section>
 
+        <section className="settings-section" aria-labelledby="microsoft-heading">
+          <h3 id="microsoft-heading" className="section-title">
+            Microsoft（Outlook・Teams）
+          </h3>
+          <p className="field-hint">
+            職場のアカウントに device code 認証でサインインします。Entra ID に登録したアプリの client ID とテナント ID が要ります（手順は docs/setup/microsoft.md）。職場のデータを扱うので、使う LLM Profile を選んでください
+          </p>
+          {(draft.microsoftAccounts ?? []).map((account, index) => (
+            <MicrosoftAccountEditor
+              key={account.id || index}
+              account={account}
+              profiles={Object.keys(draft.llmProfiles)}
+              secrets={snapshot.secrets}
+              onChange={(next) =>
+                setDraft((current) => ({ ...current, microsoftAccounts: (current.microsoftAccounts ?? []).map((entry, at) => (at === index ? next : entry)) }))
+              }
+              onRemove={() => setDraft((current) => ({ ...current, microsoftAccounts: (current.microsoftAccounts ?? []).filter((_, at) => at !== index) }))}
+              onSignedIn={reload}
+            />
+          ))}
+          <AddAccount
+            label="Microsoft のアカウントを追加"
+            placeholder="corp"
+            existing={[
+              ...draft.accounts.map((account) => account.id),
+              ...(draft.slackAccounts ?? []).map((account) => account.id),
+              ...(draft.gmailAccounts ?? []).map((account) => account.id),
+              ...(draft.notionAccounts ?? []).map((account) => account.id),
+              ...(draft.microsoftAccounts ?? []).map((account) => account.id),
+            ]}
+            onAdd={(id) => setDraft((current) => ({ ...current, microsoftAccounts: [...(current.microsoftAccounts ?? []), { kind: "microsoft", id, tenantId: "", clientId: "" }] }))}
+          />
+        </section>
+
+        <section className="settings-section" aria-labelledby="notion-heading">
+          <h3 id="notion-heading" className="section-title">
+            Notion
+          </h3>
+          <p className="field-hint">
+            受信トレイに届いたメンション・コメント・リマインダーを Task にします。ブラウザのセッションを使うので、私用のワークスペースか、管理者に確かめたワークスペースだけで使ってください
+          </p>
+          {(draft.notionAccounts ?? []).map((account, index) => (
+            <NotionAccountEditor
+              key={account.id || index}
+              account={account}
+              secrets={snapshot.secrets}
+              onChange={(next) =>
+                setDraft((current) => ({ ...current, notionAccounts: (current.notionAccounts ?? []).map((entry, at) => (at === index ? next : entry)) }))
+              }
+              onRemove={() => setDraft((current) => ({ ...current, notionAccounts: (current.notionAccounts ?? []).filter((_, at) => at !== index) }))}
+              onSecretChanged={reload}
+              onConnected={async () => setDraft(toDocument((await reload()).config))}
+            />
+          ))}
+          <AddAccount
+            label="Notion のアカウントを追加"
+            placeholder="notes"
+            existing={[
+              ...draft.accounts.map((account) => account.id),
+              ...(draft.slackAccounts ?? []).map((account) => account.id),
+              ...(draft.gmailAccounts ?? []).map((account) => account.id),
+              ...(draft.notionAccounts ?? []).map((account) => account.id),
+            ]}
+            onAdd={(id) => setDraft((current) => ({ ...current, notionAccounts: [...(current.notionAccounts ?? []), { kind: "notion", id, userId: "", userAgent: "" }] }))}
+          />
+        </section>
+
         <section className="settings-section" aria-labelledby="gmail-heading">
           <h3 id="gmail-heading" className="section-title">
             Gmail
@@ -176,7 +247,7 @@ export function Settings() {
             ルール
           </h3>
           <p className="field-hint">
-            条件に当てはまるものが届いたら、決めた操作を自動で行います。当てはまるかは条件の文から判定し、確かなときだけ当てます。ルールを作る前に届いたものには当てません
+            条件に当てはまる Task に、決めた操作を自動で行います。Task の操作（完了・対象外・todo）はどの Source の Task にも当てられます。当てはまるかは条件を分けた問いで判定し、確かなときだけ当てます。ルールを作る前にできた Task・届いたメールには当てません
           </p>
           {(draft.rules ?? []).map((rule, index) => (
             <RuleEditor
@@ -536,6 +607,178 @@ function SlackAccountEditor(props: {
   );
 }
 
+function MicrosoftAccountEditor(props: {
+  account: MicrosoftAccountDraft;
+  profiles: string[];
+  secrets: Record<string, SecretStatus>;
+  onChange: (next: MicrosoftAccountDraft) => void;
+  onRemove: () => void;
+  onSignedIn: () => Promise<unknown>;
+}) {
+  const { account } = props;
+  const [open, setOpen] = useState(account.clientId === "");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [code, setCode] = useState<{ userCode: string; verificationUri: string } | null>(null);
+  const tokenStatus = props.secrets[`microsoft.${account.id}.refresh_token`] ?? "missing";
+  const signIn = async () => {
+    setBusy(true);
+    setMessage(null);
+    const started = await api.startMicrosoftSignIn(account.id);
+    if ("error" in started) {
+      setBusy(false);
+      setMessage(`サインインを始められませんでした: ${started.error}`);
+      return;
+    }
+    setCode(started);
+    const finished = await api.finishMicrosoftSignIn(account.id);
+    setBusy(false);
+    setCode(null);
+    if ("error" in finished) {
+      setMessage(`サインインできませんでした: ${finished.error}`);
+      return;
+    }
+    await props.onSignedIn();
+    setMessage(`${finished.user} としてサインインしました`);
+  };
+  const test = async () => {
+    setMessage("確かめています");
+    const result = await api.testMicrosoft(account.id);
+    setMessage("error" in result ? `つながりません: ${result.error}` : `${result.user} としてつながりました`);
+  };
+
+  return (
+    <details className="account" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="account-header">
+        <h4 className="account-name">{account.id}</h4>
+        <span className="field-hint">サインイン: {tokenStatus === "missing" ? "まだ" : "済み"}</span>
+      </summary>
+      <div className="account-body">
+        <label className="field">
+          <span className="field-label">テナント ID</span>
+          <span className="field-hint">Entra ID の「概要」にあるディレクトリ（テナント）ID か、contoso.onmicrosoft.com の形のドメイン</span>
+          <input value={account.tenantId} onChange={(event) => props.onChange({ ...account, tenantId: event.target.value.trim() })} />
+        </label>
+        <label className="field">
+          <span className="field-label">アプリケーション（クライアント）ID</span>
+          <input value={account.clientId} onChange={(event) => props.onChange({ ...account, clientId: event.target.value.trim() })} />
+        </label>
+        <label className="field">
+          <span className="field-label">LLM Profile</span>
+          <span className="field-hint">職場のデータを送ってよい LLM Profile を選んでください</span>
+          <select value={account.llmProfile ?? ""} onChange={(event) => props.onChange({ ...account, llmProfile: event.target.value === "" ? undefined : event.target.value } as MicrosoftAccountDraft)}>
+            <option value="">選んでください</option>
+            {props.profiles.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={account.calendar === true} onChange={(event) => props.onChange({ ...account, calendar: event.target.checked })} />
+          Outlook の予定を見る（出欠が未回答の招待・準備が要る予定・自分で入れた todo の予定を Task にします。準備が要るかの判定で、予定の名前と説明がこの LLM Profile に送られます）
+        </label>
+        <div className="request-review">
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void signIn()}>
+            サインインする
+          </button>
+          <span className="field-hint">
+            {code !== null
+              ? `開いたブラウザ（${code.verificationUri}）で、コード ${code.userCode} を入れてサインインしてください`
+              : (message ?? "設定を保存してから押してください。見る機能を変えたら、サインインし直してください")}
+          </span>
+        </div>
+        <div className="request-review">
+          <button type="button" className="quiet-button" onClick={() => void test()}>
+            接続を確かめる
+          </button>
+        </div>
+        <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
+          このアカウントを外す
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function NotionAccountEditor(props: {
+  account: NotionAccountDraft;
+  secrets: Record<string, SecretStatus>;
+  onChange: (next: NotionAccountDraft) => void;
+  onRemove: () => void;
+  onSecretChanged: () => Promise<unknown>;
+  onConnected: () => Promise<void>;
+}) {
+  const { account } = props;
+  const [open, setOpen] = useState(account.userId === "");
+  const [connecting, setConnecting] = useState(false);
+  const [check, setCheck] = useState<string | null>(null);
+  const tokenStatus = props.secrets[`notion.${account.id}.token`] ?? "missing";
+  const describe = (result: { user: string; spaces: string[] } | { error: string }) =>
+    "error" in result ? `つながりません: ${result.error}` : `${result.user || "(名前なし)"} としてつながりました（ワークスペース: ${result.spaces.join("、") || "なし"}）`;
+  const connect = async () => {
+    setConnecting(true);
+    setCheck("開いたウィンドウで Notion にログインしてください。ログインが済むと自動で閉じます");
+    const result = await api.connectNotion(account.id);
+    setConnecting(false);
+    if ("error" in result) {
+      setCheck(`取り込めませんでした: ${result.error}`);
+      return;
+    }
+    await props.onConnected();
+    setCheck(describe(await api.testNotion(account.id)));
+  };
+  const test = async () => {
+    setCheck("確かめています");
+    setCheck(describe(await api.testNotion(account.id)));
+  };
+
+  return (
+    <details className="account" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="account-header">
+        <h4 className="account-name">{account.id}</h4>
+        <span className="field-hint">
+          {account.userId === "" ? "未接続" : "接続済み"}・token_v2: {SECRET_LABELS[tokenStatus]}
+        </span>
+      </summary>
+      <div className="account-body">
+        <div className="request-review">
+          <button type="button" className="primary-button" disabled={connecting} onClick={() => void connect()}>
+            ブラウザでログインして取り込む
+          </button>
+          <span className="field-hint">
+            {check ??
+              "Notion のログイン画面を開き、ログインが済んだらセッションを読み取って保存します。このアプリ専用のログインになり、ほかのブラウザのログインには影響しません"}
+          </span>
+        </div>
+        <details className="manual-secrets">
+          <summary className="field-hint">手で入れる</summary>
+          <label className="field">
+            <span className="field-label">ユーザー ID</span>
+            <span className="field-hint">Cookie の notion_user_id の値です</span>
+            <input value={account.userId} onChange={(event) => props.onChange({ ...account, userId: event.target.value.trim() })} />
+          </label>
+          <label className="field">
+            <span className="field-label">ブラウザの User-Agent</span>
+            <span className="field-hint">token_v2 を取ったブラウザで、開発者ツールのコンソールに navigator.userAgent と打って出た値をそのまま貼ります</span>
+            <textarea rows={2} value={account.userAgent} onChange={(event) => props.onChange({ ...account, userAgent: event.target.value.trim() })} />
+          </label>
+          <SecretField label="Cookie の token_v2" secretKey={`notion.${account.id}.token`} status={tokenStatus} onChanged={props.onSecretChanged} />
+        </details>
+        <div className="request-review">
+          <button type="button" className="quiet-button" onClick={() => void test()}>
+            接続を確かめる
+          </button>
+        </div>
+        <button type="button" className="dismiss-button account-remove" onClick={props.onRemove}>
+          このアカウントを外す
+        </button>
+      </div>
+    </details>
+  );
+}
+
 function AddAccount(props: { existing: string[]; onAdd: (id: string) => void; label?: string; placeholder?: string }) {
   const [id, setId] = useState("");
   const valid = /^[a-z0-9][a-z0-9-]*$/.test(id) && !props.existing.includes(id);
@@ -561,10 +804,11 @@ function AddAccount(props: { existing: string[]; onAdd: (id: string) => void; la
   );
 }
 
-const JUDGE_OPTIONS: { value: "none" | "anthropic" | "openai"; label: string; hint: string }[] = [
+const JUDGE_OPTIONS: { value: "none" | "anthropic" | "openai" | "azure-openai"; label: string; hint: string }[] = [
   { value: "none", label: "LLM を使わない", hint: "規則で決まらない通知は、すべて要確認に入ります。費用はかかりません" },
   { value: "anthropic", label: "Claude", hint: "通知ごとに Anthropic の API を呼びます" },
   { value: "openai", label: "OpenAI", hint: "通知ごとに OpenAI の API を呼びます" },
+  { value: "azure-openai", label: "Azure OpenAI", hint: "通知ごとに、自分の Azure OpenAI のリソースを呼びます" },
 ];
 
 function JudgeEditor(props: {
@@ -613,6 +857,24 @@ function JudgeEditor(props: {
           <input value={setting.model} placeholder="例: gpt-5.2" onChange={(event) => props.onChange({ ...setting, model: event.target.value })} />
         </label>
       )}
+      {setting.provider === "azure-openai" && (
+        <>
+          <label className="field">
+            <span className="field-label">エンドポイント</span>
+            <span className="field-hint">Azure ポータルの「キーとエンドポイント」にある URL</span>
+            <input
+              value={setting.azureEndpoint ?? ""}
+              placeholder="例: https://my-resource.openai.azure.com"
+              onChange={(event) => props.onChange({ ...setting, azureEndpoint: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">deployment 名</span>
+            <span className="field-hint">モデル名ではなく、Azure でデプロイしたときに付けた名前</span>
+            <input value={setting.model} placeholder="例: gpt-5-2" onChange={(event) => props.onChange({ ...setting, model: event.target.value })} />
+          </label>
+        </>
+      )}
       {setting.provider === "anthropic" && (
         <SecretField label="Anthropic の API キー" secretKey="llm.anthropic.api_key" status={props.secrets["llm.anthropic.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
       )}
@@ -623,12 +885,17 @@ function JudgeEditor(props: {
           <span>
             <span className="judge-option-label">確率も出す</span>
             <span className="field-hint">
-              OpenAI Decisions で「自分の対応が要る確率」を出し、カードに表示します。OpenAI の API キーが要ります
+              {setting.provider === "azure-openai"
+                ? "同じリソースの Microsoft-Decision で「自分の対応が要る確率」を出し、カードに表示します。Microsoft-Decision-1.1 を、deployment 名 Decision-1.1 で用意してください"
+                : "OpenAI Decisions で「自分の対応が要る確率」を出し、カードに表示します。OpenAI の API キーが要ります"}
             </span>
           </span>
         </label>
       )}
-      {(setting.provider === "openai" || setting.probabilities) && (
+      {setting.provider === "azure-openai" && (
+        <SecretField label="Azure OpenAI の API キー" secretKey="llm.azure-openai.api_key" status={props.secrets["llm.azure-openai.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
+      )}
+      {(setting.provider === "openai" || (setting.probabilities && setting.provider !== "azure-openai")) && (
         <SecretField label="OpenAI の API キー" secretKey="llm.openai.api_key" status={props.secrets["llm.openai.api_key"] ?? "missing"} onChanged={props.onSecretChanged} />
       )}
     </div>
@@ -707,6 +974,10 @@ function GmailAccountEditor(props: { account: GmailAccountDraft; onChange: (next
         <input type="checkbox" checked={account.planNextActions === true} onChange={(event) => props.onChange({ ...account, planNextActions: event.target.checked })} />
         人からのメールを Claude Code に読ませて Task にする（本文が Claude に送られます）
       </label>
+      <label className="checkbox-field">
+        <input type="checkbox" checked={account.calendar === true} onChange={(event) => props.onChange({ ...account, calendar: event.target.checked })} />
+        同じ Google アカウントの Calendar も見る（出欠が未回答の招待・準備が要る予定・自分で入れた todo の予定を Task にします。招待のメールは Calendar の側で扱います。準備が要るかの判定で、予定の名前と説明がこのアカウントの LLM に送られます）
+      </label>
       <div className="step-actions">
         <button type="button" className="dismiss-button" onClick={props.onRemove}>
           このアカウントを外す
@@ -720,6 +991,16 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
   const { rule } = props;
   const id = useId();
   const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; reason: string }>({ kind: "idle" });
+  const [conditionState, setConditionState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "failed"; reason: string }>({ kind: "idle" });
+  const decompose = async () => {
+    if (rule.when.trim() === "" || isConditionChecked(rule)) return;
+    setConditionState({ kind: "busy" });
+    const result = await api.decomposeRule(rule.when);
+    if (result.ok) {
+      props.onChange({ ...rule, condition: result.condition, conditionFrom: rule.when });
+      setConditionState({ kind: "idle" });
+    } else setConditionState({ kind: "failed", reason: result.reason });
+  };
   const interpret = async () => {
     if (rule.then.trim() === "" || isInterpreted(rule)) return;
     setState({ kind: "busy" });
@@ -740,15 +1021,39 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
       </legend>
       <label className="field" htmlFor={`${id}-when`}>
         どういう時
-        <textarea id={`${id}-when`} rows={2} value={rule.when} placeholder="請求書や領収書に関するメールが届いた時" onChange={(event) => props.onChange({ ...rule, when: event.target.value })} />
+        <textarea
+          id={`${id}-when`}
+          rows={2}
+          value={rule.when}
+          placeholder="YutaUra 以外が作った GitHub の PR で、YutaUra（または YutaUra を含むチーム）にレビュー依頼が来ていないもの"
+          onChange={(event) => props.onChange({ ...rule, when: event.target.value })}
+          onBlur={() => void decompose()}
+        />
       </label>
+      <div className="step-actions">
+        {isConditionChecked(rule) && rule.condition !== undefined ? (
+          <div className="field-hint">
+            この問いで判定します（すべて当てはまるときに当てます）:
+            <ul>
+              {describeCondition(rule.condition).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <button type="button" className="quiet-button" disabled={conditionState.kind === "busy" || rule.when.trim() === ""} onClick={() => void decompose()}>
+            {conditionState.kind === "busy" ? "確かめています…" : "どういう時かを確かめる"}
+          </button>
+        )}
+      </div>
+      {conditionState.kind === "failed" && <p className="problem">{conditionState.reason}</p>}
       <label className="field" htmlFor={`${id}-then`}>
         何をする
         <textarea
           id={`${id}-then`}
           rows={2}
           value={rule.then}
-          placeholder="レシート ラベルをつけて既読にする"
+          placeholder="完了にする（メールなら「レシート ラベルをつけて既読にする」）"
           onChange={(event) => props.onChange({ ...rule, then: event.target.value })}
           onBlur={() => void interpret()}
         />
@@ -763,6 +1068,9 @@ function RuleEditor(props: { rule: RuleDraft; onChange: (next: RuleDraft) => voi
         )}
       </div>
       {state.kind === "failed" && <p className="problem">{state.reason}</p>}
+      {needsCondition(rule) && !isConditionChecked(rule) && (
+        <p className="problem">Task の操作をするルールは、「どういう時」を確かめてから保存してください</p>
+      )}
       <ApplyToExisting rule={rule} />
       <button type="button" className="dismiss-button" onClick={props.onRemove}>
         このルールを消す

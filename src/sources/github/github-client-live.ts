@@ -2,6 +2,8 @@ import { DateTime, Effect, Layer, Option, Redacted, Ref, Schema, Semaphore } fro
 import { Headers, HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 import { type GitHubClientError, GitHubClient, GitHubRateLimitedError, GitHubRequestError } from "./github-adapter.js";
 
+const MyTeams = Schema.Array(Schema.Struct({ slug: Schema.String, organization: Schema.Struct({ login: Schema.String }) }));
+
 const API_ORIGIN = "https://api.github.com";
 const API_VERSION = "2022-11-28";
 const PER_PAGE = "100";
@@ -207,6 +209,12 @@ export const GitHubClientLive = (options: GitHubClientLiveOptions) =>
               ),
             ),
           ),
+        ),
+        listMyTeams: resolveUrl("/user/teams", { per_page: "100" }).pipe(
+          Effect.flatMap((url) =>
+            collectPages(url, arrayItems).pipe(Effect.flatMap(({ items }) => decodeBody(MyTeams, url)(items))),
+          ),
+          Effect.map((teams) => teams.map((team) => `${team.organization.login}/${team.slug}`)),
         ),
         inspectToken: Effect.gen(function* () {
           const url = yield* resolveUrl("/user");

@@ -19,3 +19,6 @@ permissions:
     skills: true
   esbuild:
     build: true
+  # Windows のインストーラーを作る道具（electron-builder の依存）。macOS だけで配るので、ビルドスクリプトを動かさない
+  electron-winstaller:
+    build: false

@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option } from "effect";
 import { Database, returnedRow } from "../db/database.js";
 import { activities, sourceItems, syncCursors } from "../db/schema.js";
-import type { ActivityKind, ItemState, ItemTriage } from "./source-item.js";
+import type { ActivityKind, ItemFact, ItemState, ItemTriage } from "./source-item.js";
 
 export type SourceItem = typeof sourceItems.$inferSelect;
 export type Activity = typeof activities.$inferSelect;
@@ -15,6 +15,8 @@ export type SourceItemDraft = {
   state: ItemState;
   fingerprint: string;
   author?: string;
+  /** 渡さなければ、前に保存した事実を残す（事実を書けない取得経路で、空に戻さないため） */
+  fact?: ItemFact;
 };
 
 export class SourceItemRepository extends Context.Service<SourceItemRepository, {
@@ -53,6 +55,7 @@ export class SourceItemRepository extends Context.Service<SourceItemRepository, 
           state: draft.state,
           fingerprint: draft.fingerprint,
           author: draft.author ?? null,
+          ...(draft.fact === undefined ? {} : { fact: draft.fact }),
           updatedAt: now,
         };
         const rows = yield* db

@@ -1,0 +1,26 @@
+# 配る版のビルド（ADR-0018）。署名と公証は CI の secrets から読む（docs/release.md）
+appId: io.github.yutaura-dev.live-todo
+productName: live-todo
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  # 起動時に DB のマイグレーションを当てるので同梱する（app.getAppPath()/drizzle から読む）
+  - drizzle/**
+  - package.json
+  - "!**/*.map"
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # APPLE_API_KEY・APPLE_API_KEY_ID・APPLE_API_ISSUER があれば公証する
+  notarize: true
+# Release は workflow で gh release create する（electron-builder に GitHub のトークンを渡さない）
+publish: null

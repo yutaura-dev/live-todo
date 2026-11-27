@@ -26,7 +26,7 @@ export type GmailJobError = GmailClientError | JudgeRequestError | DuplicateExte
 export type GmailJobRequirements = Database | SourceItemRepository | TaskRepository | SqlClient.SqlClient;
 
 /** 取り込みと仕分けをしてから、送り主ごと・スレッドごとの Source Item を作り直す（同じ表から作るので続けて動かす） */
-export const runGmailSync = Effect.fnUntraced(function* (accountId: string, rules: ReadonlyArray<Rule> = []) {
+export const runGmailSync = Effect.fnUntraced(function* (accountId: string, rules: ReadonlyArray<Rule> = [], options: { invitesHandledByCalendar?: boolean } = {}) {
   yield* ingestGmail({ accountId });
   // 完了にした Task のメールを確認済みにしてから、送り主・スレッドにまとめ直す（まとめた Task の未処理に残さないため）
   yield* archiveMailOfCompletedTasks(accountId);
@@ -35,10 +35,11 @@ export const runGmailSync = Effect.fnUntraced(function* (accountId: string, rule
   yield* syncSource(yield* makeGmailSendersBinding({ accountId }));
   yield* refreshSenderBriefs(accountId);
   yield* applyGmailSenderPlans(accountId);
-  yield* syncSource(yield* makeGmailThreadsBinding({ accountId }));
+  // Calendar のアカウントがあれば、出欠は Calendar の Task にする（招待のメールで同じ Task を二重に作らない。ADR-0016）
+  yield* syncSource(yield* makeGmailThreadsBinding({ accountId, invitesHandledByCalendar: options.invitesHandledByCalendar === true }));
 });
 
-export const makeGmailJobs = Effect.fnUntraced(function* (account: ResolvedGmailAccount, rules: ReadonlyArray<Rule> = []) {
+export const makeGmailJobs = Effect.fnUntraced(function* (account: ResolvedGmailAccount, rules: ReadonlyArray<Rule> = [], options: { invitesHandledByCalendar?: boolean } = {}) {
   // 仕分けはこのアカウントの LLM Profile の Decisions でだけ行う（charter の前提と制約）
   const classifier = yield* makeMailClassifier(account.resolvedLlmProfile);
   const client = yield* Effect.gen(function* () {
@@ -47,7 +48,7 @@ export const makeGmailJobs = Effect.fnUntraced(function* (account: ResolvedGmail
   const job: SyncJob<GmailJobError, GmailJobRequirements> = {
     name: `gmail:${account.id}`,
     interval: GMAIL_SYNC_INTERVAL,
-    run: runGmailSync(account.id, rules).pipe(Effect.provideService(GmailClient, client), Effect.provideService(MailClassifier, classifier)),
+    run: runGmailSync(account.id, rules, options).pipe(Effect.provideService(GmailClient, client), Effect.provideService(MailClassifier, classifier)),
     backoffUntil: () => Option.none<DateTime.Utc>(),
   };
   return [job];

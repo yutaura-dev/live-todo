@@ -4,7 +4,7 @@ import { RunInterrupts } from "../agent/run-interrupts.js";
 import { withTransaction } from "../db/database.js";
 import type { TodoJudgment, TodoVerdict } from "../judge/todo-judge.js";
 import { detectActivities } from "../source/activities.js";
-import type { ActivityKind, ItemState } from "../source/source-item.js";
+import type { ActivityKind, ItemFact, ItemState } from "../source/source-item.js";
 import { type SourceItem, SourceItemRepository } from "../source/source-item-repository.js";
 import { deriveTaskStatus } from "../task/task-status.js";
 import type { TaskStatus } from "../task/task.js";
@@ -38,6 +38,11 @@ export type SourceBinding<TItem, TCursor, EA, EJ, RJ> = {
    * あとで決める Source（Slack のメンション・DM）が使う。メッセージ 1 件は、それだけでは自分のやることにならないため
    */
   deferTriage?: boolean;
+  /**
+   * Item が表す事実（アプリが書いた情報と本文）を書く（ADR-0019）。ルールの判定と振り分けの材料にする。
+   * 失敗させない（書けないときは事実なしで保存する）。事実がなくても同期は進めたいため
+   */
+  describeFact?: (item: TItem) => Effect.Effect<ItemFact, never, RJ>;
 };
 
 export type SyncSummary = {
@@ -79,12 +84,13 @@ export const syncSource = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, R
   // 先に済ませても、失敗した時点ではまだ何も書いていないので原子性は保たれる。
   const { changes, nextCursor } = yield* binding.adapter.fetchChanges(Option.getOrNull(cursor));
   const judgments = binding.deferTriage === true ? new Map<string, TodoJudgment>() : yield* judgeItemsNeedingTriage(binding, changes);
+  const facts = yield* describeFacts(binding, changes);
 
   return yield* withTransaction(
     Effect.gen(function* () {
       const summary: SyncSummary = { activities: 0, tasksCreated: 0, tasksUpdated: 0, itemsIgnored: 0 };
       for (const change of changes) {
-        yield* applyChange(binding, change, judgments, summary);
+        yield* applyChange(binding, change, judgments, facts, summary);
       }
       yield* items.saveCursor(binding.source, nextCursor);
       return summary;
@@ -112,10 +118,26 @@ const judgeItemsNeedingTriage = Effect.fnUntraced(function* <TItem, TCursor, EA,
   return new Map(judged);
 });
 
+/** 事実も判定と同じくトランザクションの外で書く（事実を書くために API を呼ぶ Source があるため） */
+const describeFacts = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
+  binding: SourceBinding<TItem, TCursor, EA, EJ, RJ>,
+  changes: readonly SourceChange<TItem>[],
+): Effect.fn.Return<Map<string, ItemFact>, never, RJ> {
+  const describe = binding.describeFact;
+  if (describe === undefined) return new Map<string, ItemFact>();
+  const described = yield* Effect.forEach(
+    changes.flatMap((change) => (change.kind === "upserted" ? [change.item] : [])),
+    (item) => describe(item).pipe(Effect.map((fact) => [binding.externalIdOf(item), fact] as const)),
+    { concurrency: JUDGE_CONCURRENCY },
+  );
+  return new Map(described);
+});
+
 const applyChange = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
   binding: SourceBinding<TItem, TCursor, EA, EJ, RJ>,
   change: SourceChange<TItem>,
   judgments: ReadonlyMap<string, TodoJudgment>,
+  facts: ReadonlyMap<string, ItemFact>,
   summary: SyncSummary,
 ) {
   const items = yield* SourceItemRepository;
@@ -123,13 +145,14 @@ const applyChange = Effect.fnUntraced(function* <TItem, TCursor, EA, EJ, RJ>(
   const externalId = change.kind === "removed" ? change.externalId : binding.externalIdOf(change.item);
   const previous = yield* items.findItem(binding.source, externalId);
 
-  let draft: { title: string; url: string; state: ItemState; fingerprint: string };
+  let draft: { title: string; url: string; state: ItemState; fingerprint: string; fact?: ItemFact };
   if (change.kind === "removed") {
     if (Option.isNone(previous)) return;
     const { title, url, fingerprint } = previous.value;
     draft = { title, url, fingerprint, state: "removed" };
   } else {
-    draft = binding.toItemDraft(change.item);
+    const fact = facts.get(externalId);
+    draft = { ...binding.toItemDraft(change.item), ...(fact === undefined ? {} : { fact }) };
   }
   const item = yield* items.upsertItem({ source: binding.source, externalId, ...draft });
 

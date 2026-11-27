@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { effectiveKind, isPastInvite, personalThreads, senderGroups, senderKeyOf, senderNameOf, type StoredMail } from "./gmail-mailbox.js";
+import { effectiveKind, isPastInvite, isUpcomingInvite, personalThreads, senderGroups, senderKeyOf, senderNameOf, type StoredMail } from "./gmail-mailbox.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 10, 26);
@@ -129,6 +129,37 @@ describe("personalThreads（人からのメールをスレッドごとにまと�
     const archived = personalThreads([mail({ kind: "personal", inInbox: false })]);
     const trashed = personalThreads([mail({ kind: "personal", trashed: true })]);
     assert.deepStrictEqual([replied[0]!.open, archived[0]!.open, trashed[0]!.open], [false, false, false]);
+  });
+});
+
+describe("personalThreads（Calendar に出欠を任せるとき）", () => {
+  it("日程がまだ先の招待のメールだけが残っているスレッドは、対応待ちにしない（出欠は Calendar の Task にする）", () => {
+    const invite = mail({ messageId: "a", threadId: "t1", kind: "personal", upcomingInvite: true });
+
+    const [handled] = personalThreads([invite], { invitesHandledElsewhere: true });
+    const [alone] = personalThreads([invite]);
+
+    assert.isFalse(handled!.open);
+    assert.isTrue(alone!.open);
+  });
+
+  it("招待のほかに人からのメールが残っていれば、対応待ちのまま", () => {
+    const [thread] = personalThreads(
+      [mail({ messageId: "a", threadId: "t1", kind: "personal", upcomingInvite: true, receivedAt: NOW - 2 * DAY }), mail({ messageId: "b", threadId: "t1", kind: "personal" })],
+      { invitesHandledElsewhere: true },
+    );
+
+    assert.isTrue(thread!.open);
+  });
+});
+
+describe("日程がまだ先の招待", () => {
+  it("終わりが今より後か、終わりの決まっていない予定なら、まだ先の招待。取り消された予定や招待でないメールは違う", () => {
+    assert.isTrue(isUpcomingInvite({ inviteState: "ends", inviteEndsAt: NOW + 1 }, NOW));
+    assert.isTrue(isUpcomingInvite({ inviteState: "open", inviteEndsAt: null }, NOW));
+    assert.isFalse(isUpcomingInvite({ inviteState: "ends", inviteEndsAt: NOW - 1 }, NOW));
+    assert.isFalse(isUpcomingInvite({ inviteState: "cancelled", inviteEndsAt: null }, NOW));
+    assert.isFalse(isUpcomingInvite({ inviteState: null, inviteEndsAt: null }, NOW));
   });
 });
 

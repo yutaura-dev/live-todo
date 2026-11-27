@@ -367,3 +367,28 @@ describe("githubTodoRules", () => {
     assert.isFalse(githubTodoRules.some((rule) => rule({ ...itemWithReason("review_requested"), state: "merged" })));
   });
 });
+
+describe("レビュー依頼の宛先", () => {
+  it.effect("PR の詳細から、レビューを頼まれている人とチーム（組織/チーム名）を読む", () =>
+    Effect.gen(function* () {
+      const pull = { ...openPull, requested_reviewers: [{ login: "alice" }, { login: "YutaUra" }], requested_teams: [{ slug: "web" }] };
+      const client = clientWith({ notifications: [notifications[0]], subjects: { [PULL_URL]: pull } });
+
+      const { changes } = yield* fetchWith(client, null);
+
+      const [item] = upsertedItems(changes);
+      assert.deepStrictEqual(item?.requestedReviewers, ["alice", "YutaUra"]);
+      assert.deepStrictEqual(item?.requestedTeams, ["acme/web"]);
+    }));
+
+  it.effect("Issue のように宛先がない対象では、宛先を持たない", () =>
+    Effect.gen(function* () {
+      const client = clientWith({ notifications: [notifications[1]], subjects: { [ISSUE_URL]: openIssue } });
+
+      const { changes } = yield* fetchWith(client, null);
+
+      const [item] = upsertedItems(changes);
+      assert.isUndefined(item?.requestedReviewers);
+      assert.isUndefined(item?.requestedTeams);
+    }));
+});

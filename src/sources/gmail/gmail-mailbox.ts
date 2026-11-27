@@ -15,6 +15,8 @@ export type StoredMail = {
   trashed: boolean;
   /** 日程が過ぎた（または取り消された）予定の招待 */
   pastInvite: boolean;
+  /** 日程がまだ先の招待。Calendar に出欠を任せるときは、対応待ちに数えない */
+  upcomingInvite?: boolean;
   /** メルマガ・お知らせとして届いた（kind が personal でも、対応が要るとして移したもの） */
   bulk?: boolean;
   /** メルマガ・お知らせの用件。判定していなければ null（「その他」にまとめる） */
@@ -124,7 +126,8 @@ export type PersonalThread = {
   pastInvites: ReadonlyArray<string>;
 };
 
-export function personalThreads(mails: ReadonlyArray<StoredMail>): PersonalThread[] {
+export function personalThreads(mails: ReadonlyArray<StoredMail>, options: { invitesHandledElsewhere?: boolean } = {}): PersonalThread[] {
+  const awaitsReply = (mail: StoredMail) => isPending(mail) && !(options.invitesHandledElsewhere === true && mail.upcomingInvite === true);
   const byThread = new Map<string, StoredMail[]>();
   for (const mail of mails) {
     if (mail.kind !== "personal" && mail.kind !== "mine") continue;
@@ -141,7 +144,7 @@ export function personalThreads(mails: ReadonlyArray<StoredMail>): PersonalThrea
         threadId,
         subject: personal.at(-1)!.subject,
         messageIds: sorted.map((mail) => mail.messageId),
-        open: last !== undefined && last.kind !== "mine" && personal.some(isPending),
+        open: last !== undefined && last.kind !== "mine" && personal.some(awaitsReply),
         pastInvites: sorted.filter((mail) => isPending(mail) && mail.pastInvite).map((mail) => mail.messageId),
       },
     ];
@@ -151,6 +154,10 @@ export function personalThreads(mails: ReadonlyArray<StoredMail>): PersonalThrea
 /** 日程が過ぎた（または取り消された）招待か。終わりが決まっていない予定は過ぎない */
 export const isPastInvite = (invite: { inviteState: "ends" | "open" | "cancelled" | null; inviteEndsAt: number | null }, now: number) =>
   invite.inviteState === "cancelled" || (invite.inviteState === "ends" && invite.inviteEndsAt !== null && invite.inviteEndsAt < now);
+
+/** 日程がまだ先の招待か。終わりが決まっていない予定もまだ先とみなす */
+export const isUpcomingInvite = (invite: { inviteState: "ends" | "open" | "cancelled" | null; inviteEndsAt: number | null }, now: number) =>
+  invite.inviteState === "open" || (invite.inviteState === "ends" && invite.inviteEndsAt !== null && invite.inviteEndsAt >= now);
 
 // これ以上の確率で対応を求めていれば、メルマガ・お知らせでも人からのメールとして読ませる（迷うものは読む側に倒す）
 const ACTION_MIN_PROBABILITY = 0.5;

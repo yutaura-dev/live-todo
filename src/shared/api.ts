@@ -31,7 +31,10 @@ export type LlmProvider = "none" | "anthropic" | "openai" | "gemini" | "azure-op
 
 /** 設定ファイル（config.json）の形。画面で編集し、main で Schema 検証してから保存する */
 export type ConfigDocument = {
-  llmProfiles: Record<string, { provider: LlmProvider; model: string; decisions?: { provider: "jev" | "openai" | "gemini"; model?: string } }>;
+  llmProfiles: Record<
+    string,
+    { provider: LlmProvider; model: string; azure?: { endpoint: string }; decisions?: { provider: "jev" | "openai" | "azure-openai" | "microsoft-decision" | "gemini"; model?: string } }
+  >;
   defaultLlmProfile: string;
   accounts: Array<{
     kind: "github";
@@ -57,12 +60,38 @@ export type ConfigDocument = {
     id: string;
     llmProfile?: string;
     planNextActions?: boolean;
+    /** 同じ Google アカウントの Calendar も見る（ADR-0016） */
+    calendar?: boolean;
+  }>;
+  /** Microsoft の職場のアカウント（ADR-0017）。リフレッシュトークンは秘密情報として別に保存する */
+  microsoftAccounts?: Array<{
+    kind: "microsoft";
+    id: string;
+    tenantId: string;
+    clientId: string;
+    llmProfile?: string;
+    calendar?: boolean;
+  }>;
+  /** Notion のアカウント（ADR-0015）。token_v2 は秘密情報として別に保存する */
+  notionAccounts?: Array<{
+    kind: "notion";
+    id: string;
+    userId: string;
+    userAgent: string;
+    origin?: "https://www.notion.so" | "https://app.notion.com";
+    llmProfile?: string;
   }>;
   /** 利用者が決めたルール（ADR-0014）。条件は言葉で書き、操作は Source ごとに持つ */
   rules?: Array<RuleDraft>;
 };
 
-export type RuleActions = { gmail?: { labels?: string[]; markRead?: boolean; archive?: boolean } };
+export type RuleActions = { task?: "done" | "dismissed" | "todo"; gmail?: { labels?: string[]; markRead?: boolean; archive?: boolean } };
+
+/** 「どういう時」を分けた問い（ADR-0019）。about: metadata はアプリの情報で、content は内容を読んで答える */
+export type RuleCondition = {
+  combine: "all" | "any";
+  clauses: Array<{ question: string; expect: boolean; about: "metadata" | "content" }>;
+};
 
 export type RuleDraft = {
   id: string;
@@ -71,6 +100,10 @@ export type RuleDraft = {
   createdAt: string;
   /** どういう時（言葉で書く） */
   when: string;
+  /** when を分けた問い。Task への操作をするルールに要る */
+  condition?: RuleCondition;
+  /** condition を分けた when の文 */
+  conditionFrom?: string;
   /** 何をする（言葉で書く） */
   then: string;
   /** then から読み取った操作 */
@@ -185,6 +218,8 @@ export interface LiveTodoApi {
   applyRuleToExisting(ruleId: string): Promise<{ ok: true; applied: number; alreadyApplied: number; notMatched: number } | { ok: false; reason: string }>;
   /** ルールの「何をする」を、Decisions でアプリの操作に読み取る */
   interpretRule(then: string): Promise<{ ok: true; actions: RuleActions } | { ok: false; reason: string }>;
+  /** ルールの「どういう時」を、判定に使う問いに分ける（LLM。保存する前に利用者が確かめる） */
+  decomposeRule(when: string): Promise<{ ok: true; condition: RuleCondition } | { ok: false; reason: string }>;
   /** Task についての質問と回答（古い順） */
   taskQuestions(taskId: number): Promise<TaskQuestionView[]>;
   /** 手順を Claude Code に頼む（調べて報告するだけ。外への書き込みはさせない） */
@@ -204,6 +239,15 @@ export interface LiveTodoApi {
   testSlack(accountId: string): Promise<{ user: string; team: string } | { error: string }>;
   /** Slack のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する。workspace が空ならログインしたワークスペースを使う */
   connectSlack(accountId: string, workspace: string): Promise<{ workspace: string; team: string } | { error: string }>;
+  /** Notion のセッションでつながるかを確かめる。誰で、どのワークスペースが見えるか */
+  testNotion(accountId: string): Promise<{ user: string; spaces: string[] } | { error: string }>;
+  /** Notion のログイン画面を開き、ログインが済んだらセッションと User-Agent を読み取って保存する */
+  connectNotion(accountId: string): Promise<{ user: string } | { error: string }>;
+  /** device code 認証を始める。サインインの画面を外部のブラウザで開き、打ち込むコードを返す（保存済みの設定のアカウントだけ） */
+  startMicrosoftSignIn(accountId: string): Promise<{ userCode: string; verificationUri: string; expiresInSeconds: number } | { error: string }>;
+  /** サインインが済むまで待ち、済んだらリフレッシュトークンを保存して同期をやり直す */
+  finishMicrosoftSignIn(accountId: string): Promise<{ user: string } | { error: string }>;
+  testMicrosoft(accountId: string): Promise<{ user: string } | { error: string }>;
   openExternal(url: string): Promise<void>;
   settings(): Promise<SettingsSnapshot>;
   saveConfig(config: ConfigDocument): Promise<Outcome>;

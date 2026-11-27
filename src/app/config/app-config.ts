@@ -1,5 +1,7 @@
 import { Effect, FileSystem, Option, Schema } from "effect";
 import { isRepositoryPattern } from "../../sources/github/repository-filter.js";
+import { NOTION_ORIGINS } from "../../sources/notion/notion-client-live.js";
+import { RuleCondition } from "../../core/rules/rule-condition.js";
 
 export class InvalidAppConfigError extends Schema.TaggedError<InvalidAppConfigError>()("InvalidAppConfigError", {
   message: Schema.String,
@@ -10,13 +12,22 @@ const AccountId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/));
 
 const Probability = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
 
+// Azure OpenAI のリソースのエンドポイント。API キーを送る先なので、Azure のホストだけを受け付ける（パスは付けず、v1 API のパスはこちらで足す）
+const AzureEndpoint = Schema.String.check(
+  Schema.isPattern(/^https:\/\/[a-z0-9][a-z0-9-]*\.(openai\.azure\.com|cognitiveservices\.azure\.com|services\.ai\.azure\.com)$/),
+);
+
 const LlmProfile = Schema.Struct({
   // none: LLM を使わない（規則で決まらないものはすべて要確認）。API キーがまだない環境でも動かせるようにするため。
   provider: Schema.Literals(["none", "anthropic", "openai", "gemini", "azure-openai", "bedrock"]),
+  // azure-openai では deployment 名を書く
   model: Schema.NonEmptyString,
+  // provider / decisions.provider で Azure（azure-openai・microsoft-decision）を使うときに要る。判定と Decisions で同じリソース
+  azure: Schema.optional(Schema.Struct({ endpoint: AzureEndpoint })),
   decisions: Schema.optional(
     Schema.Struct({
-      provider: Schema.Literals(["jev", "openai", "gemini"]),
+      // microsoft-decision: Microsoft Foundry の Microsoft-Decision。azure と同じリソース・同じ API キーで呼ぶ
+      provider: Schema.Literals(["jev", "openai", "azure-openai", "microsoft-decision", "gemini"]),
       model: Schema.optional(Schema.String),
       thresholds: Schema.optional(Schema.Struct({ todo: Probability, review: Probability })),
     }),
@@ -54,6 +65,33 @@ const SlackAccount = Schema.Struct({
 });
 export type SlackAccount = typeof SlackAccount.Type;
 
+const Uuid = Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/));
+
+// 職場のアカウント（ADR-0017）。認証は device code 認証で、リフレッシュトークンは秘密情報として別に保存する
+const MicrosoftAccount = Schema.Struct({
+  kind: Schema.Literal("microsoft"),
+  id: AccountId,
+  // サインインの URL に入れるので、テナントの ID かドメインの形だけにする
+  tenantId: Schema.Union([Uuid, Schema.String.check(Schema.isPattern(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/))]),
+  clientId: Uuid,
+  llmProfile: Schema.optional(Schema.String),
+  calendar: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+});
+export type MicrosoftAccount = typeof MicrosoftAccount.Type;
+
+const NotionAccount = Schema.Struct({
+  kind: Schema.Literal("notion"),
+  id: AccountId,
+  // セッションの持ち主。Cookie の notion_user_id とヘッダに入れる（ADR-0015）
+  userId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)),
+  // セッションを取ったブラウザの User-Agent。ログインと同期で同じ値を使う
+  userAgent: Schema.NonEmptyString,
+  // notion.so から notion.com への移行中で、ログインしたドメインによって API の接続先が違う
+  origin: Schema.Literals(NOTION_ORIGINS).pipe(Schema.withDecodingDefaultKey(Effect.succeed("https://www.notion.so" as const))),
+  llmProfile: Schema.optional(Schema.String),
+});
+export type NotionAccount = typeof NotionAccount.Type;
+
 /** 利用者が決めたルール（ADR-0014）。条件は言葉で書き、操作は Source ごとに持つ（今は Gmail のラベル・既読・アーカイブだけ） */
 const Rule = Schema.Struct({
   id: Schema.NonEmptyString,
@@ -61,10 +99,15 @@ const Rule = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
   createdAt: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T/)),
   when: Schema.String.check(Schema.isMaxLength(500)),
+  // when を分けた問い（ADR-0019）。Task に当てるときは、文を読み直さずにこれで判定する
+  condition: Schema.optional(RuleCondition),
+  conditionFrom: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   then: Schema.String.check(Schema.isMaxLength(500)),
   interpretedFrom: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed(""))),
   // then から読み取った操作。決めたものだけ書ける（ゴミ箱に入れる・送るなどは書けない）
   actions: Schema.Struct({
+    // Task への操作はアプリの中の変更なので、どの Source の Task にも当てられる（ADR-0019）
+    task: Schema.optional(Schema.Literals(["done", "dismissed", "todo"])),
     gmail: Schema.optional(
       Schema.Struct({
         labels: Schema.optional(Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(100)))),
@@ -81,6 +124,8 @@ const GmailAccount = Schema.Struct({
   llmProfile: Schema.optional(Schema.String),
   // 人からのメールを Claude Code に読ませて Task にするか。本文を Claude に送るので、ほかの Source と同じく既定はオフ
   planNextActions: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  // 同じ Google アカウントの Calendar も見るか（ADR-0016）。gws の認証は 1 つなので、別のアカウントにはしない
+  calendar: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type GmailAccount = typeof GmailAccount.Type;
 
@@ -91,6 +136,8 @@ const AppConfigFile = Schema.Struct({
   // GitHub の accounts と分ける理由: GitHub だけの項目（リポジトリのフィルタ・依存更新の調査）を読む箇所を、種類で分けずに済ませるため
   slackAccounts: Schema.Array(SlackAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   gmailAccounts: Schema.Array(GmailAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  notionAccounts: Schema.Array(NotionAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  microsoftAccounts: Schema.Array(MicrosoftAccount).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   // 利用者が決めたルール。決めたルールの範囲の書き込みは、決めたことを承認とみなして自動で行う（ADR-0014）
   rules: Schema.Array(Rule).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 });
@@ -101,10 +148,15 @@ export type ResolvedSlackAccount = SlackAccount & { resolvedLlmProfile: LlmProfi
 
 export type ResolvedGmailAccount = GmailAccount & { resolvedLlmProfile: LlmProfile };
 
-export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts" | "gmailAccounts"> & {
+export type ResolvedNotionAccount = NotionAccount & { resolvedLlmProfile: LlmProfile };
+
+export type ResolvedMicrosoftAccount = MicrosoftAccount & { resolvedLlmProfile: LlmProfile };
+export type AppConfig = Omit<typeof AppConfigFile.Type, "accounts" | "slackAccounts" | "gmailAccounts" | "notionAccounts" | "microsoftAccounts"> & {
   accounts: ReadonlyArray<ResolvedAccount>;
   slackAccounts: ReadonlyArray<ResolvedSlackAccount>;
   gmailAccounts: ReadonlyArray<ResolvedGmailAccount>;
+  notionAccounts: ReadonlyArray<ResolvedNotionAccount>;
+  microsoftAccounts: ReadonlyArray<ResolvedMicrosoftAccount>;
 };
 
 const decodeFile = Schema.decodeUnknownEffect(AppConfigFile);
@@ -117,6 +169,14 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
   // 問題を 1 つずつではなくまとめて返し、設定を直す往復を減らす。
   const issues: string[] = [];
   const profileOf = (name: string) => file.llmProfiles[name];
+
+  for (const [name, profile] of Object.entries(file.llmProfiles)) {
+    const usesAzure =
+      profile.provider === "azure-openai" || profile.decisions?.provider === "azure-openai" || profile.decisions?.provider === "microsoft-decision";
+    if (usesAzure && profile.azure === undefined) {
+      issues.push(`llmProfiles.${name}.azure.endpoint: Azure OpenAI を使うので、リソースのエンドポイント（例: https://<リソース名>.openai.azure.com）を書いてください`);
+    }
+  }
 
   if (profileOf(file.defaultLlmProfile) === undefined) {
     issues.push(`defaultLlmProfile: "${file.defaultLlmProfile}" は llmProfiles にない`);
@@ -174,20 +234,53 @@ export const decodeAppConfig = Effect.fnUntraced(function* (input: unknown): Eff
     gmailAccounts.push({ ...account, resolvedLlmProfile });
   });
 
+  const notionAccounts: ResolvedNotionAccount[] = [];
+  file.notionAccounts.forEach((account, index) => {
+    if (seenIds.has(account.id)) issues.push(`notionAccounts[${index}].id: "${account.id}" が重複している`);
+    seenIds.add(account.id);
+    const resolvedLlmProfile = profileOf(account.llmProfile ?? file.defaultLlmProfile);
+    if (resolvedLlmProfile === undefined) {
+      if (account.llmProfile !== undefined) issues.push(`notionAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
+      return;
+    }
+    notionAccounts.push({ ...account, resolvedLlmProfile });
+  });
+
+  const microsoftAccounts: ResolvedMicrosoftAccount[] = [];
+  file.microsoftAccounts.forEach((account, index) => {
+    if (seenIds.has(account.id)) issues.push(`microsoftAccounts[${index}].id: "${account.id}" が重複している`);
+    seenIds.add(account.id);
+    // 既定の LLM Profile に落とさない理由: 職場のデータを、会社が許可していない LLM に送らないため（charter の前提と制約）
+    if (account.llmProfile === undefined) {
+      issues.push(`microsoftAccounts[${index}].llmProfile: 職場のデータを扱うので、使う LLM Profile を書いてください`);
+      return;
+    }
+    const resolvedLlmProfile = profileOf(account.llmProfile);
+    if (resolvedLlmProfile === undefined) {
+      issues.push(`microsoftAccounts[${index}].llmProfile: "${account.llmProfile}" は llmProfiles にない`);
+      return;
+    }
+    microsoftAccounts.push({ ...account, resolvedLlmProfile });
+  });
+
   file.rules.forEach((rule, at) => {
     if (rule.when.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「どういう時」を書いてください`);
     if (rule.then.trim() === "") issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書いてください`);
     else if (rule.interpretedFrom !== rule.then) issues.push(`rules[${at}]（${rule.name}）: 「何をする」を書き換えたので、読み取り直してください`);
     const gmail = rule.actions.gmail;
-    if (rule.then.trim() !== "" && (gmail === undefined || ((gmail.labels ?? []).length === 0 && gmail.markRead !== true && gmail.archive !== true))) {
+    const hasGmail = gmail !== undefined && ((gmail.labels ?? []).length > 0 || gmail.markRead === true || gmail.archive === true);
+    if (rule.then.trim() !== "" && !hasGmail && rule.actions.task === undefined) {
       issues.push(`rules[${at}]（${rule.name}）: 「何をする」から操作を読み取れていません`);
+    }
+    if (rule.actions.task !== undefined && rule.when.trim() !== "" && (rule.condition === undefined || rule.conditionFrom !== rule.when)) {
+      issues.push(`rules[${at}]（${rule.name}）: 「どういう時」を確かめてください（判定に使う問いに分け直す必要があります）`);
     }
   });
 
   if (issues.length > 0) {
     return yield* new InvalidAppConfigError({ message: issues.join("\n") });
   }
-  return { ...file, accounts, slackAccounts, gmailAccounts };
+  return { ...file, accounts, slackAccounts, gmailAccounts, notionAccounts, microsoftAccounts };
 });
 
 /** 設定画面に出すための、検証前の設定。ファイルがなければ none */
@@ -211,6 +304,16 @@ export const saveAppConfigFile = Effect.fnUntraced(function* (path: string, inpu
     Effect.flatMap(() => fs.rename(temporary, path)),
     Effect.mapError((error) => new InvalidAppConfigError({ message: `設定ファイルを書けない: ${path}: ${error.message}` })),
   );
+});
+
+/** 同期を始めるための設定。初めて起動したときはまだファイルがないので none（エラーにはしない） */
+export const loadAppConfigFileIfExists = Effect.fnUntraced(function* (path: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const exists = yield* fs
+    .exists(path)
+    .pipe(Effect.mapError((error) => new InvalidAppConfigError({ message: `設定ファイルを読めない: ${path}: ${error.message}` })));
+  if (!exists) return Option.none<AppConfig>();
+  return Option.some(yield* loadAppConfigFile(path));
 });
 
 export const loadAppConfigFile = Effect.fnUntraced(function* (path: string) {
