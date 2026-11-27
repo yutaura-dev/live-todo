@@ -1,4 +1,4 @@
-import type { Condition } from "./condition.value.ts";
+import type { Condition, Subject } from "./condition.value.ts";
 import type { Place } from "./place.value.ts";
 
 /**
@@ -24,8 +24,8 @@ export type How =
   | { type: "claude"; trigger: Trigger; workspace: string | null }
   /** 待つ条件が成り立って果たされる。アプリ（Watcher）が見張る */
   | { type: "condition"; condition: Condition }
-  /** ユーザーが承認した外への書き込みが成功して果たされる */
-  | { type: "approval"; approvalId: string }
+  /** 外への書き込み（merge する・メールに返信する など）が承認されて成功すると果たされる。何に・どの操作で書き込むかを持つ（書き込み 1 回は、ユーザーが頼んだときにできて、この Action Item を指す） */
+  | { type: "write"; subject: Subject; operation: string }
   /** ユーザーが選択肢から 1 つ選んで果たす。選ぶと、選んだ選択肢の先が計画に差し込まれる */
   | Decision;
 
@@ -125,7 +125,7 @@ export const invariants = {
     definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => o.then.type !== "planLater" || o.then.direction.trim() !== "")),
 };
 
-const merge: ActionDefinition = { title: "merge する", effort: "easy", completes: true, how: { type: "approval", approvalId: "ap1" } };
+const merge: ActionDefinition = { title: "merge する", effort: "easy", completes: true, how: { type: "write", subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, operation: "github.merge" } };
 
 export const examples = {
   valid: {
