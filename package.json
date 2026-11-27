@@ -18,7 +18,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "6.3.0",
-    "@yutaura/live-spec": "0.13.1",
+    "@yutaura/live-spec": "0.14.2",
     "drizzle-kit": "1.0.0-rc.6",
     "electron": "45.4.1",
     "electron-builder": "^26.18.0",

@@ -11,6 +11,8 @@ export type ActionDefinition = {
   effort: Effort;
   /** 何によって果たされるか（誰が・何で済ませるか） */
   how: How;
+  /** 完了条件か。完了条件の Action Item がすべて果たされると、Task の完了条件を満たす（まだ選んでいない分かれ道は、すべての枝の完了条件で） */
+  completes: boolean;
 };
 
 /** 何によって果たされるか。種類（type）ごとに、要るものが違う */
@@ -106,7 +108,14 @@ function allTrees(tree: DefinitionTree): DefinitionTree[] {
   return [tree, ...tree.items.flatMap((item) => (isTree(item) ? allTrees(item) : trees(item)))];
 }
 
+/** 並びの中に、完了条件があるか（分かれ道があれば、その枝の完了条件がこの並びの完了条件になる） */
+function hasCompletion(tree: DefinitionTree): boolean {
+  return tree.items.some((item) => (isTree(item) ? hasCompletion(item) : item.completes || item.how.type === "decision"));
+}
+
 export const invariants = {
+  "先の計画が決まっている選択肢には、完了条件がある": (definition: ActionDefinition) =>
+    definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => o.then.type !== "planned" || hasCompletion(o.then.plan))),
   "何をするかが空でない": (definition: ActionDefinition) => definitions(definition).every((d) => d.title.trim() !== ""),
   "分かれ道には、名前の違う選択肢が 2 つ以上ある": (definition: ActionDefinition) =>
     definitions(definition).every((d) => d.how.type !== "decision" || (d.how.options.length >= 2 && new Set(d.how.options.map((o) => o.label)).size === d.how.options.length)),
@@ -115,14 +124,15 @@ export const invariants = {
     definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => o.then.type !== "planLater" || o.then.direction.trim() !== "")),
 };
 
-const merge: ActionDefinition = { title: "merge する", effort: "easy", how: { type: "approval", approvalId: "ap1" } };
+const merge: ActionDefinition = { title: "merge する", effort: "easy", completes: true, how: { type: "approval", approvalId: "ap1" } };
 
 export const examples = {
   valid: {
-    "人がやる": { title: "年末調整の書類を出す", effort: "normal", how: { type: "human", place: { url: "https://www.nta.go.jp/", label: "国税庁のサイト", certainty: "confirmed" } } },
+    "人がやる": { title: "年末調整の書類を出す", effort: "normal", completes: false, how: { type: "human", place: { url: "https://www.nta.go.jp/", label: "国税庁のサイト", certainty: "confirmed" } } },
     "先が決まっている分かれ道と、選んでから考える分かれ道": {
       title: "修正してから merge するか決める",
       effort: "easy",
+      completes: false,
       how: {
         type: "decision",
         question: "型エラーが出ている。直してから merge するか",
@@ -135,11 +145,12 @@ export const examples = {
     "分かれ道の先に、また分かれ道がある": {
       title: "配信を続けるか決める",
       effort: "easy",
+      completes: false,
       how: {
         type: "decision",
         question: "このメルマガを読み続けるか",
         options: [
-          { label: "続ける", then: { type: "planned", plan: { type: "serial", items: [{ title: "フォルダに振り分ける", effort: "easy", how: { type: "human", place: null } }] } } },
+          { label: "続ける", then: { type: "planned", plan: { type: "serial", items: [{ title: "フォルダに振り分ける", effort: "easy", completes: true, how: { type: "human", place: null } }] } } },
           {
             label: "やめる",
             then: {
@@ -150,12 +161,13 @@ export const examples = {
                   {
                     title: "解除の方法を決める",
                     effort: "easy",
+                    completes: false,
                     how: {
                       type: "decision",
                       question: "どうやって配信を止めるか",
                       options: [
-                        { label: "配信を解除する", then: { type: "planned", plan: { type: "serial", items: [{ title: "解除のページで解除する", effort: "easy", how: { type: "human", place: null } }] } } },
-                        { label: "迷惑メールにする", then: { type: "planned", plan: { type: "serial", items: [{ title: "迷惑メールに振り分ける", effort: "easy", how: { type: "human", place: null } }] } } },
+                        { label: "配信を解除する", then: { type: "planned", plan: { type: "serial", items: [{ title: "解除のページで解除する", effort: "easy", completes: true, how: { type: "human", place: null } }] } } },
+                        { label: "迷惑メールにする", then: { type: "planned", plan: { type: "serial", items: [{ title: "迷惑メールに振り分ける", effort: "easy", completes: true, how: { type: "human", place: null } }] } } },
                       ],
                     },
                   },
@@ -168,15 +180,30 @@ export const examples = {
     },
   },
   invalid: {
-    "何をするかが空": { title: " ", effort: "easy", how: { type: "human", place: null } },
+    "先が決まった選択肢に完了条件がない": {
+      title: "決める",
+      effort: "easy",
+      completes: false,
+      how: {
+        type: "decision",
+        question: "どうするか",
+        options: [
+          { label: "merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "PR を読む", effort: "easy", completes: false, how: { type: "human", place: null } }] } } },
+          { label: "ひとまず調査する", then: { type: "planLater", direction: "調べる" } },
+        ],
+      },
+    },
+    "何をするかが空": { title: " ", effort: "easy", completes: false, how: { type: "human", place: null } },
     "選択肢が 1 つしかない": {
       title: "決める",
       effort: "easy",
+      completes: false,
       how: { type: "decision", question: "どうするか", options: [{ label: "merge する", then: { type: "planned", plan: { type: "serial", items: [merge] } } }] },
     },
     "選択肢の名前が同じ": {
       title: "決める",
       effort: "easy",
+      completes: false,
       how: {
         type: "decision",
         question: "どうするか",
@@ -189,6 +216,7 @@ export const examples = {
     "選択肢の先の並びが空": {
       title: "決める",
       effort: "easy",
+      completes: false,
       how: {
         type: "decision",
         question: "どうするか",
@@ -201,6 +229,7 @@ export const examples = {
     "選んでから考える選択肢に方針がない": {
       title: "決める",
       effort: "easy",
+      completes: false,
       how: {
         type: "decision",
         question: "どうするか",
@@ -213,13 +242,14 @@ export const examples = {
     "入れ子の分かれ道の選択肢が 1 つしかない": {
       title: "決める",
       effort: "easy",
+      completes: false,
       how: {
         type: "decision",
         question: "どうするか",
         options: [
           {
             label: "やめる",
-            then: { type: "planned", plan: { type: "serial", items: [{ title: "方法を決める", effort: "easy", how: { type: "decision", question: "どうやって", options: [{ label: "解除する", then: { type: "planLater", direction: "解除の方法を調べる" } }] } }] } },
+            then: { type: "planned", plan: { type: "serial", items: [{ title: "方法を決める", effort: "easy", completes: false, how: { type: "decision", question: "どうやって", options: [{ label: "解除する", then: { type: "planLater", direction: "解除の方法を調べる" } }] } }] } },
           },
           { label: "続ける", then: { type: "planLater", direction: "振り分けを考える" } },
         ],
