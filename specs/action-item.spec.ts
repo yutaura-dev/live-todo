@@ -79,11 +79,12 @@ export function initial(actor: Actor, definition: ActionDefinition): ActionItem 
 const decision: ActionDefinition = {
   title: "修正してから merge するか決める",
   effort: "easy",
+  completes: false,
   how: {
     type: "decision",
     question: "型エラーが出ている。直してから merge するか",
     options: [
-      { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", how: { type: "approval", approvalId: "ap1" } }] } } },
+      { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", completes: false, how: { type: "approval", approvalId: "ap1" } }] } } },
       { label: "ひとまず調査する", then: { type: "planLater", direction: "型エラーの原因と影響範囲を調べる" } },
     ],
   },
@@ -91,11 +92,11 @@ const decision: ActionDefinition = {
 
 export const inputs = {
   initial: {
-    人がやる: [{ title: "年末調整の書類を出す", effort: "normal", how: { type: "human", place: null } }],
-    頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", how: { type: "claude", trigger: "on_request", workspace: null } }],
-    自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", how: { type: "claude", trigger: "auto", workspace: null } }],
-    条件で果たす: [{ title: "CI が通るのを待つ", effort: "easy", how: { type: "condition", conditionId: "c1" } }],
-    承認で果たす: [{ title: "merge する", effort: "easy", how: { type: "approval", approvalId: "ap1" } }],
+    人がやる: [{ title: "年末調整の書類を出す", effort: "normal", completes: false, how: { type: "human", place: null } }],
+    頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null } }],
+    自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null } }],
+    条件で果たす: [{ title: "CI が通るのを待つ", effort: "easy", completes: false, how: { type: "condition", conditionId: "c1" } }],
+    承認で果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "approval", approvalId: "ap1" } }],
     分かれ道: [decision],
   },
   complete: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
@@ -249,15 +250,17 @@ export const reviewed = {
 };
 
 export const links = [
-  { from: complete, to: "task", action: "finishPlan", label: "計画の最後の Action Item なら、計画が全部済む" },
-  { from: finishByCondition, to: "task", action: "finishPlan", label: "計画の最後の Action Item なら、計画が全部済む" },
-  { from: completeByApproval, to: "task", action: "finishPlan", label: "計画の最後の Action Item なら、計画が全部済む" },
-  { from: succeed, to: "task", action: "finishPlan", label: "計画の最後の Action Item なら、計画が全部済む" },
-  { from: reopen, to: "task", action: "addRemaining", label: "計画にまだのものができる（やり終えた Task ならやり直す）" },
-  { from: choose, to: "task", action: "addRemaining", label: "先の計画が決まっていれば、差し込む" },
+  { from: complete, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
+  { from: finishByCondition, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
+  { from: completeByApproval, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
+  { from: succeed, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
+  { from: reopen, to: "task", action: "addPendingCriteria", label: "完了条件の Action Item なら、まだの完了条件ができる" },
+  { from: reopen, to: "task", action: "reopen", label: "やり終えた Task なら、やり直す" },
+  { from: choose, to: "task", action: "addPendingCriteria", label: "先の計画が決まっていれば、差し込む（その中の完了条件が、まだの完了条件になる）" },
+  { from: choose, to: "task", action: "makeUndetermined", label: "選んでから考える選択肢なら、先の計画ができるまで完了条件は未定" },
   { from: choose, to: "task", action: "startWork", label: "選んでから考える選択肢なら、AI に先の計画を考えさせる" },
   { from: rechoose, to: "action-item", action: "skip", label: "前に選んだ枝の、まだの Action Item をやらなくする" },
-  { from: rechoose, to: "task", action: "addRemaining", label: "新しく選んだ選択肢の先を差し込む" },
+  { from: rechoose, to: "task", action: "addPendingCriteria", label: "新しく選んだ選択肢の先を差し込む" },
   { from: request, to: "task", action: "startWork", label: "AI が作業中になる" },
   { from: autoStart, to: "task", action: "startWork", label: "AI が作業中になる" },
 ];
