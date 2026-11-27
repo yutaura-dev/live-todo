@@ -72,6 +72,7 @@
 
 - **ツールを追加するとき**: `flake.nix` の `devShells.default` の `packages` へ追加する。グローバルインストールはしない
 - **npm 依存を追加するとき**: `pnpm add` を使う。pnpm の設定は `pnpm-workspace.yaml` に書き、`.npmrc` や `package.json` の `"pnpm"` フィールドには書かない。`ERR_PNPM_IGNORED_BUILDS` が出たら、ビルドが本当に必要か判断してから `pnpm approve-builds <pkg>` する
+- **@yutaura/live-spec を上げるとき**: 作者自身のパッケージなので、確認せずに最新版へ上げてよい。公開から 24 時間たっていなければ、`pnpm-workspace.yaml` の `minimumReleaseAgeExclude` に完全な版（`"@yutaura/live-spec@x.y.z"`）で書き、前の版の行は消す（名前だけ・範囲では書かない）
 - **環境変数を増やすとき**: `.env.example` にキーと説明だけを追記する（非秘匿値は `.env`、秘匿値は `.env.local`）
 - **worktree で足りないファイルがあるとき**: `.worktreeinclude` に追記する
 

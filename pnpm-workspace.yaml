@@ -1,7 +1,7 @@
 # --- 供給網対策 ---
 minimumReleaseAge: 1440        # 公開から 24 時間経っていない版は入れない（分単位）
 minimumReleaseAgeExclude:
-  - "@yutaura/live-spec@0.7.1"  # 自作パッケージ。版を固定して例外にし、以後の版は通常どおり 24 時間待つ
+  - "@yutaura/live-spec@0.13.1"  # 自作パッケージ。版を固定して例外にし、以後の版は通常どおり 24 時間待つ
 trustPolicy: no-downgrade      # 過去版より信頼性（trusted publisher / provenance）が下がった版を拒否
 blockExoticSubdeps: true       # 推移的依存の git / tarball URL を拒否
 strictDepBuilds: true          # 未承認のビルドスクリプトがあれば install を失敗させる
