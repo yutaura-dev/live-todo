@@ -1,6 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import { specOf } from "@yutaura/live-spec/testing";
-import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
 import { canUserMove, deriveTaskStatus } from "./task-status.js";
 
 describe("deriveTaskStatus", () => {
@@ -39,10 +37,8 @@ describe("deriveTaskStatus", () => {
     assert.strictEqual(deriveTaskStatus("dismissed", ["resolved"]), "dismissed");
   });
 
-  describe(specOf(TaskStatusSpec, { scenario: "追う項目がない Task は、同期で動かない" }), () => {
-    it("tracks の Item がなければ変えない", () => {
-      assert.strictEqual(deriveTaskStatus("todo", []), "todo");
-    });
+  it("tracks の Item がなければ変えない", () => {
+    assert.strictEqual(deriveTaskStatus("todo", []), "todo");
   });
 });
 

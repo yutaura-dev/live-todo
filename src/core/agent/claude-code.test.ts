@@ -1,6 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import { specOf } from "@yutaura/live-spec/testing";
-import * as AgentRunSpec from "../../../specs/agent-run.spec.js";
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { childEnv, type ClaudeRequest, type ClaudeResult, ClaudeCodeError, claudeArgs, decodeClaudeOutput, runStoppable } from "./claude-code.js";
 
@@ -206,20 +204,16 @@ describe("runStoppable", () => {
 
   const noticeOf = (deferred: Deferred.Deferred<string>) => ({ wait: Deferred.await(deferred), poll: Effect.map(Deferred.poll(deferred), Option.map(() => "")) });
 
-  describe(specOf(AgentRunSpec.decideStop, "判断中のときだけ"), () => {
-    describe(specOf(AgentRunSpec.decideContinue, "判断中のときだけ"), () => {
-      it.effect("知らせが来なければ、決めた session id で動かし、回答をそのまま返す", () =>
-        Effect.gen(function* () {
-          const deferred = yield* Deferred.make<string>();
-          const { requests, run } = fakeRun([answered({ plan: 1 })], { firstRuns: true });
+  it.effect("知らせが来なければ、決めた session id で動かし、回答をそのまま返す", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      const { requests, run } = fakeRun([answered({ plan: 1 })], { firstRuns: true });
 
-          const result = yield* runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION));
+      const result = yield* runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION));
 
-          assert.deepStrictEqual(result.structured, { plan: 1 });
-          assert.strictEqual(requests[0]?.sessionId, SESSION);
-        }));
-    });
-  });
+      assert.deepStrictEqual(result.structured, { plan: 1 });
+      assert.strictEqual(requests[0]?.sessionId, SESSION);
+    }));
 
   it.effect("知らせが来たら動いている claude を止め、同じ session で、やめるか続けるかを判断させる", () =>
     Effect.gen(function* () {
@@ -237,36 +231,32 @@ describe("runStoppable", () => {
       assert.strictEqual(error.stoppedReason, "merge されたので直す意味がない");
     }));
 
-  describe(specOf(AgentRunSpec.finish, "実行中か続行中のときだけ"), () => {
-    it.effect("続けると判断したら、元の形の回答（result）を回答として返す", () =>
-      Effect.gen(function* () {
-        const deferred = yield* Deferred.make<string>();
-        const { run } = fakeRun([answered({ decision: "continue", reason: "別の PR でも要る修正", result: { plan: 2 } })]);
+  it.effect("続けると判断したら、元の形の回答（result）を回答として返す", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      const { run } = fakeRun([answered({ decision: "continue", reason: "別の PR でも要る修正", result: { plan: 2 } })]);
 
-        const fiber = yield* Effect.forkChild(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION)));
-        yield* Effect.yieldNow;
-        yield* Deferred.succeed(deferred, "追っている PR が merge された");
-        const result = yield* Fiber.join(fiber);
+      const fiber = yield* Effect.forkChild(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION)));
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(deferred, "追っている PR が merge された");
+      const result = yield* Fiber.join(fiber);
 
-        assert.deepStrictEqual(result.structured, { plan: 2 });
-      }));
-  });
+      assert.deepStrictEqual(result.structured, { plan: 2 });
+    }));
 
-  describe(specOf(AgentRunSpec.fail, "動いているときだけ"), () => {
-    it.effect("続けると答えたのに元の形の回答がなければ、やめたことにせず失敗にする", () =>
-      Effect.gen(function* () {
-        const deferred = yield* Deferred.make<string>();
-        const { run } = fakeRun([answered({ decision: "continue", reason: "続ける" })]);
+  it.effect("続けると答えたのに元の形の回答がなければ、やめたことにせず失敗にする", () =>
+    Effect.gen(function* () {
+      const deferred = yield* Deferred.make<string>();
+      const { run } = fakeRun([answered({ decision: "continue", reason: "続ける" })]);
 
-        const fiber = yield* Effect.forkChild(Effect.flip(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION))));
-        yield* Effect.yieldNow;
-        yield* Deferred.succeed(deferred, "追っている PR が merge された");
-        const error = yield* Fiber.join(fiber);
+      const fiber = yield* Effect.forkChild(Effect.flip(runStoppable(run, request, noticeOf(deferred), Effect.succeed(SESSION))));
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(deferred, "追っている PR が merge された");
+      const error = yield* Fiber.join(fiber);
 
-        assert.instanceOf(error, ClaudeCodeError);
-        assert.isUndefined(error.stoppedReason);
-      }));
-  });
+      assert.instanceOf(error, ClaudeCodeError);
+      assert.isUndefined(error.stoppedReason);
+    }));
 
   it.effect("始める前に知らせが来ていたら、止めずに最初から、作業と一緒に判断も頼む", () =>
     Effect.gen(function* () {

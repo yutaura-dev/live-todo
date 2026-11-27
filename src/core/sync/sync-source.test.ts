@@ -1,6 +1,4 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
-import { specOf } from "@yutaura/live-spec/testing";
-import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
 import { Effect, Option, Schema } from "effect";
 import { RunInterrupts } from "../agent/run-interrupts.js";
 import { TestDatabase } from "../db/test-database.js";
@@ -228,17 +226,15 @@ describe("Item の変化と Task の更新", () => {
       assert.strictEqual((yield* taskOfItem("a"))?.status, "in_progress");
     }).pipe(Effect.provide(TestDatabase)));
 
-  describe(specOf(TaskStatusSpec.createBySync, "まだ Task がないときだけ"), () => {
-    it.effect("一度判定した Item は、内容が変わっても判定し直さない", () =>
-      Effect.gen(function* () {
-        const judge = judgeReturning("todo");
-        const binding = bindingWith(batches([upserted(item())], [upserted(item({ version: 2 }))]), judge);
+  it.effect("一度判定した Item は、内容が変わっても判定し直さない", () =>
+    Effect.gen(function* () {
+      const judge = judgeReturning("todo");
+      const binding = bindingWith(batches([upserted(item())], [upserted(item({ version: 2 }))]), judge);
 
-        yield* syncTimes(binding, 2);
+      yield* syncTimes(binding, 2);
 
-        expect(judge).toHaveBeenCalledTimes(1);
-      }).pipe(Effect.provide(TestDatabase)));
-  });
+      expect(judge).toHaveBeenCalledTimes(1);
+    }).pipe(Effect.provide(TestDatabase)));
 
   it.effect("not_todo と判定した Item は、内容が変わっても判定し直さない", () =>
     Effect.gen(function* () {

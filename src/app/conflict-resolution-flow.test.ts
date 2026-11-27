@@ -1,6 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import { specOf } from "@yutaura/live-spec/testing";
-import * as AgentRunSpec from "../../specs/agent-run.spec.js";
 import { and, eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { ClaudeCode, ClaudeCodeError, type ClaudeRequest } from "../core/agent/claude-code.js";
@@ -150,16 +148,14 @@ describe("コンフリクトを直す", () => {
       assert.deepStrictEqual(yield* currentKinds(taskId), ["resolve_conflicts"]);
     }).pipe(Effect.provide(TestDatabase)));
 
-  describe(specOf(AgentRunSpec.startNow, "まだ処理がないときだけ"), () => {
-    it.effect("同じ Task で直している最中なら、もう一度は始めない", () =>
-      Effect.gen(function* () {
-        const taskId = yield* conflictTask;
-        yield* startConflictResolution(taskId);
+  it.effect("同じ Task で直している最中なら、もう一度は始めない", () =>
+    Effect.gen(function* () {
+      const taskId = yield* conflictTask;
+      yield* startConflictResolution(taskId);
 
-        const again = yield* startConflictResolution(taskId).pipe(Effect.flip);
-        assert.include(again.message, "直している最中");
-      }).pipe(Effect.provide(TestDatabase)));
-  });
+      const again = yield* startConflictResolution(taskId).pipe(Effect.flip);
+      assert.include(again.message, "直している最中");
+    }).pipe(Effect.provide(TestDatabase)));
 });
 
 describe("直した内容を push する", () => {
