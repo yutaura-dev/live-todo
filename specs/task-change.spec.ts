@@ -4,6 +4,7 @@ import { ensure } from "@yutaura/live-spec";
  * Task Change（Task の項目の変化 1 つ）。どの項目が、何から何に、だれによって変わったかを残す。
  * 更新マークは、未読の Task Change がある Task に付く（Task ごとに、未読があるかを数えて出す）。Source 側の変化（事実が変わった・増えた）には付かず、それを受け取って Task の項目が変わったときだけ付く。
  * 自分で変えたことは知っているので、ユーザーが変えた変化は初めから既読にする。
+ * Task の数える項目を変えるときは、同じときに Task Change も残す（あとから反応で作ると、取りこぼして更新マークが付かないことがあるため）。
  */
 export type TaskChange = {
   /** 見たか */
@@ -38,24 +39,25 @@ export type Status = (typeof Status)[keyof typeof Status];
 export type ChangedField = "列" | "どう終わったか" | "何をするか" | "今の状況と次の一手" | "計画" | "Action Item の進み" | "完了条件";
 
 /** だれが変えたか */
-export type Changer = "ユーザー" | "AI" | "同期" | "ルール";
+export type Changer = "ユーザー" | "AI" | "同期" | "ルール" | "アプリ";
 
 /** 変化の例（数える項目と、数えない項目） */
 type Field = ChangedField | "事実" | "AI が作業中か" | "最後に変えた日時";
 
 const COUNTED: Field[] = ["列", "どう終わったか", "何をするか", "今の状況と次の一手", "計画", "Action Item の進み", "完了条件"];
 
-type Actor = { kind: "user" } | { kind: "agent" } | { kind: "sync" } | { kind: "rule" };
+type Actor = { kind: "user" } | { kind: "agent" } | { kind: "sync" } | { kind: "rule" } | { kind: "app" };
 
-/** Task を変えた人。AI: 事実の変化を受け取って Task を導き直す・計画を考える・Claude Code が Action Item を果たす。同期: 待つ条件・承認した書き込みで Action Item が果たされる。ルール: ルールで Task を変える */
+/** Task を変えた人。AI: 事実の変化を受け取って Task を導き直す・計画を考える・Claude Code が Action Item を果たす。同期: 待つ条件で Action Item が果たされる。ルール: ルールで Task を変える。アプリ: 承認した書き込みで Action Item が果たされる・定期の Task を作る */
 export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
   AI: { kind: "agent" },
   同期: { kind: "sync" },
   ルール: { kind: "rule" },
+  アプリ: { kind: "app" },
 };
 
-const CHANGER: Record<Actor["kind"], Changer> = { user: "ユーザー", agent: "AI", sync: "同期", rule: "ルール" };
+const CHANGER: Record<Actor["kind"], Changer> = { user: "ユーザー", agent: "AI", sync: "同期", rule: "ルール", app: "アプリ" };
 
 /**
  * Task の項目が変わった
@@ -68,7 +70,7 @@ export function initial(actor: Actor, field: Field): TaskChange {
     status: actor.kind === "user" ? "既読" : "未読",
     id: "c1",
     taskId: "t1",
-    field: "今の状況と次の一手",
+    field: field as ChangedField,
     before: "レビュー待ち",
     after: "レビューで指摘が 2 件。直す",
     by: CHANGER[actor.kind],
@@ -76,10 +78,20 @@ export function initial(actor: Actor, field: Field): TaskChange {
   };
 }
 
-/** 見た（Task を開いた・カードで変化を見た） */
+/** 変化を 1 つ見た（カードで変化を開いた） */
 export function read(change: TaskChange, actor: Actor): TaskChange {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(change.status === "未読", "未読のときだけ");
+  return { ...change, status: "既読" };
+}
+
+/**
+ * Task を開いた
+ *
+ * その Task の未読の変化を、まとめて既読にする（ADR-0003）。もう既読の変化はそのまま。
+ */
+export function openTask(change: TaskChange, actor: Actor): TaskChange {
+  ensure(actor.kind === "user", "ユーザーだけ");
   return { ...change, status: "既読" };
 }
 
@@ -105,6 +117,13 @@ export const scenarios = {
     { do: read, by: "ユーザー", expect: { status: "既読" } },
     { do: read, by: "ユーザー", denied: "未読のときだけ" },
   ],
+  "Task を開いたら、その Task の未読はまとめて消える": [
+    { do: initial, by: "ルール", input: "列が変わった", expect: { status: "未読" } },
+    { do: openTask, by: "AI", denied: "ユーザーだけ" },
+    { do: openTask, by: "ユーザー", expect: { status: "既読" } },
+    { do: openTask, by: "ユーザー", expect: { status: "既読" } },
+  ],
+  "承認した書き込みで Action Item が果たされたら、更新マークが付く": [{ do: initial, by: "アプリ", input: "Action Item が済んだ", expect: { status: "未読", by: "アプリ" } }],
   "Claude Code が Action Item を果たしたら、更新マークが付く": [{ do: initial, by: "AI", input: "Action Item が済んだ", expect: { status: "未読" } }],
   "待つ条件が成り立って Action Item が果たされたら、更新マークが付く": [{ do: initial, by: "同期", input: "Action Item が済んだ", expect: { status: "未読", by: "同期" } }],
   "ルールで Task を完了にしたら、更新マークが付く": [{ do: initial, by: "ルール", input: "列が変わった", expect: { status: "未読", by: "ルール" } }],
@@ -120,7 +139,33 @@ export const scenarios = {
   ],
 };
 
+export const reviewed = {
+  "equivalent-states:既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読": "どの項目が・だれが変えたかは、見せるための記録で、見たかの振る舞いは変えない（入力の例ごとに値が違うので、別の状態に見えている）",
+  "anytime:openTask": "Task を開いたら、その Task の変化をまとめて既読にする。既読の変化は既読のまま変わらないので、どの状態でも通してよい",
+};
+
 export const questions = [
+  {
+    ask: "どの項目にも入らない「知らせ」をどう扱うか？（書き込めなかった理由・ADR-0016 の AI の作業をやめた理由 など） 案 A: 今の状況と次の一手（brief）の書き換えとして扱う。案 B: 「知らせ」という項目を足す",
+    about: initial,
+  },
+  {
+    ask: "新しく出た Task（同期が列を決めた）にも、更新マークを付けるか？ 新しいことは別の印（新着）で見せるほうがよいか？",
+    about: { status: "未読" },
+  },
+  {
+    ask: "同期が絞り込みの外として片付けた Task はボードに出ないので、その変化はずっと未読のまま残る。終わった Task の変化は初めから既読にしてよいか？ それとも、終わった Task も見られるところに未読を出すか？",
+    about: { status: "未読" },
+  },
+  {
+    ask: "ユーザーが決めたルールで変えた変化・承認した書き込みで果たされた変化は、ユーザーが決めた・承認したことの結果だが、未読にしてよいか？（案: 未読にする。起きたタイミングは見ていないので）",
+    about: initial,
+  },
+  {
+    ask: "未読の変化がある項目を、ユーザーが自分で直したら、その項目の未読を既読にするか？",
+    about: read,
+  },
+
   {
     ask: "見る前に、同じ項目が元の値に戻ったら（AI が今の状況を書き換え、すぐ元に戻した など）、更新マークを消すか？ 案: 消さない（変化があったことは残す）。ただし、同じ項目の未読の変化は 1 つにまとめて、最初の前と最後の後を見せる",
     about: initial,
