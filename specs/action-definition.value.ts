@@ -1,3 +1,4 @@
+import type { Condition } from "./condition.value.ts";
 import type { Place } from "./place.value.ts";
 
 /**
@@ -21,8 +22,8 @@ export type How =
   | { type: "human"; place: Place | null }
   /** Claude Code が果たす（人が「済んだ」を押して済ませてもよい） */
   | { type: "claude"; trigger: Trigger; workspace: string | null }
-  /** 指した Condition Item が解消して果たされる。アプリ（Watcher）が見張る */
-  | { type: "condition"; conditionId: string }
+  /** 待つ条件が成り立って果たされる。アプリ（Watcher）が見張る */
+  | { type: "condition"; condition: Condition }
   /** ユーザーが承認した外への書き込みが成功して果たされる */
   | { type: "approval"; approvalId: string }
   /** ユーザーが選択肢から 1 つ選んで果たす。選ぶと、選んだ選択肢の先が計画に差し込まれる */
