@@ -1,58 +1,53 @@
 /**
  * 待つ条件（何が起きるのを待つか）。条件で果たされる Action Item が持ち、Watcher が確かめる。
- * 種類（kind）ごとに、要るものが違う。どの種類も、見張る対象をアカウントと uri の組で指す（URL とは限らない）。
- * 確かめ方は Source ごとに違うので、各 Source の Adapter が持つ（ADR-0008）。ここでは、何を待つかだけを書く。
- * 困った状態（conflict・CI の失敗・返信が決まった時間ないなど）は、待つ条件ではない。その対象の Source Item の事実の行（「conflict: あり」「返信: 48 時間なし」）として届く。
+ * 何を確かめるか・どんな条件があるかは Source ごとに違うので、各 Source の provider（Adapter・WatchProvider）が決めて実装する（ADR-0008）。ドメインは、どの対象のどの条件を待つかだけを持ち、中身を解釈しない。
+ * 困った状態（conflict・CI の失敗・返信が決まった時間ないなど）は、待つ条件ではない。その対象の Source Item の事実の行（「conflict: あり」）として届く。
  */
-export type Condition =
-  /** PR が merge される */
-  | { kind: "merged"; subject: Subject }
-  /** since より後に、レビューが付く */
-  | { kind: "review_submitted"; subject: Subject; since: string }
-  /** since より後に、対象に動きがある（何を待つかが分からない待ち。返信待ちなど） */
-  | { kind: "item_changed"; subject: Subject; since: string }
-  /** since より後に、返信が来る */
-  | { kind: "reply_received"; subject: Subject; since: string }
-  /** 検索に当たる PR が開かれる（依存先の PR が出る など） */
-  | { kind: "pull_request_opened"; accountId: string; repository: string; query: string }
-  /** 自分の PR の merge commit が、検索に当たる開いた PR（deploy の PR など）に入る */
-  | { kind: "included_in_pull_request"; subject: Subject; repository: string; query: string }
-  /** 自分の PR の merge commit を含む commit で、ワークフロー（ファイル名）が成功する */
-  | { kind: "workflow_succeeded"; subject: Subject; repository: string; workflow: string };
+export type Condition = {
+  /** 何について待つか */
+  subject: Subject;
+  /** どの条件か。provider が決めた名前（github.merged・github.review_submitted・gmail.reply_received など） */
+  name: string;
+  /** いつより後に起きたことを見るか（待ち始めた時刻など）。「待ち始める前のレビューでは済ませない」のように使う。見ない条件では null */
+  since: string | null;
+  /** 何を待つかの説明（画面に出す。「PR #42 が merge される」など） */
+  label: string;
+};
 
-/** 見張る対象（アカウントと、Source の中で見分ける識別子） */
+/**
+ * 見張る対象（アカウントと、Source の中で見分ける識別子）。
+ * 1 つの項目（PR・メールのスレッド）だけでなく、検索やワークフローの実行も、provider が決めた識別子で表す（github:search/acme/deploy?q=… など）。
+ */
 export type Subject = {
   /** どのアカウントで見るか */
   accountId: string;
-  /** Source の中で、対象を見分ける識別子（github:acme/app/pull/42 など） */
+  /** Source の中で、対象を見分ける識別子 */
   uri: string;
 };
 
-const subjectsOf = (condition: Condition): Subject[] => ("subject" in condition ? [condition.subject] : []);
-
 export const invariants = {
-  "見張る対象は、アカウントと識別子を持つ": (condition: Condition) => subjectsOf(condition).every((s) => s.accountId.trim() !== "" && s.uri.trim() !== ""),
-  "検索・ワークフローで待つ条件は、アカウントとリポジトリを持つ": (condition: Condition) =>
-    (condition.kind !== "pull_request_opened" || (condition.accountId.trim() !== "" && condition.repository.trim() !== "")) &&
-    ((condition.kind !== "included_in_pull_request" && condition.kind !== "workflow_succeeded") || condition.repository.trim() !== ""),
-  "ワークフローで待つ条件は、ワークフローを持つ": (condition: Condition) => condition.kind !== "workflow_succeeded" || condition.workflow.trim() !== "",
-  "検索で待つ条件は、検索の条件を持つ": (condition: Condition) =>
-    (condition.kind !== "pull_request_opened" && condition.kind !== "included_in_pull_request") || condition.query.trim() !== "",
+  "見張る対象は、アカウントと識別子を持つ": (condition: Condition) => condition.subject.accountId.trim() !== "" && condition.subject.uri.trim() !== "",
+  "条件の名前は、provider の名前から始まる（provider が実装する条件だけを使う）": (condition: Condition) => /^[a-z][a-z0-9-]*\.[a-z_]+$/.test(condition.name),
+  "何を待つかの説明がある": (condition: Condition) => condition.label.trim() !== "",
 };
 
 const pr: Subject = { accountId: "github-work", uri: "github:acme/app/pull/42" };
 
 export const examples = {
   valid: {
-    "merge を待つ": { kind: "merged", subject: pr },
-    "待ち始めたあとのレビューを待つ": { kind: "review_submitted", subject: pr, since: "2026-11-28T00:00:00Z" },
-    "送ったメールに返信が来る": { kind: "reply_received", subject: { accountId: "gmail-private", uri: "gmail:thread/18c2f" }, since: "2026-11-28T00:00:00Z" },
-    "deploy の PR に入るのを待つ": { kind: "included_in_pull_request", subject: pr, repository: "acme/deploy", query: "is:open label:release" },
+    "merge を待つ": { subject: pr, name: "github.merged", since: null, label: "PR #42 が merge される" },
+    "待ち始めたあとのレビューを待つ": { subject: pr, name: "github.review_submitted", since: "2026-11-28T00:00:00Z", label: "PR #42 にレビューが付く" },
+    "deploy の PR に入るのを待つ（検索の対象）": {
+      subject: { accountId: "github-work", uri: "github:search/acme/deploy?q=is:open+label:release" },
+      name: "github.includes_merge_commit",
+      since: null,
+      label: "PR #42 の変更が deploy の PR に入る",
+    },
+    "送ったメールに返信が来る": { subject: { accountId: "gmail-private", uri: "gmail:thread/18c2f" }, name: "gmail.reply_received", since: "2026-11-28T00:00:00Z", label: "見積もりの返信が来る" },
   },
   invalid: {
-    "対象の識別子が空": { kind: "merged", subject: { accountId: "github-work", uri: "" } },
-    "リポジトリのない検索": { kind: "pull_request_opened", accountId: "github-work", repository: "", query: "is:open" },
-    "ワークフローの名前がない": { kind: "workflow_succeeded", subject: pr, repository: "acme/app", workflow: " " },
-    "検索の条件がない": { kind: "pull_request_opened", accountId: "github-work", repository: "acme/app", query: " " },
+    "対象の識別子が空": { subject: { accountId: "github-work", uri: "" }, name: "github.merged", since: null, label: "merge される" },
+    "provider のない条件の名前": { subject: pr, name: "merged", since: null, label: "merge される" },
+    "説明がない": { subject: pr, name: "github.merged", since: null, label: " " },
   },
 } satisfies { valid: Record<string, Condition>; invalid: Record<string, Condition> };

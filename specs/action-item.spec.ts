@@ -98,7 +98,7 @@ export const inputs = {
     人がやる: [{ title: "年末調整の書類を出す", effort: "normal", completes: false, how: { type: "human", place: null } }],
     頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null } }],
     自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null } }],
-    条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { kind: "merged", subject: { accountId: "github-work", uri: "github:acme/app/pull/42" } } } }],
+    条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, name: "github.merged", since: null, label: "PR #42 が merge される" } } }],
     承認で果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "approval", approvalId: "ap1" } }],
     分かれ道: [decision],
   },

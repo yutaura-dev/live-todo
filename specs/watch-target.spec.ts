@@ -5,7 +5,8 @@ import type { Subject } from "./condition.value.ts";
  * Watcher が見張る対象 1 つ（ADR-0008・0009）。同じ対象は 1 つだけ持つ（対象で探し、あれば理由を足す）。
  * 見張る理由は 2 つある。
  * - 自分の対象: 自分が関わる開いている対象（自分の PR など）。一覧で取って見張り、困った状態（conflict・CI の失敗など）を事実の行として Source Item に届ける
- * - 待っている: 待つ条件の Action Item が指す対象（他人の PR・deploy の PR を探す検索・ワークフローなど）。待っている Action Item がある間だけ見張る
+ * - 待っている: 待つ条件の Action Item が指す対象（他人の PR・deploy の PR を探す検索・ワークフローの実行など）。待っている Action Item がある間だけ見張る
+ * 対象の取り方・確かめ方・何が変わったか（fingerprint）は、Source ごとの provider が実装する。ここでは、いつ確かめるかと、見張る理由だけを決める。
  * 確かめても変わらなければ確認の間隔を倍に延ばし（最初 5 分、上限 1 日）、変わったら最初に戻す。確かめない間は、前に確かめた結果を引き継ぐ。
  */
 export type WatchTarget = {
@@ -19,26 +20,17 @@ export type WatchTarget = {
   interval: Interval;
   /** 確かめる時刻が来ているか */
   due: Due;
-  /** 見張る対象 */
-  target: Target;
+  /** 見張る対象（1 つの項目・検索・ワークフローの実行も、provider が決めた識別子で表す） */
+  subject: Subject;
   /** 待っている Action Item */
   waitingItemIds: string[];
   /** 一覧で分かる、対象の更新を表す値（GitHub なら PR の updated_at）。変わったら予定より前でも確かめる */
   revision: string | null;
-  /** 判定に効く値だけを並べたもの（head の commit・mergeable・check・レビュー）。変わらなければ間隔を延ばす */
+  /** 判定に効く値だけを並べたもの（provider が決める。GitHub の PR なら head の commit・mergeable・check・レビュー）。変わらなければ間隔を延ばす */
   fingerprint: string | null;
   /** 次に確かめる時刻。間隔から決め、時間の条件が成り立つかもしれない時刻より遅らせない */
   nextCheckAt: string;
 };
-
-/** 見張る対象。1 つの項目か、検索か、ワークフローか */
-export type Target =
-  /** 1 つの項目（PR・メールのスレッドなど） */
-  | { type: "item"; subject: Subject }
-  /** 検索に当たる項目（依存先の PR が出る・deploy の PR に入る など） */
-  | { type: "search"; accountId: string; repository: string; query: string }
-  /** ワークフローの実行（merge commit を含む commit で成功する など） */
-  | { type: "workflow"; accountId: string; repository: string; workflow: string };
 
 export const Watching = {
   /** 見張っている */
@@ -93,7 +85,7 @@ export function initial(actor: Actor, reason: "自分の対象" | "待ってい�
     ...START,
     mine: reason === "自分の対象",
     waiters: reason === "待っている" ? "あり" : "なし",
-    target: { type: "item", subject: { accountId: "github-work", uri: "github:acme/app/pull/42" } },
+    subject: { accountId: "github-work", uri: "github:acme/app/pull/42" },
     waitingItemIds: reason === "待っている" ? ["a1"] : [],
     revision: null,
     fingerprint: null,
@@ -190,7 +182,7 @@ export const reviewed = {
 export const invariants = {
   "見張りをやめたのは、見張る理由が 1 つもないときだけ": (target: WatchTarget) => target.watching === "見張っている" || !hasReason(target),
   "見張る理由がないのに見張っているのは、最後に確かめる前だけ": (target: WatchTarget) => target.watching === "やめた" || hasReason(target) || target.due === "確かめる時刻",
-  "見張る対象は、作ったあと変わらない": (before: WatchTarget, after: WatchTarget) => JSON.stringify(before.target) === JSON.stringify(after.target),
+  "見張る対象は、作ったあと変わらない": (before: WatchTarget, after: WatchTarget) => before.subject.accountId === after.subject.accountId && before.subject.uri === after.subject.uri,
 };
 
 export const links = [
