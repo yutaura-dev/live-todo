@@ -281,6 +281,9 @@ export const reviewed = {
 
 export const links = [
   { from: rechoose, to: "completion-effect", action: "withdraw", label: "選び直したら、前の枝に置いていた完了したときにすることを取りやめる" },
+  { from: succeed, to: "task-change", label: "Claude Code が Action Item を果たしたことを、変化として残す" },
+  { from: finishByCondition, to: "task-change", label: "待つ条件で Action Item が果たされたことを、変化として残す" },
+  { from: completeByWrite, to: "task-change", label: "書き込みで Action Item が果たされたことを、変化として残す" },
   { from: complete, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
   { from: finishByCondition, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
   { from: completeByWrite, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },

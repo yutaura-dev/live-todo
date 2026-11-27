@@ -138,6 +138,19 @@ export const links = [
   { from: dismiss, to: "completion-effect", action: "withdraw", label: "やらないことにしたら、まだ頼んでいない完了したときにすることを取りやめる" },
   { from: detachFact, to: "completion-effect", action: "withdraw", label: "外した事実に書き込む完了したときにすることは、Decisions を通さずに取りやめる（完了待ちでは計画を直せないので、先に外す）" },
   { from: detachFact, to: "task", action: "revisePlan", label: "計画を見直す必要があるかを Decisions で軽く判定し、要るなら AI が計画を直す（外れた事実への、完了したときにすることも）" },
+  { from: triage, to: "task-change", label: "列が決まった（要確認・todo）ことを、変化として残す" },
+  { from: move, to: "task-change", label: "列が変わったことを、変化として残す" },
+  { from: complete, to: "task-change", label: "終わったこと（列・どう終わったか）を、変化として残す" },
+  { from: dismiss, to: "task-change", label: "やらないことにした（列・どう終わったか）を、変化として残す" },
+  { from: reopen, to: "task-change", label: "やり直すことになった（列）を、変化として残す" },
+  { from: revisePlan, to: "task-change", label: "計画が変わったことを、変化として残す" },
+  { from: defineCompletionByHand, to: "task-change", label: "完了条件が変わったことを、変化として残す" },
+  { from: makeUndetermined, to: "task-change", label: "完了条件が未定になったことを、変化として残す" },
+  { from: addPendingCriteria, to: "task-change", label: "完了条件が変わったことを、変化として残す" },
+  { from: satisfyCompletion, to: "task-change", label: "完了条件を満たしたことを、変化として残す" },
+  { from: receiveFact, to: "task-change", label: "事実の変化を受け取って、Task の項目（今の状況と次の一手・列 など）が変わったときだけ、変化として残す" },
+  { from: confirmCompletion, to: "task-change", label: "完了のボタンを押したことは、ユーザーが変えたので既読の変化として残す" },
+  { from: finishCompletion, to: "task-change", label: "完了待ちから終わったこと（列・どう終わったか）を、変化として残す" },
 ];
 
 export const actors: Record<string, Actor> = {
