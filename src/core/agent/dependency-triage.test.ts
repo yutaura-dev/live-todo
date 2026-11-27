@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { specOf } from "@yutaura/live-spec/testing";
+import * as AgentRunSpec from "../../../specs/agent-run.spec.js";
 import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
 import { Effect, Option } from "effect";
 import { TestClock } from "effect/testing";
@@ -263,7 +264,7 @@ describe("runDependencyReviews", () => {
       assert.strictEqual(yield* statusOf(taskId), "done");
     }).pipe(Effect.provide(TestDatabase)));
 
-  describe(specOf(TaskStatusSpec.finishAgent, "処理中のときだけ"), () => {
+  describe(specOf(TaskStatusSpec.leaveAgent, "処理中のときだけ"), () => {
     it.effect("調べている間に同期が状態を変えたら（merge されて完了など）、そちらを優先する", () =>
       Effect.gen(function* () {
         const { taskId } = yield* dependencyTask();
@@ -319,22 +320,24 @@ describe("調査待ち", () => {
       assert.strictEqual(agent.recorded.maxInFlight, 2);
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("調査待ちの間に同期が状態を変えたら（merge されて完了など）、その Task は調べずに待ちから外す", () =>
-    Effect.gen(function* () {
-      yield* dependencyTask({ url: "https://github.com/acme/app/pull/1" });
-      const second = yield* dependencyTask({ url: "https://github.com/acme/app/pull/2" });
-      const agent = withAgent({
-        onRun: Effect.gen(function* () {
-          yield* (yield* TaskRepository).updateTask(second.taskId, { status: "done" });
-        }),
-      });
+  describe(specOf(AgentRunSpec.begin, "待ちのときだけ"), () => {
+    it.effect("調査待ちの間に同期が状態を変えたら（merge されて完了など）、その Task は調べずに待ちから外す", () =>
+      Effect.gen(function* () {
+        yield* dependencyTask({ url: "https://github.com/acme/app/pull/1" });
+        const second = yield* dependencyTask({ url: "https://github.com/acme/app/pull/2" });
+        const agent = withAgent({
+          onRun: Effect.gen(function* () {
+            yield* (yield* TaskRepository).updateTask(second.taskId, { status: "done" });
+          }),
+        });
 
-      yield* agent.provide(run);
+        yield* agent.provide(run);
 
-      assert.lengthOf(agent.recorded.requests, 1);
-      assert.strictEqual(yield* statusOf(second.taskId), "done");
-      assert.lengthOf(yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, second.taskId)), 0);
-    }).pipe(Effect.provide(TestDatabase)));
+        assert.lengthOf(agent.recorded.requests, 1);
+        assert.strictEqual(yield* statusOf(second.taskId), "done");
+        assert.lengthOf(yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, second.taskId)), 0);
+      }).pipe(Effect.provide(TestDatabase)));
+  });
 });
 
 describe("requestDependencyReview", () => {
@@ -353,15 +356,17 @@ describe("requestDependencyReview", () => {
       assert.strictEqual(yield* statusOf(taskId), "todo");
     }).pipe(Effect.provide(TestDatabase)));
 
-  it.effect("すでに調査待ちか調べている最中なら、二重には入れない", () =>
-    Effect.gen(function* () {
-      const { taskId } = yield* dependencyTask();
-      yield* requestDependencyReview(taskId);
-      yield* requestDependencyReview(taskId);
+  describe(specOf(AgentRunSpec.enqueue, "まだ処理がないときだけ"), () => {
+    it.effect("すでに調査待ちか調べている最中なら、二重には入れない", () =>
+      Effect.gen(function* () {
+        const { taskId } = yield* dependencyTask();
+        yield* requestDependencyReview(taskId);
+        yield* requestDependencyReview(taskId);
 
-      const queued = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, taskId));
-      assert.lengthOf(queued, 1);
-    }).pipe(Effect.provide(TestDatabase)));
+        const queued = yield* (yield* Database).select().from(agentRuns).where(eq(agentRuns.taskId, taskId));
+        assert.lengthOf(queued, 1);
+      }).pipe(Effect.provide(TestDatabase)));
+  });
 
   it.effect("PR を追っていない Task は調べられない", () =>
     Effect.gen(function* () {

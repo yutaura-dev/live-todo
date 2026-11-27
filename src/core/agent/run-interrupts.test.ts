@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { specOf } from "@yutaura/live-spec/testing";
-import * as TaskStatusSpec from "../../../specs/task-status.spec.js";
+import * as AgentRunSpec from "../../../specs/agent-run.spec.js";
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { Database } from "../db/database.js";
 import { agentRuns } from "../db/schema.js";
@@ -99,23 +99,25 @@ describe("RunInterrupts.trackedClosed", () => {
       }),
     ));
 
-  it.effect("merge のように知らせを聞かない処理が動いていれば、待ち行列だけ取り消し、status は変えない", () =>
-    run(
-      Effect.gen(function* () {
-        const task = yield* trackedTask("agent_running", "resolved");
-        yield* insertRun(task.id, "running", "merge_pull_request");
-        yield* insertRun(task.id, "queued");
+  describe(specOf(AgentRunSpec.notifyClosed, "merge の処理には知らせない"), () => {
+    it.effect("merge のように知らせを聞かない処理が動いていれば、待ち行列だけ取り消し、status は変えない", () =>
+      run(
+        Effect.gen(function* () {
+          const task = yield* trackedTask("agent_running", "resolved");
+          yield* insertRun(task.id, "running", "merge_pull_request");
+          yield* insertRun(task.id, "queued");
 
-        const handled = yield* (yield* RunInterrupts).trackedClosed(task.id, ["resolved"]);
+          const handled = yield* (yield* RunInterrupts).trackedClosed(task.id, ["resolved"]);
 
-        const remaining = yield* (yield* Database).select().from(agentRuns);
-        assert.isTrue(handled);
-        assert.deepStrictEqual(remaining.map((row) => row.kind), ["merge_pull_request"]);
-        assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(task.id)).status, "agent_running");
-      }),
-    ));
+          const remaining = yield* (yield* Database).select().from(agentRuns);
+          assert.isTrue(handled);
+          assert.deepStrictEqual(remaining.map((row) => row.kind), ["merge_pull_request"]);
+          assert.strictEqual(Option.getOrThrow(yield* (yield* TaskRepository).findTask(task.id)).status, "agent_running");
+        }),
+      ));
+  });
 
-  describe(specOf(TaskStatusSpec.stopAgent, "処理中のときだけ"), () => {
+  describe(specOf(AgentRunSpec.notifyClosed, "待ちか実行中のときだけ"), () => {
     it.effect("聞き終わった処理には知らせない", () =>
       run(
         Effect.gen(function* () {

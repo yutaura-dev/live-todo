@@ -39,7 +39,7 @@ describe("deriveTaskStatus", () => {
     assert.strictEqual(deriveTaskStatus("dismissed", ["resolved"]), "dismissed");
   });
 
-  describe(specOf(TaskStatusSpec.reconcile, "追う Source Item があるときだけ"), () => {
+  describe(specOf(TaskStatusSpec, { scenario: "追う項目がない Task は、同期で動かない" }), () => {
     it("tracks の Item がなければ変えない", () => {
       assert.strictEqual(deriveTaskStatus("todo", []), "todo");
     });

@@ -337,26 +337,24 @@ describe("AI が処理中の Task", () => {
     );
   });
 
-  describe(specOf(TaskStatusSpec.cancelQueued, "処理中のときだけ"), () => {
-    it.effect("処理中でない Task は、処理側に知らせず、追う Item から status を導き直す", () => {
-      const calls: number[] = [];
-      return Effect.gen(function* () {
-        const binding = bindingWith(batches([upserted(item())], [upserted(item({ state: "closed", version: 2 }))]));
+  it.effect("処理中でない Task は、処理側に知らせず、追う Item から status を導き直す", () => {
+    const calls: number[] = [];
+    return Effect.gen(function* () {
+      const binding = bindingWith(batches([upserted(item())], [upserted(item({ state: "closed", version: 2 }))]));
 
-        yield* syncTimes(binding, 2);
+      yield* syncTimes(binding, 2);
 
-        assert.strictEqual((yield* taskOfItem("a"))?.status, "done");
-        assert.deepStrictEqual(calls, []);
-      }).pipe(
-        Effect.provideService(
-          RunInterrupts,
-          RunInterrupts.of({
-            listen: (_taskId, effect) => effect as never,
-            trackedClosed: (taskId) => Effect.sync(() => (calls.push(taskId), true)),
-          }),
-        ),
-        Effect.provide(TestDatabase),
-      );
-    });
+      assert.strictEqual((yield* taskOfItem("a"))?.status, "done");
+      assert.deepStrictEqual(calls, []);
+    }).pipe(
+      Effect.provideService(
+        RunInterrupts,
+        RunInterrupts.of({
+          listen: (_taskId, effect) => effect as never,
+          trackedClosed: (taskId) => Effect.sync(() => (calls.push(taskId), true)),
+        }),
+      ),
+      Effect.provide(TestDatabase),
+    );
   });
 });
