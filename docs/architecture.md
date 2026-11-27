@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
-> **最終更新**: 2026-11-25
-> **直近の変更 ADR**: [ADR-0009](decisions/0009-adaptive-watch-frequency.md)
+> **最終更新**: 2026-11-27
+> **直近の変更 ADR**: [ADR-0019](decisions/0019-task-first-model.md)
 
 # Architecture — live-todo
 
@@ -42,6 +42,18 @@ Source Item ──(Link: tracks / context)──▶ Task
 5. Task の項目が実際に変わったときだけ Task Change を記録する
 6. カーソルを保存する（2〜6 は 1 つのトランザクション）
 
+### Task 起点（ADR-0019）
+
+Task が主で、Source Item は Task についての事実。届いた事実をどの Task のものかに振り分け、ルールは Task に当てる（振り分けは段階的に作っている。今は同期の triage が Item ごとに Task を作るまま）。
+
+- **事実**（`source_items.fact`）: Source Item が表す事実を、アプリが書いた情報（`trusted`）と外の人が書いた文（`body`）に分けて持つ。同期で Source ごとの `describeFact` が書く（今は GitHub の通知だけ。ほかの Source の Item は、Source の名前・作成者・タイトルで代わりにする）
+  - 値がなくても書く（「レビュー依頼: なし」）、状態は Source の言葉で書く（「マージ済み」）、自分に関わる結論はアプリが決めて 1 行で書く（「あなた（または所属チーム）へのレビュー依頼: あり（チーム @x）」）
+- **dossier**（`src/core/task/dossier.ts`）: Task の情報（状態・作られ方・事実の数）と、紐づく事実をまとめたもの。判定に渡すときは、アプリの情報だけで答える問いには title・brief・本文を渡さない
+- **ルール**: 「どういう時」は保存するときに LLM で判定しやすい問いに分け（`src/core/rules/rule-condition.ts`）、利用者に見せて確かめてもらう。「何をする」は Decisions で Task の操作・メールの操作に読み取る（`rule-actions.ts`）。条件が混ざっていたら保存させない
+  - Task への操作（完了・対象外・todo）は `app:task-rules` のジョブ（`src/app/task-rules.ts`）が、Task ができた・事実が紐づいた・紐づく事実に出来事があったときに、ルールを作ったあとのものだけ当てる。記録は `task_rule_runs`
+  - メールへの操作（ラベル・既読・アーカイブ）は、今は Gmail の同期の中でメールに当てる（`gmail-rule-runner.ts`、ADR-0014 のまま）。Task に紐づくメールに当てる形に寄せる
+- spike とベンチマークは `spike/task-first/`（実データの評価用データは gitignore の `data/`）
+
 ### 見張り（Watcher）
 
 経緯は [ADR-0008](decisions/0008-watchers.md)。`src/core/watch/` が Source を知らない共通部分、Source 側は WatchProvider（見張る対象の一覧）と固有の Condition を持つ。
@@ -63,6 +75,7 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 | `tasks` | Task（title / brief / status） |
 | `task_links` | Link。`source_item_id` で一意 |
 | `task_changes` | Task Change。`seen_at` が NULL のものが更新マーク |
+| `task_rule_runs` | ルールを Task に当てた記録。Task・ルールの中身・きっかけごとに一度だけ |
 | `sync_cursors` | Source ごとのカーソル |
 
 ## 設定と秘密情報
@@ -120,7 +133,7 @@ revision が変わった → すぐ確認 / unknown が残る → 延ばさな�
 | UI | React + Vite | |
 | カンバン | dnd-kit | |
 | データストア | SQLite（`@effect/sql-sqlite-node`）+ Drizzle ORM 1.0 rc（`drizzle-orm/effect-sqlite-node`） | ローカル完結。テーブル定義から型を導く。[ADR-0006](decisions/0006-drizzle-on-effect-sql.md) |
-| LLM 抽象 | `effect/ai`（`LanguageModel`）+ `@effect/ai-*` | 複数プロバイダと tool calling を共通 API で扱える。Decisions provider は `effect/http` で自前実装 |
+| LLM 抽象 | `effect/ai`（`LanguageModel`）+ `@effect/ai-*` | 複数プロバイダと tool calling を共通 API で扱える。Decisions provider は `effect/ai` の `DecisionModel`（OpenAI / Azure OpenAI は `@effect/ai-openai`、Microsoft-Decision は `DecisionModel.make` で自前実装） |
 | 秘匿情報 | Electron `safeStorage`（macOS Keychain） | トークンを平文の設定ファイルに置かない |
 | テスト | Vitest + `@effect/vitest`（UI の E2E は必要に応じて Playwright） | |
 | パッケージ管理 | pnpm 12（`packageManager` で固定、corepack で起動） | |

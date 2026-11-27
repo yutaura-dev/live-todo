@@ -33,7 +33,7 @@
 | Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる |
 | 未分類 | どの Epic にも入っていない Task |
 | 更新マーク | 未読の Task Change がある Task に付く目印。Source 側の変化ではなく Task の項目が変わったときだけ付く |
-| Decisions provider | 確率付きの判定 API（Jev / OpenAI Decisions / Gemini Decisions） |
+| Decisions provider | 確率付きの判定 API（OpenAI Decisions / Azure OpenAI Decisions / Microsoft-Decision / Jev / Gemini Decisions） |
 | 要確認 | 判定の確率が閾値の中間、または refusal だった Task の置き場 |
 | SnapshotDiffer | 全件取得の結果を前回の fingerprint と比べて SourceChange に変換する共通処理 |
 | Watcher | 見張りの共通部分。WatchProvider（見張る対象の一覧）と Condition（困った状態か）から Condition Item を作る（[ADR-0008](docs/decisions/0008-watchers.md)） |
@@ -57,7 +57,7 @@
 ## 触れてほしくない領域
 
 - `.env.local` — API キー・トークンの置き場所。読まない、出力しない
-- `drizzle/` — drizzle-kit が生成するマイグレーション。手で編集せず、`src/core/task/schema.ts` を直して `pnpm db:generate` で作り直す
+- `drizzle/` — drizzle-kit が生成するマイグレーション。手で編集せず、`src/core/db/schema.ts` を直して `pnpm db:generate` で作り直す
 - ローカル DB ファイル（場所は実装時に追記）— 実データが入っているため直接編集しない
 
 ## 開発環境
