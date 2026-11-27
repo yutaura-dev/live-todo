@@ -36,7 +36,7 @@ export type Presence = (typeof Presence)[keyof typeof Presence];
 
 type Actor = { kind: "sync" } | { kind: "agent" } | { kind: "user" };
 
-/** 同期: Source から取り込む処理。Watcher が困った状態を事実として届けるのも、同期の一種 */
+/** 同期: Source から取り込む処理。Watcher が、一覧からは分からない状態（conflict しているか など）を確かめて事実として届けるのも、同期の一種 */
 export const actors: Record<string, Actor> = {
   同期: { kind: "sync" },
   AI: { kind: "agent" },
