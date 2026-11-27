@@ -20,6 +20,7 @@ node_modules/
 /mail-eval-results-*.json
 /plan-eval-results-*.json
 /.mail-eval-work/
+/spike/*/data/
 
 .env
 .env*.local
