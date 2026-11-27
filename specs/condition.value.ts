@@ -1,15 +1,16 @@
 /**
  * 待つ条件（何が起きるのを待つか）。条件で果たされる Action Item が持ち、Watcher が確かめる。
  * 何を確かめるか・どんな条件があるかは Source ごとに違うので、各 Source の provider（Adapter・WatchProvider）が決めて実装する（ADR-0008）。ドメインは、どの対象のどの条件を待つかだけを持ち、中身を解釈しない。
- * 困った状態（conflict・CI の失敗・返信が決まった時間ないなど）は、待つ条件ではない。その対象の Source Item の事実の行（「conflict: あり」）として届く。
+ * 待つ条件は、一度起きたら取り消されない出来事で決める（merge された・レビューが付いた・返信が来た）。「CI が通っている」のように、成り立っても崩れうる状態は待つ条件にしない（provider はこれを守る）。
+ * 一覧からは分からない状態（conflict しているか・CI の結果・レビューの状態など）は、待つ条件ではない。対象の Source Item の事実の行（「conflict: あり」）として届き、それが自分に行動を求めるかは、振り分けと Task が判断する。
  */
 export type Condition = {
   /** 何について待つか */
   subject: Subject;
   /** どの条件か。provider が決めた名前（github.merged・github.review_submitted・gmail.reply_received など） */
   name: string;
-  /** いつより後に起きたことを見るか（待ち始めた時刻など）。「待ち始める前のレビューでは済ませない」のように使う。見ない条件では null */
-  since: string | null;
+  /** 待ち始めたより後に起きたことだけを見るか（「待ち始める前のレビューでは済ませない」）。待ち始めた時刻は、Action Item の進み具合が持つ */
+  afterStart: boolean;
   /** 何を待つかの説明（画面に出す。「PR #42 が merge される」など） */
   label: string;
 };
@@ -35,19 +36,19 @@ const pr: Subject = { accountId: "github-work", uri: "github:acme/app/pull/42" }
 
 export const examples = {
   valid: {
-    "merge を待つ": { subject: pr, name: "github.merged", since: null, label: "PR #42 が merge される" },
-    "待ち始めたあとのレビューを待つ": { subject: pr, name: "github.review_submitted", since: "2026-11-28T00:00:00Z", label: "PR #42 にレビューが付く" },
+    "merge を待つ": { subject: pr, name: "github.merged", afterStart: false, label: "PR #42 が merge される" },
+    "待ち始めたあとのレビューを待つ": { subject: pr, name: "github.review_submitted", afterStart: true, label: "PR #42 にレビューが付く" },
     "deploy の PR に入るのを待つ（検索の対象）": {
       subject: { accountId: "github-work", uri: "github:search/acme/deploy?q=is:open+label:release" },
       name: "github.includes_merge_commit",
-      since: null,
+      afterStart: false,
       label: "PR #42 の変更が deploy の PR に入る",
     },
-    "送ったメールに返信が来る": { subject: { accountId: "gmail-private", uri: "gmail:thread/18c2f" }, name: "gmail.reply_received", since: "2026-11-28T00:00:00Z", label: "見積もりの返信が来る" },
+    "送ったメールに返信が来る": { subject: { accountId: "gmail-private", uri: "gmail:thread/18c2f" }, name: "gmail.reply_received", afterStart: true, label: "見積もりの返信が来る" },
   },
   invalid: {
-    "対象の識別子が空": { subject: { accountId: "github-work", uri: "" }, name: "github.merged", since: null, label: "merge される" },
-    "provider のない条件の名前": { subject: pr, name: "merged", since: null, label: "merge される" },
-    "説明がない": { subject: pr, name: "github.merged", since: null, label: " " },
+    "対象の識別子が空": { subject: { accountId: "github-work", uri: "" }, name: "github.merged", afterStart: false, label: "merge される" },
+    "provider のない条件の名前": { subject: pr, name: "merged", afterStart: false, label: "merge される" },
+    "説明がない": { subject: pr, name: "github.merged", afterStart: false, label: " " },
   },
 } satisfies { valid: Record<string, Condition>; invalid: Record<string, Condition> };

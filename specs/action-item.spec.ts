@@ -33,8 +33,8 @@ export type Progress =
   | { type: "none" }
   /** Claude Code にやらせた進み具合 */
   | { type: "claude"; run: Run; report: string | null }
-  /** 待つ条件を確かめた結果 */
-  | { type: "condition"; observed: "まだ" | "成り立った" | "達成できない" }
+  /** 待つ条件を確かめた結果と、待ち始めた時刻 */
+  | { type: "condition"; observed: "まだ" | "成り立った" | "達成できない"; waitingSince: string }
   /** 分かれ道で選んだか（何を選んだか・選び直した履歴は、Task の計画の枝に残る） */
   | { type: "decision"; chosen: "まだ" | "選んだ" };
 
@@ -65,7 +65,7 @@ export const actors: Record<string, Actor> = {
 function progressFor(definition: ActionDefinition): Progress {
   if (definition.how.type === "claude") return { type: "claude", run: "なし", report: null };
   if (definition.how.type === "decision") return { type: "decision", chosen: "まだ" };
-  if (definition.how.type === "condition") return { type: "condition", observed: "まだ" };
+  if (definition.how.type === "condition") return { type: "condition", observed: "まだ", waitingSince: "2026-11-28T00:00:00Z" };
   return { type: "none" };
 }
 
@@ -98,7 +98,7 @@ export const inputs = {
     人がやる: [{ title: "年末調整の書類を出す", effort: "normal", completes: false, how: { type: "human", place: null } }],
     頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null } }],
     自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null } }],
-    条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, name: "github.merged", since: null, label: "PR #42 が merge される" } } }],
+    条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, name: "github.merged", afterStart: false, label: "PR #42 が merge される" } } }],
     承認で果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "approval", approvalId: "ap1" } }],
     分かれ道: [decision],
   },
@@ -127,6 +127,7 @@ export function complete(item: ActionItem, actor: Actor, turn: Turn): ActionItem
  * 待つ条件を確かめた結果が出る（Watcher が見つける）
  *
  * 番が来ていなくても、成り立ったことは持っておく（番が来たときに果たすため）。見張る対象が消えて、もう成り立ちようがなければ「達成できない」にする。
+ * 確かめても分からないときは、結果を出さない（「達成できない」にもしない）。
  */
 export function observeCondition(item: ActionItem, actor: Actor, verdict: "成り立った" | "達成できない"): ActionItem {
   ensure(actor.kind === "sync", "同期だけ");
@@ -148,7 +149,7 @@ export function finishByCondition(item: ActionItem, actor: Actor, turn: Turn): A
   return { ...item, status: "done" };
 }
 
-/** 待つ対象がまた現れたので、達成できないを取り消して、また待つ */
+/** 待つ対象がまた現れた（ユーザーが確かめて戻した・関わっている対象の一覧にまた載った）ので、達成できないを取り消して、また待つ */
 export function resetCondition(item: ActionItem, actor: Actor): ActionItem {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(item.status === "todo", "まだのときだけ");
@@ -292,10 +293,15 @@ export const links = [
   { from: rechoose, to: "task", action: "addPendingCriteria", label: "新しく選んだ選択肢の先を差し込む" },
   { from: request, to: "task", action: "startWork", label: "AI が作業中になる" },
   { from: observeCondition, to: "action-item", action: "finishByCondition", label: "成り立ったとき番が来ていれば、すぐ果たす" },
+  { from: observeCondition, to: "watch-target", action: "removeWaiter", label: "結果が出たら（成り立った・達成できない）、その対象を待つのをやめる" },
   { from: observeCondition, to: "task", label: "達成できなくなったら、Task が受け取る（AI が計画を立て直すか、ユーザーに知らせる）" },
   { from: complete, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
-  { from: finishByCondition, to: "watch-target", action: "removeWaiter", label: "待つ条件で果たされたら、その対象を待つのをやめる" },
-  { from: skip, to: "watch-target", action: "removeWaiter", label: "待つ条件の Action Item をやらなくなったら、その対象を待つのをやめる" },
+  { from: succeed, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: completeByApproval, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: finishByCondition, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: choose, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: skip, to: "watch-target", action: "removeWaiter", label: "待つ条件の Action Item をやらなくなったら、その対象を待つのをやめる（まだ待っていたなら）" },
+  { from: resetCondition, to: "watch-target", action: "addWaiter", label: "また待つので、その対象を待つ" },
   { to: "watch-target", action: "addWaiter", label: "待つ条件の Action Item を作ったら、その対象を待つ（見張っていなければ見張りを始める）" },
   { from: autoStart, to: "task", action: "startWork", label: "AI が作業中になる" },
 ];
