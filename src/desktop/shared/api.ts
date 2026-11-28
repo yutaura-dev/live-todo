@@ -20,6 +20,21 @@ export const FactView = Schema.Struct({
 });
 export type FactView = typeof FactView.Type;
 
+/** 計画の 1 行（木を、字下げ付きの行の並びにして見せる） */
+export const PlanRow = Schema.Struct({
+  kind: Schema.Literals(["item", "decision", "branch", "group"]),
+  id: Schema.String,
+  title: Schema.String,
+  depth: Schema.Number,
+  turn: Schema.NullOr(Schema.Literals(["番が来ている", "番待ち", "済んだ", "やらない"])),
+  completes: Schema.Boolean,
+  how: Schema.NullOr(Schema.Literals(["human", "claude", "condition", "write", "decision"])),
+  options: Schema.Array(Schema.String),
+  chosen: Schema.NullOr(Schema.Number),
+  added: Schema.Boolean,
+});
+export type PlanRow = typeof PlanRow.Type;
+
 /** 見せる優先度（いまのラベルと、どう決まったか。まだ決め始めていなければ status は未判定） */
 export const PriorityView = Schema.Struct({ status: PrioritizationStatus, level: Schema.NullOr(PriorityLevel), reason: Schema.NullOr(Schema.String) });
 export type PriorityView = typeof PriorityView.Type;
@@ -47,6 +62,7 @@ export const TaskView = Schema.Struct({
   mark: Mark,
   priority: PriorityView,
   facts: Schema.Array(FactView),
+  plan: Schema.NullOr(Schema.Array(PlanRow)),
   history: Schema.Array(TaskActivity),
   createdAt: Schema.String,
 });
@@ -65,6 +81,16 @@ export const Command = Schema.Union([
   Schema.TaggedStruct("ViewTask", { id: Id }),
   Schema.TaggedStruct("SetPriority", { id: Id, level: PriorityLevel }),
   Schema.TaggedStruct("ClearPriority", { id: Id }),
+  Schema.TaggedStruct("RevisePlan", { id: Id }),
+  Schema.TaggedStruct("PlanAction", {
+    id: Id,
+    action: Schema.Union([
+      Schema.TaggedStruct("CompleteItem", { itemId: Id }),
+      Schema.TaggedStruct("ReopenItem", { itemId: Id }),
+      Schema.TaggedStruct("SkipItem", { itemId: Id }),
+      Schema.TaggedStruct("ChooseOption", { itemId: Id, option: Schema.Number }),
+    ]),
+  }),
 ]);
 export type Command = typeof Command.Type;
 

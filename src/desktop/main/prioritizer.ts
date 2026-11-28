@@ -12,7 +12,8 @@ import {
   start,
   stop,
 } from "../../domain/priority/prioritization.js";
-import { daysUntil, ruleLevel, type RuleResult } from "../../domain/priority/rule.js";
+import { daysUntil, effortDays, ruleLevel, type RuleResult } from "../../domain/priority/rule.js";
+import { itemsOf } from "../../domain/plan/plan.js";
 import { notePriority, type Task } from "../../domain/task/task.js";
 import { PrioritizationStore } from "../../store/prioritization-store.js";
 import { AiServices } from "./ai/ai-services.js";
@@ -58,7 +59,15 @@ export class Prioritizer extends Context.Service<
       const calendar = yield* Calendar;
       const ai = yield* AiServices;
 
-      const basisOf = (task: Task, today: string) => JSON.stringify({ due: task.due?.earliest ?? null, blocksOthers: task.blocksOthers, today });
+      /** まだの Action Item の手間の合計と、期日のいちばん早いもの（Task の期日と Action Item の期日）。分かれ道と待つ条件は手間を数えない */
+      const workOf = (task: Task) => {
+        const remaining = task.plan === null ? [] : itemsOf(task.plan, { activeOnly: true }).filter((item) => item.status === "まだ");
+        const effort = remaining.filter((item) => item.definition.how.type !== "decision" && item.definition.how.type !== "condition").reduce((sum, item) => sum + effortDays(item.definition.effort), 0);
+        const dues = [task.due?.earliest, ...remaining.map((item) => item.definition.due?.earliest)].filter((due): due is string => due !== undefined);
+        return { effort, earliest: dues.length === 0 ? null : dues.reduce((a, b) => (a < b ? a : b)) };
+      };
+
+      const basisOf = (task: Task, today: string) => JSON.stringify({ ...workOf(task), blocksOthers: task.blocksOthers, today });
 
       const askDecisions = (p: Prioritization, rule: RuleResult, task: Task, today: string) =>
         Effect.gen(function* () {
@@ -78,9 +87,11 @@ export class Prioritizer extends Context.Service<
       const decide = (p: Prioritization, task: Task, today: string) =>
         Effect.gen(function* () {
           if (!canDecide(p)) return p;
-          const days = task.due === null ? null : daysUntil(today, task.due.earliest, calendar.timeZone);
-          const rule = ruleLevel({ 期日まで: days ?? "期日なし", 手間: 0, 待ち: 0, 他の人を止めている: task.blocksOthers });
-          if (isLevel(rule)) return yield* decideByRule(p, sync, rule, days !== null && days < 0 ? "期日を過ぎている" : `期日まで ${days} 日`);
+          const work = workOf(task);
+          const days = work.earliest === null ? null : daysUntil(today, work.earliest, calendar.timeZone);
+          const rule = ruleLevel({ 期日まで: days ?? "期日なし", 手間: work.effort, 待ち: 0, 他の人を止めている: task.blocksOthers });
+          const reason = days !== null && days < 0 ? "期日を過ぎている" : work.effort > 0 ? `期日まで ${days} 日で、手間が ${work.effort} 日` : `期日まで ${days} 日`;
+          if (isLevel(rule)) return yield* decideByRule(p, sync, rule, reason);
           return yield* askDecisions(p, rule, task, today);
         });
 

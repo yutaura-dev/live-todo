@@ -15,10 +15,12 @@ import { proposals, routings } from "../ingest/router.js";
 import { Calendar, Prioritizer } from "../prioritizer.js";
 import { sequentialIds } from "../task-service.js";
 import { ProposalService } from "./proposal-service.js";
+import { Planner } from "../plan/planner.js";
 
 const stores = Layer.mergeAll(TaskStore.layer, PrioritizationStore.layer, SourceItemStore.layer, DocumentStore.layer).pipe(Layer.provideMerge(StoreDatabase.layer({ filename: ":memory:" })));
 const prioritizer = Prioritizer.layer.pipe(Layer.provide(AiServices.fromContext), Layer.provide(Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" })));
-const layer = ProposalService.layer.pipe(Layer.provideMerge(Layer.mergeAll(prioritizer, sequentialIds("t")).pipe(Layer.provideMerge(stores))));
+const core = Layer.mergeAll(prioritizer, sequentialIds("t"), AiServices.fromContext).pipe(Layer.provideMerge(stores));
+const layer = ProposalService.layer.pipe(Layer.provideMerge(Layer.mergeAll(core, Planner.layer.pipe(Layer.provide(core)))));
 
 const seed = (kind: "新しい Task" | "既存の Task に足す") =>
   Effect.gen(function* () {

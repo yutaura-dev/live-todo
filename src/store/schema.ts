@@ -16,6 +16,10 @@ export const tasks = sqliteTable("tasks", {
   blocksOthers: integer("blocks_others", { mode: "boolean" }).notNull(),
   /** この Task についての事実の ID（JSON の配列） */
   sourceItemIds: text("source_item_ids").notNull().default("[]"),
+  /** 計画（JSON。まだ立てていなければ null） */
+  plan: text("plan"),
+  /** 立て直す前の計画（JSON の配列） */
+  previousPlans: text("previous_plans").notNull().default("[]"),
   lastSeenAt: text("last_seen_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),

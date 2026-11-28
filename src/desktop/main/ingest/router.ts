@@ -2,7 +2,8 @@ import { Context, Effect, Layer, Option, Schema } from "effect";
 import { TaskProposal, propose } from "../../../domain/proposal/task-proposal.js";
 import { createTask, linkTo, placeWork, Routing, route, startRouting } from "../../../domain/routing/routing.js";
 import type { SourceItem } from "../../../domain/source-item/source-item.js";
-import { attachFact, create, type Task } from "../../../domain/task/task.js";
+import { attachFact, create, noteProgress, type Task } from "../../../domain/task/task.js";
+import { appendItem } from "../../../domain/plan/plan.js";
 import type { DecisionResult } from "../../../llm/decision/decisions.js";
 import {
   factBelongsToTaskQuestion,
@@ -31,6 +32,8 @@ const sync = { kind: "sync" } as const;
 /** 振り分けで決めたこと（AI を呼び終えてから、まとめて書く） */
 type Plan = {
   links: Task[];
+  /** 紐づけた Task の計画で受ける作業（判定 2 で「計画に足す」） */
+  add: Array<{ taskId: string; work: Work }>;
   create: Array<{ title: string; brief: string; due: Work["due"] }>;
   propose: Array<{ kind: "新しい Task" | "既存の Task に足す"; title: string; brief: string; targetTaskId: string | null }>;
   undecided: boolean;
@@ -45,7 +48,7 @@ const summaryOf = (records: ReadonlyArray<CallRecord>) =>
     })
     .join("・");
 
-export type RouteResult = { status: Routing["status"]; changedTaskIds: ReadonlyArray<string> };
+export type RouteResult = { status: Routing["status"]; changedTaskIds: ReadonlyArray<string>; createdTaskIds: ReadonlyArray<string> };
 
 /**
  * 届いた事実を振り分ける（routing.spec の判断表 1〜3）。開いている Task には緩めに紐づけ、作業は既存の Task で受ける方に倒し、迷ったら提案にする（ADR-0025）。
@@ -68,7 +71,7 @@ export class Router extends Context.Service<Router, { route(item: SourceItem): E
           if (Option.isNone(decisionsOption) || Option.isNone(generationOption)) return null;
           const decisions = decisionsOption.value;
           const generation = generationOption.value;
-          const plan: Plan = { links: [], create: [], propose: [], undecided: false, records: [] };
+          const plan: Plan = { links: [], add: [], create: [], propose: [], undecided: false, records: [] };
           const noted = <D extends Record<string, never>>(result: DecisionResult<D> | { record: CallRecord }) => {
             plan.records.push(result.record);
             return result;
@@ -109,7 +112,10 @@ export class Router extends Context.Service<Router, { route(item: SourceItem): E
                 寄せ先の完了条件: task.completion === "未定" ? "未定" : "決まっている",
                 完了したあとも残るかの確率: routingBand(workOutlivesTaskQuestion, outlives.answers.outlives),
               });
-              if (placement === "計画に足す") placed = true;
+              if (placement === "計画に足す") {
+                plan.add.push({ taskId: task.id, work });
+                placed = true;
+              }
               if (placement === "判断できなかった") plan.undecided = true;
               if (placement === "足す提案にする") {
                 const reason = yield* generation.write(proposalReasonWriting, { kind: "計画に足す", work, facts: [fact], target: taskMaterialOf(task) });
@@ -144,9 +150,17 @@ export class Router extends Context.Service<Router, { route(item: SourceItem): E
       const apply = (item: SourceItem, routing: Routing, plan: Plan) =>
         Effect.gen(function* () {
           const changed: string[] = [];
+          const created: string[] = [];
           const judgment = summaryOf(plan.records);
           for (const task of plan.links) {
-            yield* tasks.save(yield* Effect.orDie(attachFact(task, agent, item.id)));
+            let next = yield* Effect.orDie(attachFact(task, agent, item.id));
+            // 事実が求める作業を、その Task の計画の最後に足す（どの事実から足したかを持つ。足したことは出来事に残り、更新マークになる）
+            for (const { work } of plan.add.filter((entry) => entry.taskId === task.id)) {
+              if (next.plan === null) continue;
+              const added = appendItem(next.plan, { id: yield* ids.next, status: "まだ", definition: { title: work.title, effort: "normal", due: work.due, completes: false, how: { type: "human" } }, addedFrom: item.id, chosen: null });
+              next = yield* Effect.orDie(noteProgress(next, agent, added, item.id));
+            }
+            yield* tasks.save(next);
             changed.push(task.id);
           }
           for (const draft of plan.create) {
@@ -155,6 +169,7 @@ export class Router extends Context.Service<Router, { route(item: SourceItem): E
             yield* tasks.save(task);
             yield* tasks.save(yield* prioritizer.refresh(task));
             changed.push(task.id);
+            created.push(task.id);
           }
           for (const proposal of plan.propose) {
             yield* proposals.save(yield* Effect.orDie(propose({ id: yield* ids.next, ...proposal, sourceItemId: item.id, judgment }, agent)));
@@ -171,7 +186,7 @@ export class Router extends Context.Service<Router, { route(item: SourceItem): E
                     : "対象外";
           const next = yield* Effect.orDie(route(routing, agent, outcome, judgment));
           yield* routings.save({ ...next, id: item.id });
-          return { status: next.status, changedTaskIds: changed };
+          return { status: next.status, changedTaskIds: changed, createdTaskIds: created };
         });
 
       const routeItem = (item: SourceItem) =>
@@ -179,10 +194,10 @@ export class Router extends Context.Service<Router, { route(item: SourceItem): E
           const found = yield* routings.find(item.id);
           const routing = Option.isSome(found) ? found.value : yield* Effect.orDie(startRouting(item.id, sync));
           if (Option.isNone(found)) yield* routings.save({ ...routing, id: item.id });
-          if (routing.status !== "未振り分け") return { status: routing.status, changedTaskIds: [] } as RouteResult;
+          if (routing.status !== "未振り分け") return { status: routing.status, changedTaskIds: [], createdTaskIds: [] } as RouteResult;
           const open = (yield* tasks.listForBoard()).filter((task) => task.status === "やること");
           const plan = yield* decide(item, open).pipe(Effect.catchTag("AiUnreachableError", () => Effect.succeed(null)));
-          if (plan === null) return { status: "未振り分け", changedTaskIds: [] } as RouteResult;
+          if (plan === null) return { status: "未振り分け", changedTaskIds: [], createdTaskIds: [] } as RouteResult;
           return yield* apply(item, routing, plan);
         });
 

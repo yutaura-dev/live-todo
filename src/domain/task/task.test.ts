@@ -3,7 +3,8 @@ import { specOf } from "@yutaura/live-spec/testing";
 import { DateTime, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
-import { attachFact, complete, create, defineCompletionByHand, detachFact, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
+import { fromDrafts } from "../plan/plan.js";
+import { attachFact, complete, create, noteProgress, receive, revisePlan, defineCompletionByHand, detachFact, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
 const user = { kind: "user" } as const;
@@ -307,5 +308,80 @@ describe(specOf(Spec.detachFact), () => {
   it.effect(specOf(Spec.detachFact, "ユーザーだけ"), () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* denied(detachFact(yield* attachFact(yield* byHand(), ai, "s1"), ai, "s1")), "ユーザーだけ");
+    }));
+});
+
+const twoStepPlan = () =>
+  fromDrafts(
+    { type: "serial", items: [{ title: "読む", effort: "easy", due: null, completes: false, how: { type: "human" } }, { title: "返事する", effort: "easy", due: null, completes: true, how: { type: "human" } }] },
+    (() => {
+      let i = 0;
+      return () => `a${++i}`;
+    })(),
+  ).plan;
+
+describe(specOf(Spec.revisePlan), () => {
+  it.effect("計画を立てると、完了条件は計画から導いて「まだ」になり、計画が変わったことを出来事に残す", () =>
+    Effect.gen(function* () {
+      const task = yield* revisePlan(yield* byHand(), ai, twoStepPlan());
+      assert.strictEqual(task.completion, "まだ");
+      assert.deepStrictEqual(task.history.at(-1)?.changes.map((c) => c.field), ["計画", "完了条件"]);
+    }));
+
+  it.effect("立て直すと、前の計画は残しておく（今の完了条件には数えない）", () =>
+    Effect.gen(function* () {
+      const once = yield* revisePlan(yield* byHand(), ai, twoStepPlan());
+      const twice = yield* revisePlan(once, ai, twoStepPlan());
+      assert.strictEqual(twice.previousPlans.length, 1);
+    }));
+
+  it.effect(specOf(Spec.revisePlan, "AI だけ"), () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* denied(revisePlan(yield* byHand(), user, twoStepPlan())), "AI だけ");
+    }));
+
+  it.effect(specOf(Spec.revisePlan, "やること のときだけ"), () =>
+    Effect.gen(function* () {
+      const gone = yield* dismiss(yield* byHand(), user, "自分で片付けた", "頼んだものはない");
+      assert.strictEqual(yield* denied(revisePlan(gone, ai, twoStepPlan())), "やること のときだけ");
+    }));
+});
+
+describe(specOf(Spec.noteProgress), () => {
+  it.effect("Action Item が進んだことを、どれが進んだかと一緒に残し、完了条件を導き直す", () =>
+    Effect.gen(function* () {
+      const planned = yield* revisePlan(yield* byHand(), ai, twoStepPlan());
+      const plan = planned.plan!;
+      const done = { ...plan, nodes: plan.nodes.map((node) => (node.type === "item" ? { ...node, item: { ...node.item, status: "済んだ" as const } } : node)) };
+      const task = yield* noteProgress(planned, user, done, "a2");
+      assert.strictEqual(task.completion, "満たした");
+      assert.deepStrictEqual(task.history.at(-1)?.changes[0], { field: "Action Item の進み", before: null, after: null, target: "a2" });
+    }));
+});
+
+describe(specOf(Spec.receive), () => {
+  it.effect("届いたものを Task の言葉に置き換え、どの入力から来たかと一緒に残す", () =>
+    Effect.gen(function* () {
+      const task = yield* receive(yield* byHand(), ai, "事実", { brief: "PR が merge された。確かめて閉じる" }, "activity:s1:3");
+      assert.deepStrictEqual(task.history.at(-1), {
+        kind: "変わった",
+        by: "AI",
+        occurredAt: "2026-11-28T09:00:00.000Z",
+        changes: [{ field: "今の状況と次の一手", before: null, after: "PR が merge された。確かめて閉じる", target: null }],
+        cause: "activity:s1:3",
+      });
+    }));
+
+  it.effect("同じ入力が 2 度届いても、反映は 1 回にする", () =>
+    Effect.gen(function* () {
+      const once = yield* receive(yield* byHand(), ai, "事実", { brief: "a" }, "activity:s1:3");
+      const twice = yield* receive(once, ai, "事実", { brief: "b" }, "activity:s1:3");
+      assert.strictEqual(twice.brief, "a");
+    }));
+
+  it.effect(specOf(Spec.receive, "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ"), () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* denied(receive(yield* byHand(), app, "事実", { brief: "a" }, "c")), "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ");
+      assert.strictEqual(yield* denied(receive(yield* byHand(), ai, "書き込めなかった", { brief: "a" }, "c")), "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ");
     }));
 });

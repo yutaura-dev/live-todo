@@ -18,6 +18,7 @@ const view = (card: BoardCard): TaskView => ({
   mark: card.mark,
   priority: card.priority,
   facts: [],
+  plan: card.id === "t1" ? planRows : null,
   history: [{ kind: "できた", by: "ユーザー", occurredAt: "2026-11-28T09:00:00.000Z", changes: [], cause: "手で足した" }],
   createdAt: "2026-11-28T09:00:00.000Z",
 });
@@ -36,6 +37,11 @@ const settingsWith = (status: AiSettingsView["status"], problem: AiSettingsView[
     agent: { selected: status === "初期設定中" ? null : "claude-code", options: options.agent },
   },
 });
+
+const planRows: NonNullable<TaskView["plan"]> = [
+  { kind: "item", id: "a1", title: "PR を読む", depth: 0, turn: "番が来ている", completes: false, how: "human", options: [], chosen: null, added: false },
+  { kind: "decision", id: "a2", title: "merge するか", depth: 0, turn: "番待ち", completes: false, how: "decision", options: ["merge する", "調べる"], chosen: null, added: true },
+];
 
 const emptyInbox: InboxView = { proposals: [], undecided: [], accounts: [] };
 
@@ -264,5 +270,38 @@ describe("アカウント", () => {
     assert.isNotNull(screen.getByText(/LIVE_TODO_SECRET_GITHUB_WORK_TOKEN/));
     fireEvent.click(screen.getByRole("button", { name: "足してつなぐ" }));
     await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "AddGitHubAccount", key: "work", label: "会社の GitHub" }]));
+  });
+});
+describe("計画", () => {
+  const openFirst = async (api: LiveTodoApi) => {
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /請求書を送る/ }));
+    return screen.findByRole("region", { name: "計画" });
+  };
+
+  it("番が来ている Action Item だけに「済んだ」を出し、押すと済ませるよう送る", async () => {
+    const { api, sent } = fakeApi(cards);
+    const plan = await openFirst(api);
+    const buttons = within(plan).getAllByRole("button", { name: "済んだ" });
+    assert.strictEqual(buttons.length, 1);
+    fireEvent.click(buttons[0]!);
+    await waitFor(() => assert.deepStrictEqual(sent.at(-1), { _tag: "PlanAction", id: "t1", action: { _tag: "CompleteItem", itemId: "a1" } }));
+  });
+
+  it("番待ちの分かれ道は、選択肢を見せるが選べない", async () => {
+    const plan = await openFirst(fakeApi(cards).api);
+    assert.isTrue((within(plan).getByRole("button", { name: "merge する" }) as HTMLButtonElement).disabled);
+  });
+
+  it("事実から足した Action Item には印を付ける", async () => {
+    const plan = await openFirst(fakeApi(cards).api);
+    assert.isNotNull(within(plan).getByText("事実から足した"));
+  });
+
+  it("計画を立て直すよう頼める", async () => {
+    const { api, sent } = fakeApi(cards);
+    const plan = await openFirst(api);
+    fireEvent.click(within(plan).getByRole("button", { name: "計画を立て直す" }));
+    await waitFor(() => assert.deepStrictEqual(sent.at(-1), { _tag: "RevisePlan", id: "t1" }));
   });
 });

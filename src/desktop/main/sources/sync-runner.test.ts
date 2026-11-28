@@ -11,6 +11,7 @@ import { Ingestor, type ObservedChange } from "../ingest/ingestor.js";
 import { Router, routings } from "../ingest/router.js";
 import { Calendar, Prioritizer } from "../prioritizer.js";
 import { sequentialIds } from "../task-service.js";
+import { Planner } from "../plan/planner.js";
 import { AccountService, accounts, githubSecretOf } from "./account-service.js";
 import { SourceFetchError, SourceGateway } from "./gateway.js";
 import { backoffAfter, SyncRunner, syncs } from "./sync-runner.js";
@@ -31,7 +32,8 @@ function layerWith(fetch: () => Effect.Effect<{ changes: ReadonlyArray<ObservedC
   const gateway = Layer.succeed(SourceGateway, SourceGateway.of({ githubViewer: () => Effect.succeed(viewer), fetch: () => fetch() }));
   const ai = AiServices.fromContext;
   const prioritizer = Prioritizer.layer.pipe(Layer.provideMerge(ai), Layer.provide(Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" })));
-  const deps = Layer.mergeAll(prioritizer, sequentialIds("x"), gateway).pipe(Layer.provideMerge(stores));
+  const core = Layer.mergeAll(prioritizer, sequentialIds("x"), gateway).pipe(Layer.provideMerge(stores));
+  const deps = Layer.mergeAll(core, Planner.layer.pipe(Layer.provide(core)));
   const router = Router.layer.pipe(Layer.provideMerge(deps));
   const ingestor = Ingestor.layer.pipe(Layer.provide(deps));
   return Layer.mergeAll(SyncRunner.layer.pipe(Layer.provide(Layer.mergeAll(router, ingestor))), AccountService.layer.pipe(Layer.provide(deps))).pipe(Layer.provideMerge(router));
