@@ -76,7 +76,7 @@ export const Stage = {
 } as const;
 export type Stage = (typeof Stage)[keyof typeof Stage];
 
-/** 書き込める状態か（provider が決める。merge なら CI がすべて通っていて conflict がない など） */
+/** 書き込める状態か（provider が決める。merge なら CI がすべて通っていて conflict がない など）。書き込み先のアカウントがつないでいないなら、書き込めない */
 type Ready = "書き込める" | "書き込めない";
 
 /** 頼むときに確かめること。Action Item・Task の状態は、それぞれの集約が持つ */
