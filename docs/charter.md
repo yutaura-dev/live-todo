@@ -1,6 +1,6 @@
 > **Stability**: 🪨 stable
 > **最終更新**: 2026-11-28
-> **直近の変更 ADR**: [ADR-0023](decisions/0023-autonomy-policy.md)
+> **直近の変更 ADR**: [ADR-0024](decisions/0024-put-epic-on-hold.md)
 
 # Charter — live-todo
 
@@ -28,7 +28,7 @@
 - 次の Source から、自分の todo になるものを自動で取得する: Slack / Gmail / GitHub / Google Calendar / Google Docs / Notion / Outlook（Mail・Calendar）/ Teams
 - 取得したものにラベルと優先度を付け、「今やるべきこと」を示す
 - ユーザーが定義したルールで、カスタムラベルを付ける
-- Task を Epic → Task の 2 段で管理する。Epic は自動で作り、Task を振り分ける
+- Task を Epic → Task の 2 段で管理する。Epic は自動で作り、Task を振り分ける（保留中。[ADR-0024](decisions/0024-put-epic-on-hold.md)）
 - ポーリングで Source の状況変化を検知し、Task を自動で更新する
 - 自分が関わるものを見張り、通知が来ない困った状態（PR の conflict など）や、何も起きないこと（返信待ちなど）を Task にする
 - GitHub Projects のようなカンバン UI で Task を管理する。手動での Task 追加もできる

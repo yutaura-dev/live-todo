@@ -1,6 +1,6 @@
 > **Stability**: 🌊 living
-> **最終更新**: 2026-11-27
-> **直近の変更 ADR**: [ADR-0019](decisions/0019-task-first-model.md)
+> **最終更新**: 2026-11-28
+> **直近の変更 ADR**: [ADR-0024](decisions/0024-put-epic-on-hold.md)
 
 # Architecture — live-todo
 
@@ -26,14 +26,29 @@ macOS 向けの Electron アプリ。main プロセスがポーリングして S
 
 ## ドメインモデル
 
-経緯は [ADR-0007](decisions/0007-separate-source-items-from-tasks.md)。
+振る舞いの正本は `specs/*.spec.ts`（ADR-0015）。経緯は [ADR-0007](decisions/0007-separate-source-items-from-tasks.md)・[ADR-0019](decisions/0019-task-first-model.md)・[ADR-0021](decisions/0021-task-activity.md)。
 
 ```
-Source Item ──(Link: tracks / context)──▶ Task
-  └ Activity（出来事）  ── 解釈 ──▶  └ Task Change（更新マーク）
+Source Item ──（Task の事実。つながりに役割の区別はない）──▶ Task
+  └ Activity（出来事） ── Task Input ── receive ──▶ └ Task Activity（更新マーク・新着は、ここから導く）
 ```
 
-同期の流れ（`src/core/sync/sync-source.ts`）:
+### spec と今の実装の違い（実装を spec に合わせるときに直す）
+
+この節より下の「同期の流れ」・テーブル・設定は、今の実装（`src/`）をそのまま書いている。spec とは次の点が違う。
+
+| spec | 今の実装 |
+|------|------|
+| Task の事実のつながりに役割の区別はない。Task がいつ終わるかは計画の完了条件（Action Item）で決める | `task_links` の tracks / context。tracks の Item の状態から Task の status を導く |
+| 1 つの Source Item は複数の Task の事実になれる（AI が振り分けるのは 1 つ目だけ） | `task_links` は `source_item_id` で一意 |
+| Task に起きた出来事は Task Activity。更新マーク・新着は、履歴と最後に見た時刻から導いて保存しない | `task_changes` の `seen_at` が NULL のものが更新マーク |
+| AI の設定は AI Settings（PC に 1 つ）で、使い道ごとに Decisions・Generation・Agent を持つ。Decisions が迷ったら要確認にし、別の AI に上げない（ADR-0022） | アカウントごとの LLM Profile。Decisions がなければ structured output で判定する |
+| AI が作業中かは Agent Run（Agent Thread）の段階で決まる | Task の `agent_running` |
+| 優先度は「いつまでに手を付けるとよいか」の 6 ラベルで、期日・手間・待つ見込みから決める | 優先度はまだない |
+| Epic は保留（ADR-0024） | ADR-0004 の Epic・未分類のまとまりの判定 |
+| 自動でやってよい範囲（ADR-0023）・Completion Effect・定期の Task の回（予定日） | まだない（定期の Task は毎月だけで、最後に作った月で数える） |
+
+同期の流れ（`src/core/sync/sync-source.ts`。今の実装）:
 
 1. Adapter から SourceChange を取得し、triage が pending の Item を判定する（トランザクションの外）
 2. Source Item を保存し、前回との差から Activity を記録する
@@ -166,7 +181,7 @@ devShell には Node.js 24 と corepack を入れている。pnpm は nixpkgs �
 - [ADR-0001: アーキテクチャ判断記録方式の採用](decisions/0001-record-architecture-decisions.md)
 - [ADR-0002: アプリ基盤に Electron + TypeScript を採用する](decisions/0002-desktop-app-stack.md)
 - [ADR-0003: 同期と判定のパイプライン](decisions/0003-sync-and-judge-pipeline.md)
-- [ADR-0004: Epic とカスタムラベルを導入する](decisions/0004-epic-and-custom-labels.md)
+- [ADR-0004: Epic とカスタムラベルを導入する](decisions/0004-epic-and-custom-labels.md)（Epic は [ADR-0024](decisions/0024-put-epic-on-hold.md) で保留）
 - [ADR-0005: 実装の基盤に Effect を採用する](decisions/0005-adopt-effect.md)
 - [ADR-0006: DB アクセスに Drizzle ORM（Effect 版）を使う](decisions/0006-drizzle-on-effect-sql.md)
 - [ADR-0007: Source Item と Task を別の概念として分ける](decisions/0007-separate-source-items-from-tasks.md)
