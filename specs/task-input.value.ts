@@ -24,6 +24,8 @@ export const TaskInputKind = {
   writeFailed: "書き込めなかった",
   /** Agent の作業の成果（調べた結果・下書き など） */
   agentResult: "AI の作業の成果",
+  /** 待つ条件が達成できなくなった（PR が閉じられた・アカウントを外した など。Generation が計画を立て直すか、ユーザーに知らせる） */
+  conditionFailed: "待つ条件が達成できない",
 } as const;
 export type TaskInputKind = (typeof TaskInputKind)[keyof typeof TaskInputKind];
 

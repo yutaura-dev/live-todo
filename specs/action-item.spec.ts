@@ -292,7 +292,7 @@ export const links = [
   { from: request, to: "agent-thread", label: "Claude Code に、この Action Item をやる作業を頼む（作業を始めたら、Task が AI の作業中になる）" },
   { from: observeCondition, to: "action-item", action: "finishByCondition", label: "成り立ったとき番が来ていれば、すぐ果たす" },
   { from: observeCondition, to: "watch-target", action: "removeWaiter", label: "結果が出たら（成り立った・達成できない）、その対象を待つのをやめる" },
-  { from: observeCondition, to: "task", label: "達成できなくなったら、Task が受け取る（AI が計画を立て直すか、ユーザーに知らせる）" },
+  { from: observeCondition, to: "task", action: "receive", label: "達成できなくなったら、「待つ条件が達成できない」として Task が受け取る（Generation が計画を立て直すか、ユーザーに知らせる）" },
   { from: complete, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
   { from: complete, to: "action-item", action: "autoStart", label: "次の Action Item に番が来て、自動でやる Action Item なら、Claude Code に頼む" },
   { from: complete, to: "action-item", action: "autoRequestWrite", label: "次の Action Item に番が来て、自動でやる書き込みの Action Item なら、書き込みを頼む" },

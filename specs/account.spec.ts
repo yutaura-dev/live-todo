@@ -126,12 +126,12 @@ export const links = [
   { from: connect, to: "sync", label: "つないだら、取り込む種類ごとに取り込みを始める（初めて）・止めていた取り込みを再開する（resume）・外していた取り込みを続きから始める（restart）" },
   { from: remove, to: "sync", action: "end", label: "このアカウントの取り込みを止める（カーソルは残す）" },
   { from: changeScope, to: "sync", action: "rescope", label: "取り込む範囲を広げたら、初めの取り込みからやり直す（新しい範囲の、前から開いているものを取り込む）" },
-  { from: remove, to: "watch-target", label: "このアカウントの見張りをやめる" },
-  { from: restore, to: "watch-target", label: "つなぎ直したら、このアカウントの見張りを続きから始める" },
-  { from: reject, to: "watch-target", label: "つなぎ直すまで、このアカウントの見張りを止める" },
+  { from: remove, to: "watch-target", action: "drop", label: "このアカウントの見張りをやめる（待っている Action Item は達成できない）" },
+  { from: connect, to: "watch-target", action: "resume", label: "つないだら、止めていたこのアカウントの見張りを続きから始める" },
+  { from: reject, to: "watch-target", action: "pause", label: "つなぎ直すまで、このアカウントの見張りを止める" },
   { from: changeScope, to: "source-item", action: "remove", label: "範囲から外れた Source Item は、範囲の外になったとして消す" },
   { from: remove, to: "write", action: "withdraw", label: "このアカウントへの、確認中の書き込みを取りやめる" },
-  { from: remove, to: "write", label: "このアカウントへの、書き込み中・書けたか分からない書き込みは、外を確かめられないので失敗にする（理由: アカウントを外した）" },
+  { from: remove, to: "write", action: "abandon", label: "このアカウントへの、書き込み中・書けたか分からない書き込みは、外を確かめられないので失敗にする（理由: アカウントを外した）" },
   { from: reject, to: "write", label: "このアカウントへの、確認中の書き込みは残す。つなぎ直すまで承認だけできない（書き込める状態でないので）。つなぎ直したら、見せた版のままなら承認できる" },
 ];
 

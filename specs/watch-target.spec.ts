@@ -22,6 +22,8 @@ export type WatchTarget = {
   revision: string | null;
   /** 判定に効く値だけを並べたもの（provider が決める。GitHub の PR なら head の commit・mergeable・check・レビュー）。変わらなければ間隔を延ばす */
   fingerprint: string | null;
+  /** アカウントのつなぎ直しが要るので、確かめるのを止めているか（つないだら続きから確かめる） */
+  paused: boolean;
   /** 次に確かめる時刻。確かめたら間隔から決め、時間の条件が成り立つかもしれない時刻より遅らせない。動きがあったときや一覧から外れたときは、すぐに前倒しする */
   nextCheckAt: string;
 };
@@ -53,10 +55,11 @@ type Change = "変わらない" | "変わった" | "分からない値がある"
 type ItemExample = "Task 1 の Action Item" | "Task 2 の Action Item";
 /** 次に確かめる時刻を過ぎたか */
 type Timing = "次に確かめる時刻を過ぎた" | "まだ";
-type Actor = { kind: "sync" };
+type Actor = { kind: "sync" } | { kind: "app" };
 
 export const actors: Record<string, Actor> = {
   同期: { kind: "sync" },
+  アプリ: { kind: "app" },
 };
 
 const NOW = "2026-11-28T00:00:00Z";
@@ -80,6 +83,7 @@ export function initial(actor: Actor, reason: "関わっている" | "待って�
     waitingItems: reason === "待っている" ? [ITEMS["Task 1 の Action Item"]] : [],
     revision: null,
     fingerprint: null,
+    paused: false,
   };
 }
 
@@ -105,12 +109,13 @@ export function unlisted(target: WatchTarget, actor: Actor): WatchTarget {
 /**
  * 待つ Action Item が増える
  *
+ * 待っている Action Item は、Task と Action Item の順に並べて持つ（足した順で別のものにならないように）。
  * 見張っていなければ、また見張る。見張っていても、間隔を最初に戻す（待つ人が増えたので、早く気づけるように）。すでに待っている Action Item なら、何もしない。
  */
 export function addWaiter(target: WatchTarget, actor: Actor, item: ItemExample): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
   if (target.waitingItems.some((w) => sameItem(w, ITEMS[item]))) return target;
-  return { ...target, ...RESTART, reason: inList(target.reason) ? "両方" : "待っている", waitingItems: [...target.waitingItems, ITEMS[item]] };
+  return { ...target, ...RESTART, reason: inList(target.reason) ? "両方" : "待っている", waitingItems: [...target.waitingItems, ITEMS[item]].sort((a, b) => (a.taskId + a.actionItemId).localeCompare(b.taskId + b.actionItemId)) };
 }
 
 /**
@@ -143,6 +148,7 @@ export function revisionChanged(target: WatchTarget, actor: Actor): WatchTarget 
 export function check(target: WatchTarget, actor: Actor, timing: Timing, _change: Change): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(target.reason !== "見張らない", "見張っているときだけ");
+  ensure(!target.paused, "止めていないときだけ（つなぎ直しが要るアカウントの対象は確かめない）");
   ensure(timing === "次に確かめる時刻を過ぎた", "次に確かめる時刻を過ぎたときだけ");
   return { ...target, nextCheckAt: "2026-11-28T01:00:00Z", reason: target.reason === "最後に確かめる" ? "見張らない" : target.reason };
 }
@@ -181,6 +187,27 @@ export const decisions = {
   },
 };
 
+/** アカウントのつなぎ直しが要るので、確かめるのを止める（Account の「つなぎ直しが要る」からの反応） */
+export function pause(target: WatchTarget, actor: Actor): WatchTarget {
+  ensure(actor.kind === "app", "アプリだけ");
+  ensure(!target.paused, "止めていないときだけ");
+  return { ...target, paused: true };
+}
+
+/** アカウントをつないだので、続きから確かめる（すぐ確かめる。Account の「つなぐ」からの反応） */
+export function resume(target: WatchTarget, actor: Actor): WatchTarget {
+  ensure(actor.kind === "app", "アプリだけ");
+  ensure(target.paused, "止めているときだけ");
+  return { ...target, paused: false, nextCheckAt: "2026-11-28T00:00:00Z" };
+}
+
+/** アカウントを外したので、見張らない（待っている Action Item には、達成できないと知らせる） */
+export function drop(target: WatchTarget, actor: Actor): WatchTarget {
+  ensure(actor.kind === "app", "アプリだけ");
+  ensure(target.reason !== "見張らない", "見張っているときだけ");
+  return { ...target, reason: "見張らない", waitingItems: [], paused: false };
+}
+
 export const inputs = {
   initial: { 関わっている: ["関わっている"], 待っている: ["待っている"] },
   addWaiter: { "Task 1": ["Task 1 の Action Item"], "Task 2": ["Task 2 の Action Item"] },
@@ -199,13 +226,42 @@ export const invariants = {
 };
 
 export const links = [
+  { from: drop, to: "task", label: "待っていた Action Item に、待つ条件が達成できないと知らせる（理由: アカウントを外した。Action Item の observeCondition）" },
   { from: listed, to: "source-item", label: "関わっている対象の事実がまだなければ、取り込む" },
   { from: check, to: "source-item", action: "update", label: "関わっている対象なら、確かめた状態（conflict: あり など）を事実の行として届ける" },
   { from: check, to: "source-item", action: "remove", label: "最後に確かめた対象は、事実を変えてから、範囲の外になったとして消す" },
-  { from: check, to: "task", label: "待っている対象なら、待つ条件が成り立ったか・達成できないかを、待っている Action Item に知らせる" },
+  { from: check, to: "task", label: "待っている対象なら、待つ条件が成り立ったか・達成できないかを、待っている Action Item に知らせる（Action Item の observeCondition）" },
 ];
 
 export const scenarios = {
+  "一覧と確かめるのは同期、アカウントの変化を伝えるのはアプリだけ": [
+    { do: initial, by: "同期", input: "関わっている" },
+    { do: unlisted, by: "アプリ", denied: "同期だけ" },
+    { do: addWaiter, by: "アプリ", input: "Task 1", denied: "同期だけ" },
+    { do: addWaiter, by: "同期", input: "Task 1" },
+    { do: removeWaiter, by: "アプリ", input: "Task 1", denied: "同期だけ" },
+    { do: revisionChanged, by: "アプリ", denied: "同期だけ" },
+    { do: check, by: "アプリ", input: "変わった", denied: "同期だけ" },
+    { do: pause, by: "アプリ" },
+    { do: resume, by: "同期", denied: "アプリだけ" },
+    { do: unlisted, by: "同期" },
+    { do: listed, by: "アプリ", denied: "同期だけ" },
+  ],
+  "つなぎ直しが要るあいだは確かめず、つないだら続きから確かめる": [
+    { do: initial, by: "同期", input: "待っている" },
+    { do: resume, by: "アプリ", denied: "止めているときだけ" },
+    { do: pause, by: "同期", denied: "アプリだけ" },
+    { do: pause, by: "アプリ", expect: { paused: true } },
+    { do: pause, by: "アプリ", denied: "止めていないときだけ" },
+    { do: check, by: "同期", input: "変わった", denied: "止めていないときだけ（つなぎ直しが要るアカウントの対象は確かめない）" },
+    { do: resume, by: "アプリ", expect: { paused: false } },
+  ],
+  "アカウントを外したら見張らない": [
+    { do: initial, by: "同期", input: "待っている" },
+    { do: drop, by: "同期", denied: "アプリだけ" },
+    { do: drop, by: "アプリ", expect: { reason: "見張らない" } },
+    { do: drop, by: "アプリ", denied: "見張っているときだけ" },
+  ],
   "確かめる時刻が来たら確かめる": [
     { do: initial, by: "同期", input: "関わっている", expect: { reason: "関わっている" } },
     { do: check, by: "同期", input: "まだ時刻前", denied: "次に確かめる時刻を過ぎたときだけ" },
@@ -247,8 +303,6 @@ export const scenarios = {
 };
 
 export const reviewed = {
-  "equivalent-states:待っている · waitingItems=[{ actionItemId: a1, taskId: t1 }, { actionItemId: a1, taskId: t2 }]/待っている · waitingItems=[{ actionItemId: a1, taskId: t2 }, { actionItemId: a1, taskId: t1 }]": "待っている Action Item は集合で、並び順に意味はない",
-  "equivalent-states:両方 · waitingItems=[{ actionItemId: a1, taskId: t1 }, { actionItemId: a1, taskId: t2 }]/両方 · waitingItems=[{ actionItemId: a1, taskId: t2 }, { actionItemId: a1, taskId: t1 }]": "待っている Action Item は集合で、並び順に意味はない",
   "indistinguishable-example:check:変わらない,変わった,分からない": "確かめた結果で変わるのは次の確認の間隔だけで、判断表「次の確認の間隔」で決まる。見張っているか・見張る理由は変わらない",
   "anytime:addWaiter": "待つ Action Item は、いつでも増えうる。見張っていなければ、見張りを始め直す",
 };

@@ -110,11 +110,11 @@ export function confirmRemoval(sync: Sync, actor: Actor): Sync {
   return { ...sync, status: "待っている", cursor: { historyId: "12345" }, nextRunAt: "2026-11-28T00:01:00Z", lastError: null };
 }
 
-/** ユーザーが、大量に消えたのは間違いだとする（反映せず、カーソルも進めず、次の回にやり直す） */
+/** ユーザーが、大量に消えたのは間違いだとする（反映せず、カーソルも進めず、取り込みを止める。範囲や権限を直してつなぎ直したら再開する。そのまま次の回にやり直すと、同じ消え方を確かめ続けるだけになるため） */
 export function rejectRemoval(sync: Sync, actor: Actor): Sync {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(sync.status === "確かめている", "確かめているときだけ");
-  return { ...sync, status: "待っている", nextRunAt: "2026-11-28T00:01:00Z", lastError: "想定外の応答" };
+  return { ...sync, status: "止めている", lastError: "想定外の応答" };
 }
 
 /** トークンが通らなかった（アカウントを、つなぎ直しが要るにする） */
@@ -228,7 +228,8 @@ export const scenarios = {
     { do: start, by: "アプリ", input: "時刻を過ぎた", denied: "待っているときだけ" },
     { do: confirmRemoval, by: "Source", denied: "ユーザーだけ" },
     { do: rejectRemoval, by: "アプリ", denied: "ユーザーだけ" },
-    { do: rejectRemoval, by: "ユーザー", expect: { status: "待っている", lastError: "想定外の応答" } },
+    { do: rejectRemoval, by: "ユーザー", expect: { status: "止めている", lastError: "想定外の応答" } },
+    { do: resume, by: "アプリ" },
     { do: rejectRemoval, by: "ユーザー", denied: "確かめているときだけ" },
     { do: start, by: "アプリ", input: "時刻を過ぎた" },
     { do: succeed, by: "Source", input: "大量に消えた" },
