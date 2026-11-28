@@ -1,16 +1,28 @@
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { Effect, ManagedRuntime } from "effect";
 import { Duration, Schedule } from "effect";
 import { StoreDatabase } from "../../store/database.js";
 import { CHANNELS } from "../shared/api.js";
-import { handleCommand, handleQuery } from "./ipc.js";
+import { liveConnector } from "./ai/connector-live.js";
+import { handleAiCommand, handleCommand, handleQuery } from "./ipc.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { TaskIds, TaskService } from "./task-service.js";
 
 // 今のアプリ（live-todo.db）とは別のファイルにする（作り直しの間、両方を並べて動かせるように）
 const DATABASE_FILE = "live-todo-store.db";
+
+// API キーは .env.local に置く（ai-settings.spec）。dev ではリポジトリの直下にある
+const ENV_LOCAL = join(import.meta.dirname, "../../.env.local");
+if (existsSync(ENV_LOCAL)) process.loadEnvFile(ENV_LOCAL);
+
+const commandSucceeds = (command: string, args: ReadonlyArray<string>) =>
+  Effect.callback<boolean>((resume) => {
+    execFile(command, [...args], { timeout: 10_000 }, (error) => resume(Effect.succeed(error === null)));
+  });
 
 const runtime = ManagedRuntime.make(
   desktopLayer({
@@ -21,6 +33,7 @@ const runtime = ManagedRuntime.make(
     }),
     calendar: Calendar.system,
     ids: TaskIds.random,
+    connector: liveConnector({ env: process.env, commandSucceeds }),
   }),
 );
 
@@ -50,6 +63,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.command, (_event, raw: unknown) => runtime.runPromise(handleCommand(raw)));
   ipcMain.handle(CHANNELS.query, (_event, raw: unknown) => runtime.runPromise(handleQuery(raw)));
+  ipcMain.handle(CHANNELS.ai, (_event, raw: unknown) => runtime.runPromise(handleAiCommand(raw)));
   await runtime.runPromise(
     Effect.gen(function* () {
       const service = yield* TaskService;

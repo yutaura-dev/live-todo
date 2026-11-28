@@ -1,5 +1,4 @@
 import { Context, DateTime, Effect, Layer, Option } from "effect";
-import { Decisions } from "../../llm/decision/decisions.js";
 import { blockingNowQuestion, interpretBlockingNow, interpretPriorityLevel, priorityLevelQuestion } from "../../llm/decision/questions/index.js";
 import type { TaskMaterial } from "../../llm/shared/materials.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
@@ -17,6 +16,7 @@ import {
 import { daysUntil, ruleLevel, type RuleResult } from "../../domain/priority/rule.js";
 import { notePriority, type Task } from "../../domain/task/task.js";
 import { PrioritizationStore } from "../../store/prioritization-store.js";
+import { AiServices } from "./ai/ai-services.js";
 import type { StoreCorrupted } from "../../store/task-store.js";
 
 /** 今日の日付と地域。期日までの日数を数えるのに使う（テストでは固定する） */
@@ -66,14 +66,14 @@ export class Prioritizer extends Context.Service<
     Effect.gen(function* () {
       const store = yield* PrioritizationStore;
       const calendar = yield* Calendar;
-      // 呼ばれたときではなく作るときに取る（呼ぶ側の環境には Decisions がないため）。なければ AI 設定がまだ
-      const decisionsService = yield* Effect.serviceOption(Decisions);
+      const ai = yield* AiServices;
 
       const basisOf = (task: Task, today: string) => JSON.stringify({ due: task.due?.earliest ?? null, blocksOthers: task.blocksOthers, today });
 
       const askDecisions = (p: Prioritization, rule: RuleResult, task: Task, today: string) =>
         Effect.gen(function* () {
-          const found = decisionsService;
+          // 呼ぶたびに取る（AI 設定を選び直したら、次の呼び出しから変わるように）。none なら AI 設定がまだ・使えない
+          const found = yield* ai.decisions;
           if (Option.isNone(found)) return p;
           const material = { task: materialOf(task), facts: [], today };
           if (rule === "今日中以上（今すぐかは判定）") {

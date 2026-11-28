@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppShell, type View } from "../../design/AppShell.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
-import type { BoardCard, LiveTodoApi, TaskView } from "../shared/api.js";
+import type { AiCommand, AiSettingsView, BoardCard, LiveTodoApi, TaskView } from "../shared/api.js";
 import { AddTaskDialog } from "./AddTaskDialog.js";
 import { Kanban } from "./Kanban.js";
 import { Horizon } from "./Horizon.js";
+import { Settings } from "./Settings.js";
 import { type PanelCommand, TaskPanel } from "./TaskPanel.js";
 
 /** 最初の縦の一本: 手で足した Task とカンバン。ほかの画面は、それぞれの一本で足す */
@@ -14,6 +15,19 @@ export function App({ api }: { api: LiveTodoApi }) {
   const [selected, setSelected] = useState<TaskView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [ai, setAi] = useState<AiSettingsView | null>(null);
+  const locked = ai !== null && ai.status !== "使える";
+
+  useEffect(() => {
+    void api.aiSettings().then((reply) => reply.ok && setAi(reply.value));
+  }, [api]);
+
+  const configureAi = async (command: AiCommand) => {
+    const reply = await api.configureAi(command);
+    if (!reply.ok) return reply.reason;
+    setAi(reply.value);
+    return null;
+  };
 
   const reload = useCallback(async () => {
     const board = await api.board();
@@ -59,13 +73,16 @@ export function App({ api }: { api: LiveTodoApi }) {
 
   return (
     <AppShell
-      current={view}
+      current={locked ? "設定" : view}
+      locked={locked}
       counts={{}}
       sync={{ state: "ok", text: "まだ取り込みはありません" }}
       onNavigate={setView}
       inspector={selected && <TaskPanel task={selected} problem={problem} onCommand={(command) => void run(command)} onClose={() => setSelected(null)} />}
     >
-      {view === "見通し" ? (
+      {ai === null ? null : locked || view === "設定" ? (
+        <Settings settings={ai} onConfigure={configureAi} />
+      ) : view === "見通し" ? (
         <Horizon cards={cards} selectedId={selected?.id ?? null} onOpen={(id) => void open(id)} onAdd={() => setAdding(true)} onSetPriority={(id, level) => void setPriority(id, level)} />
       ) : view === "カンバン" ? (
         <Kanban cards={cards} selectedId={selected?.id ?? null} onOpen={(id) => void open(id)} onAdd={() => setAdding(true)} />

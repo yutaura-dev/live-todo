@@ -4,11 +4,12 @@ import { DateTime, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
 import { StoreDatabase } from "../../store/database.js";
+import { AiConnector } from "./ai/connector.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { sequentialIds, TaskService } from "./task-service.js";
 
-const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t") });
+const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable });
 const undecided = { status: "未判定", level: null, reason: null } as const;
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
