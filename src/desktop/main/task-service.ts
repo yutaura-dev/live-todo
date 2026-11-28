@@ -9,6 +9,9 @@ import type { SourceItem } from "../../domain/source-item/source-item.js";
 import { factViewOf, sourceOf } from "./materials.js";
 import type { BoardCard, Command, PriorityView, Reply, TaskView } from "../shared/api.js";
 import { Prioritizer } from "./prioritizer.js";
+import { Planner } from "./plan/planner.js";
+import { type PlanGroup, turnsOf } from "../../domain/plan/plan.js";
+import type { PlanRow } from "../shared/api.js";
 
 export class TaskIds extends Context.Service<TaskIds, { readonly next: Effect.Effect<string> }>()("live-todo/desktop/TaskIds") {
   static readonly random = Layer.succeed(TaskIds, TaskIds.of({ next: Effect.sync(() => randomUUID()) }));
@@ -27,6 +30,40 @@ const NOT_FOUND = "Task が見つかりません";
 const priorityOf = (p: Prioritization | undefined): PriorityView =>
   p === undefined ? { status: "未判定", level: null, reason: null } : { status: p.status, level: p.priority?.level ?? null, reason: p.priority?.reason ?? null };
 
+/** 計画の木を、字下げ付きの行の並びにする（画面はこの順に並べる） */
+export function planRowsOf(plan: PlanGroup): PlanRow[] {
+  const turns = turnsOf(plan);
+  const rows: PlanRow[] = [];
+  const walk = (group: PlanGroup, depth: number) => {
+    for (const node of group.nodes) {
+      if (node.type === "group") {
+        rows.push({ kind: "group", id: `group-${rows.length}`, title: node.group.arrangement === "parallel" ? "同時に進める" : "順に進める", depth, turn: null, completes: false, how: null, options: [], chosen: null, added: false });
+        walk(node.group, depth + 1);
+      } else if (node.type === "branch") {
+        rows.push({ kind: "branch", id: `branch-${node.decisionId}`, title: `「${node.option}」を選んだ${node.plan === null ? "（AI が先の計画を考えています）" : ""}`, depth, turn: null, completes: false, how: null, options: [], chosen: null, added: false });
+        if (node.plan !== null && node.state === "進めている") walk(node.plan, depth + 1);
+      } else {
+        const { item } = node;
+        const how = item.definition.how;
+        rows.push({
+          kind: how.type === "decision" ? "decision" : "item",
+          id: item.id,
+          title: how.type === "decision" ? how.question : item.definition.title,
+          depth,
+          turn: turns.get(item.id) ?? null,
+          completes: item.definition.completes,
+          how: how.type,
+          options: how.type === "decision" ? how.options.map((option) => option.label) : [],
+          chosen: item.chosen ?? null,
+          added: item.addedFrom !== null,
+        });
+      }
+    }
+  };
+  walk(plan, 0);
+  return rows;
+}
+
 const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<SourceItem>): TaskView => ({
   id: task.id,
   title: task.title,
@@ -38,6 +75,7 @@ const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<
   mark: markOf(task),
   priority: priorityOf(p),
   facts: facts.map(factViewOf),
+  plan: task.plan === null ? null : planRowsOf(task.plan),
   history: task.history,
   createdAt: task.createdAt,
 });
@@ -79,6 +117,7 @@ export class TaskService extends Context.Service<
       const priorities = yield* PrioritizationStore;
       const items = yield* SourceItemStore;
       const prioritizer = yield* Prioritizer;
+      const planner = yield* Planner;
       const ids = yield* TaskIds;
       const notify = (id: string) => Effect.sync(() => listeners.forEach((listener) => listener(id)));
       const viewOf = (task: Task) =>
@@ -124,6 +163,15 @@ export class TaskService extends Context.Service<
           );
         });
 
+      // 計画は Planner が保存するので、ここでは読み直して知らせるだけ
+      const afterPlan = (id: string) =>
+        Effect.gen(function* () {
+          const found = yield* store.find(id);
+          if (Option.isNone(found)) return failed(NOT_FOUND);
+          yield* notify(id);
+          return { ok: true, value: yield* viewOf(found.value) } as Reply<TaskView>;
+        });
+
       const nothingPending = { effects: "完了したときにすることがない", added: "足した項目はすべて済んだ" } as const;
 
       const command = (input: Command): Effect.Effect<Reply<TaskView>> =>
@@ -140,8 +188,24 @@ export class TaskService extends Context.Service<
               return yield* apply(input.id, (task) => complete(task, user, "自分で完了にした", nothingPending));
             case "DismissTask":
               return yield* apply(input.id, (task) => dismiss(task, user, "自分で片付けた", "頼んだものはない"));
-            case "ReopenTask":
-              return yield* apply(input.id, (task) => reopen(task, user, "頼んだものはない"));
+            case "ReopenTask": {
+              const reply = yield* apply(input.id, (task) => reopen(task, user, "頼んだものはない"));
+              // やり直したら、計画を立て直す（前の Action Item は済んだまま残るので、そのままでは二度と自動で終わらないため。task.spec）
+              if (!reply.ok) return reply;
+              const reopened = yield* store.find(input.id);
+              if (Option.isSome(reopened) && reopened.value.plan !== null) yield* planner.revise(reopened.value);
+              return yield* afterPlan(input.id);
+            }
+            case "RevisePlan": {
+              const found = yield* store.find(input.id);
+              if (Option.isNone(found)) return failed(NOT_FOUND);
+              const reply = yield* planner.revise(found.value);
+              return reply.ok ? yield* afterPlan(input.id) : failed(reply.reason);
+            }
+            case "PlanAction": {
+              const reply = yield* planner.act(input.id, input.action);
+              return reply.ok ? yield* afterPlan(input.id) : failed(reply.reason);
+            }
             case "SetDue":
               return yield* apply(input.id, (task) => setDue(task, user, input.due));
             case "DefineCompletion":

@@ -4,6 +4,8 @@ import { DocumentStore, documentsOf } from "../../../store/document-store.js";
 import type { StoreCorrupted } from "../../../store/task-store.js";
 import { Ingestor } from "../ingest/ingestor.js";
 import { Router } from "../ingest/router.js";
+import { Planner } from "../plan/planner.js";
+import { TaskStore } from "../../../store/task-store.js";
 import { accounts } from "./account-service.js";
 import { SourceGateway } from "./gateway.js";
 
@@ -35,6 +37,8 @@ export class SyncRunner extends Context.Service<SyncRunner, { runOnce(): Effect.
       const ingestor = yield* Ingestor;
       const router = yield* Router;
       const docs = yield* DocumentStore;
+      const planner = yield* Planner;
+      const tasks = yield* TaskStore;
 
       const runAccount = (account: Account) =>
         Effect.gen(function* () {
@@ -52,7 +56,13 @@ export class SyncRunner extends Context.Service<SyncRunner, { runOnce(): Effect.
           const changed: string[] = [];
           for (const entry of ingested) {
             if (entry.event !== "appeared" && entry.event !== "restored") continue;
-            changed.push(...(yield* router.route(entry.item)).changedTaskIds);
+            const routed = yield* router.route(entry.item);
+            changed.push(...routed.changedTaskIds);
+            // AI が作った Task は、計画を立てる（立てられなくても、Task は残る。計画は未定のまま）
+            for (const id of routed.createdTaskIds) {
+              const created = yield* tasks.find(id);
+              if (Option.isSome(created)) yield* planner.revise(created.value);
+            }
           }
           // カーソルは、変化を事実に反映したあとで進める（反映だけが失敗して取りこぼさないように。sync.spec）
           yield* syncs.save({ id: account.id, cursor: fetched.success.nextCursor, failures: 0, lastError: null, nextRunAt: DateTime.formatIso(DateTime.addDuration(now, INTERVAL)) });

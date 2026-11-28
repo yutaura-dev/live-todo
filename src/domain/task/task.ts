@@ -1,5 +1,6 @@
 import { DateTime, Effect, Schema } from "effect";
 import { DueDate } from "../values.js";
+import { completionOf, type PlanGroup, PlanGroupSchema } from "../plan/plan.js";
 import { type ActivityBy, PLAN_FIELDS, TaskActivity, type TaskFieldChange } from "./activity.js";
 
 // specs/task.spec.ts の Task。計画・事実・定期の Task・優先度は、それぞれの縦の一本で足す
@@ -32,6 +33,10 @@ export const Task = Schema.Struct({
   blocksOthers: Schema.Boolean,
   /** この Task についての事実（つながりの持ち主は Task。1 つの事実を、いくつの Task が持ってもよい） */
   sourceItemIds: Schema.Array(Schema.String),
+  /** 次にやることの計画（まだ立てていなければ null） */
+  plan: Schema.NullOr(PlanGroupSchema),
+  /** 立て直す前の計画（済んだことは消さずに残す。今の完了条件には数えない） */
+  previousPlans: Schema.Array(PlanGroupSchema),
   history: Schema.Array(TaskActivity),
   lastSeenAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
@@ -94,6 +99,8 @@ export const create = Effect.fn("Task.create")(function* (input: {
     due: input.due ?? null,
     blocksOthers: input.blocksOthers ?? false,
     sourceItemIds: [...(input.sourceItemIds ?? [])],
+    plan: null,
+    previousPlans: [],
     history: [{ kind: "できた", by: BY[input.actor.kind], occurredAt: now, changes: [], cause: input.origin }],
     lastSeenAt: null,
     createdAt: now,
@@ -177,6 +184,54 @@ export const defineCompletionByHand = Effect.fn("Task.defineCompletionByHand")(f
   yield* ensure(isOpen(task), "やること のときだけ");
   yield* ensure(task.completion === "未定", "完了条件が決まっていないときだけ");
   return yield* noted(task, actor, [{ field: "完了条件", before: "未定", after: "まだ", target: null }], { completion: "まだ" });
+});
+
+/**
+ * 計画を立て直す（Generation が、Task の dossier と届いたものから計画を書く）。前の計画は previousPlans に移す。
+ * 完了条件は、新しい計画から導く（task.spec の revisePlan は「まだ」にするが、選んでから考える選択肢があれば未定のまま）
+ */
+export const revisePlan = Effect.fn("Task.revisePlan")(function* (task: Task, actor: Actor, plan: PlanGroup) {
+  const ensure = guard("revisePlan");
+  yield* ensure(actor.kind === "agent", "AI だけ");
+  yield* ensure(isOpen(task), "やること のときだけ");
+  const completion = completionOf(plan);
+  return yield* noted(task, actor, [{ field: "計画", before: null, after: null, target: null }, { field: "完了条件", before: task.completion, after: completion, target: null }], {
+    plan,
+    previousPlans: task.plan === null ? task.previousPlans : [...task.previousPlans, task.plan],
+    completion,
+  });
+});
+
+/**
+ * 計画の中の Action Item が進んだ（済んだ・やらない・戻した・選んだ・足した）。だれが進めたかと一緒に出来事に残し、完了条件を導き直す
+ *
+ * 完了条件をすべて満たしたら、spec の satisfyCompletion に当たる（Task を終えるかは、呼ぶ側が complete で決める）
+ */
+export const noteProgress = Effect.fn("Task.noteProgress")(function* (task: Task, actor: Actor, plan: PlanGroup, target: string) {
+  yield* guard("noteProgress")(isOpen(task), "やること のときだけ");
+  const completion = completionOf(plan);
+  return yield* noted(task, actor, [{ field: "Action Item の進み", before: null, after: null, target }, { field: "完了条件", before: task.completion, after: completion, target: null }], { plan, completion });
+});
+
+/**
+ * 届いたもの（Task Input）を受け取る。事実・AI の作業の成果は AI が、書き込めなかったはアプリが、Task の言葉に置き換える
+ *
+ * 判定できなかった（refusal・閾値の間・想定外の応答）ときも黙って何も変えず、今の状況に「確かめる」を書く（fail closed）。
+ * 同じ入力が 2 度届いても、反映は 1 回にする（cause で分かる）。
+ */
+export const receive = Effect.fn("Task.receive")(function* (
+  task: Task,
+  actor: Actor,
+  input: "事実" | "書き込めなかった" | "AI の作業の成果",
+  change: { title?: string | null; brief?: string | null },
+  cause: string,
+) {
+  yield* guard("receive")(input === "書き込めなかった" ? actor.kind === "app" : actor.kind === "agent", "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ");
+  if (task.history.some((activity) => activity.cause === cause)) return task;
+  const changes: TaskFieldChange[] = [];
+  if (change.title !== undefined && change.title !== null) changes.push({ field: "何をするか", before: task.title, after: change.title, target: null });
+  if (change.brief !== undefined) changes.push({ field: "今の状況と次の一手", before: task.brief, after: change.brief, target: null });
+  return yield* noted(task, actor, changes, { ...(change.title ? { title: change.title } : {}), ...(change.brief !== undefined ? { brief: change.brief } : {}) }, cause);
 });
 
 /** 事実を持つ（振り分けが、この Task の事実にすると決めた）。事実は出来事にしない（task-activity.value.ts） */

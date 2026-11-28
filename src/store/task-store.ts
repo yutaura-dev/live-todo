@@ -31,6 +31,8 @@ export class TaskStore extends Context.Service<
           closure: parse(row.closure),
           due: parse(row.due),
           sourceItemIds: JSON.parse(row.sourceItemIds),
+          plan: parse(row.plan),
+          previousPlans: JSON.parse(row.previousPlans),
           history: activities.map((activity) => ({
             kind: activity.kind,
             by: activity.by,
@@ -68,6 +70,8 @@ export class TaskStore extends Context.Service<
                 due: json(task.due),
                 blocksOthers: task.blocksOthers,
                 sourceItemIds: JSON.stringify(task.sourceItemIds),
+                plan: json(task.plan),
+                previousPlans: JSON.stringify(task.previousPlans),
                 lastSeenAt: task.lastSeenAt,
                 createdAt: task.createdAt,
                 updatedAt: task.updatedAt,

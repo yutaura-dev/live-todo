@@ -1,11 +1,13 @@
 import { Button, Icon, Pill, SourceMarks } from "../../design/components.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
 import type { DueDate } from "../../domain/values.js";
-import type { TaskView } from "../shared/api.js";
+import type { Command, TaskView } from "../shared/api.js";
+import { PlanView } from "./PlanView.js";
 import { LEVELS } from "./horizon-groups.js";
 
 export type PanelCommand =
-  | { _tag: "CompleteTask" | "DismissTask" | "ReopenTask" | "DefineCompletion" | "ClearPriority" }
+  | { _tag: "CompleteTask" | "DismissTask" | "ReopenTask" | "DefineCompletion" | "ClearPriority" | "RevisePlan" }
+  | { _tag: "PlanAction"; action: Extract<Command, { _tag: "PlanAction" }>["action"] }
   | { _tag: "SetPriority"; level: PriorityLevel }
   | { _tag: "SetDue"; due: DueDate | null };
 
@@ -105,6 +107,9 @@ export function TaskPanel(props: { task: TaskView; problem: string | null; onCom
         </section>
       )}
 
+      <PlanView rows={task.plan} open={open} onCommand={props.onCommand} />
+
+      {task.plan === null && (
       <section className="ui-section" aria-labelledby="completion-title">
         <h3 id="completion-title" className="ui-section-title">
           完了条件
@@ -122,6 +127,7 @@ export function TaskPanel(props: { task: TaskView; problem: string | null; onCom
           <p>{task.completion === "満たした" ? "満たしました" : "やり終えたら、自分で確かめて完了にします"}</p>
         )}
       </section>
+      )}
 
       {task.facts.length > 0 && (
         <section className="ui-section" aria-labelledby="facts-title">

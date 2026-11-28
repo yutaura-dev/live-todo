@@ -12,6 +12,7 @@ import { Ingestor } from "./ingest/ingestor.js";
 import { Router } from "./ingest/router.js";
 import { Prioritizer, type Calendar } from "./prioritizer.js";
 import { ProposalService } from "./proposals/proposal-service.js";
+import { Planner } from "./plan/planner.js";
 import { AccountService } from "./sources/account-service.js";
 import type { SourceGateway } from "./sources/gateway.js";
 import { SyncRunner } from "./sources/sync-runner.js";
@@ -29,7 +30,8 @@ export const desktopLayer = (options: {
   const ai = AiServices.live;
   const settings = AiSettingsService.layer.pipe(Layer.provide(Layer.mergeAll(stores, ai, options.connector)));
   const prioritizer = Prioritizer.layer.pipe(Layer.provide(Layer.mergeAll(stores, options.calendar, ai)));
-  const base = Layer.mergeAll(stores, prioritizer, ai, options.ids, options.gateway);
+  const core = Layer.mergeAll(stores, prioritizer, ai, options.ids, options.gateway);
+  const base = Layer.mergeAll(core, Planner.layer.pipe(Layer.provide(core)));
   const router = Router.layer.pipe(Layer.provide(base));
   const ingestor = Ingestor.layer.pipe(Layer.provide(base));
   const sync = SyncRunner.layer.pipe(Layer.provide(Layer.mergeAll(base, router, ingestor)));

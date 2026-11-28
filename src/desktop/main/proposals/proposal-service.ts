@@ -10,6 +10,7 @@ import { proposals, routings } from "../ingest/router.js";
 import { factViewOf } from "../materials.js";
 import { Prioritizer } from "../prioritizer.js";
 import { TaskIds } from "../task-service.js";
+import { Planner } from "../plan/planner.js";
 
 const user = { kind: "user" } as const;
 
@@ -35,12 +36,15 @@ export class ProposalService extends Context.Service<
       const prioritizer = yield* Prioritizer;
       const ids = yield* TaskIds;
       const docs = yield* DocumentStore;
+      const planner = yield* Planner;
 
       const newTask = (input: { title: string; brief: string | null; sourceItemIds: ReadonlyArray<string>; origin: "提案を受け入れた" | "手で足した" }) =>
         Effect.gen(function* () {
           const task = yield* Effect.orDie(create({ id: yield* ids.next, title: input.title, brief: input.brief, actor: user, origin: input.origin, sourceItemIds: input.sourceItemIds }));
           yield* tasks.save(task);
           yield* tasks.save(yield* prioritizer.refresh(task));
+          // 受け入れた Task は、計画を立てる（立てられなくても Task は残り、完了条件は未定のまま）
+          if (input.origin === "提案を受け入れた") yield* planner.revise(Option.getOrElse(yield* tasks.find(task.id), () => task));
           return task.id;
         });
 
