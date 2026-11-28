@@ -5,11 +5,13 @@ import { handleAiCommand, handleCommand, handleInbox, handleQuery } from "./ipc.
 import { AiConnector } from "./ai/connector.js";
 import { SourceGateway } from "./sources/gateway.js";
 import { WriteProvider } from "./writes/write-provider.js";
+import { agentTest } from "../../llm/agent/test-double.js";
+import { unanswered } from "../../llm/shared/answer.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { sequentialIds } from "./task-service.js";
 
-const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable, gateway: SourceGateway.live({}), writer: (stores) => WriteProvider.live({}).pipe(Layer.provide(stores)) });
+const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable, gateway: SourceGateway.live({}), writer: (stores) => WriteProvider.live({}).pipe(Layer.provide(stores)), agent: agentTest({ run: () => [], askToStop: () => unanswered("Missing") }).layer });
 
 describe("IPC（renderer から届いたものを、形を確かめてから TaskService に渡す）", () => {
   it.effect("形の正しい操作は、そのまま当てる", () =>
@@ -40,5 +42,14 @@ describe("IPC（renderer から届いたものを、形を確かめてから Tas
     Effect.gen(function* () {
       assert.deepStrictEqual(yield* handleInbox({ _tag: "RequestWrite", taskId: "nope", itemId: "a1" }), { ok: false, reason: "Task が見つかりません" });
       assert.deepStrictEqual(yield* handleInbox({ _tag: "ApproveWrite", id: "nope" }), { ok: false, reason: "書き込みが見つかりません" });
+    }).pipe(Effect.provide(layer)));
+
+  it.effect("Claude Code に頼む操作は、Agent の口に渡す（ない Task・作業なら断る。空の頼みは形で断る）", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* handleInbox({ _tag: "AskAgent", taskId: "nope", request: "なぜ？" }), { ok: false, reason: "Task が見つかりません" });
+      assert.deepStrictEqual(yield* handleInbox({ _tag: "AskAgent", taskId: "t1", request: "" }), { ok: false, reason: "操作の形が正しくありません" });
+      assert.deepStrictEqual(yield* handleInbox({ _tag: "RequestAgent", taskId: "nope", itemId: "a1" }), { ok: false, reason: "Task が見つかりません" });
+      assert.deepStrictEqual(yield* handleInbox({ _tag: "StopAgent", id: "nope" }), { ok: false, reason: "作業が見つかりません" });
+      assert.deepStrictEqual(yield* handleInbox({ _tag: "CancelAgent", id: "nope" }), { ok: false, reason: "作業が見つかりません" });
     }).pipe(Effect.provide(layer)));
 });

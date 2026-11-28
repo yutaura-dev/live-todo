@@ -6,6 +6,8 @@ import type { Prioritization } from "../../domain/priority/prioritization.js";
 import { PrioritizationStore } from "../../store/prioritization-store.js";
 import { SourceItemStore } from "../../store/source-item-store.js";
 import { TaskStore } from "../../store/task-store.js";
+import { DocumentStore } from "../../store/document-store.js";
+import { agentRuns, runsOfTask } from "./agent/agent-runs.js";
 import type { SourceItem } from "../../domain/source-item/source-item.js";
 import { factViewOf, sourceOf } from "./materials.js";
 import type { BoardCard, Command, PriorityView, Reply, TaskView } from "../shared/api.js";
@@ -82,7 +84,7 @@ export function planRowsOf(plan: PlanGroup): PlanRow[] {
   return rows;
 }
 
-const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<SourceItem>): TaskView => ({
+const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<SourceItem>, agentRunViews: TaskView["agentRuns"]): TaskView => ({
   id: task.id,
   title: task.title,
   brief: task.brief,
@@ -95,6 +97,7 @@ const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<
   facts: facts.map(factViewOf),
   plan: task.plan === null ? null : planRowsOf(task.plan),
   effects: task.plan === null ? [] : effectsOf(task.plan).map((effect) => ({ id: effect.id, title: effect.title, target: effect.subject.uri, operation: effect.operation, checked: effect.checked, delivery: effect.delivery })),
+  agentRuns: agentRunViews,
   history: task.history,
   createdAt: task.createdAt,
 });
@@ -138,12 +141,14 @@ export class TaskService extends Context.Service<
       const prioritizer = yield* Prioritizer;
       const planner = yield* Planner;
       const ids = yield* TaskIds;
+      const docs = yield* DocumentStore;
       const notify = (id: string) => Effect.sync(() => listeners.forEach((listener) => listener(id)));
       const viewOf = (task: Task) =>
         Effect.gen(function* () {
           const p = yield* priorities.find(task.id);
           const facts = yield* items.findMany(task.sourceItemIds);
-          return toView(task, Option.getOrUndefined(p), facts);
+          const runs = yield* agentRuns.all().pipe(Effect.provideService(DocumentStore, docs));
+          return toView(task, Option.getOrUndefined(p), facts, runsOfTask(runs, task.id));
         });
       // 優先度を決め直して出来事を足し、Task と一緒に保存する（spec の links: Task の操作 → 優先度）
       const settle = (task: Task) =>

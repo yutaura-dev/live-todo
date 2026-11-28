@@ -2,6 +2,7 @@ import { Button, Icon, Pill, SourceMarks } from "../../design/components.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
 import type { DueDate } from "../../domain/values.js";
 import type { Command, TaskView } from "../shared/api.js";
+import { AgentSection } from "./AgentSection.js";
 import { CompletionChecklist } from "./CompletionChecklist.js";
 import { PlanView } from "./PlanView.js";
 import { LEVELS } from "./horizon-groups.js";
@@ -37,6 +38,7 @@ export function TaskPanel(props: {
   onRequestWrite?: (itemId: string) => void;
   onEffect?: (effectId: string, action: "check" | "uncheck" | "retry") => void;
   onConfirmCompletion?: () => void;
+  onAgent?: (command: { _tag: "AskAgent"; request: string } | { _tag: "RequestAgent"; itemId: string } | { _tag: "StopAgent" | "CancelAgent"; id: string }) => void;
   onClose: () => void;
 }) {
   const { task } = props;
@@ -120,7 +122,22 @@ export function TaskPanel(props: {
         <CompletionChecklist effects={task.effects} onAction={(id, action) => props.onEffect?.(id, action)} onConfirm={() => props.onConfirmCompletion?.()} />
       )}
 
-      <PlanView rows={task.plan} open={open} onCommand={props.onCommand} {...(props.onRequestWrite ? { onRequestWrite: props.onRequestWrite } : {})} />
+      <PlanView
+        rows={task.plan}
+        open={open}
+        onCommand={props.onCommand}
+        {...(props.onRequestWrite ? { onRequestWrite: props.onRequestWrite } : {})}
+        onRequestAgent={(itemId) => props.onAgent?.({ _tag: "RequestAgent", itemId })}
+        busyItems={new Set(task.agentRuns.filter((run) => ["待ち行列", "やっている", "判断中"].includes(run.status) && run.actionItemId !== null).map((run) => run.actionItemId!))}
+      />
+
+      <AgentSection
+        runs={task.agentRuns}
+        open={open}
+        onAsk={(request) => props.onAgent?.({ _tag: "AskAgent", request })}
+        onStop={(id) => props.onAgent?.({ _tag: "StopAgent", id })}
+        onCancel={(id) => props.onAgent?.({ _tag: "CancelAgent", id })}
+      />
 
       {task.plan === null && (
       <section className="ui-section" aria-labelledby="completion-title">

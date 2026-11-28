@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell, type View } from "../../design/AppShell.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
 import type { AiCommand, AiSettingsView, BoardCard, InboxCommand, InboxView, LiveTodoApi, TaskView } from "../shared/api.js";
@@ -20,6 +20,9 @@ export function App({ api }: { api: LiveTodoApi }) {
   const [ai, setAi] = useState<AiSettingsView | null>(null);
   const [inbox, setInbox] = useState<InboxView>({ proposals: [], undecided: [], accounts: [], writes: [], autonomy: [] });
   const locked = ai !== null && ai.status !== "使える";
+  // 知らせを受けたときに開いている Task を読み直すため（reload を作り直さずに今の選択を読む）
+  const selectedId = useRef<string | null>(null);
+  selectedId.current = selected?.id ?? null;
 
   useEffect(() => {
     void api.aiSettings().then((reply) => reply.ok && setAi(reply.value));
@@ -37,6 +40,11 @@ export function App({ api }: { api: LiveTodoApi }) {
     if (board.ok) setCards(board.value);
     else setProblem(board.reason);
     if (current.ok) setInbox(current.value);
+    const openId = selectedId.current;
+    if (openId !== null) {
+      const task = await api.task(openId);
+      if (task.ok && selectedId.current === openId) setSelected(task.value);
+    }
   }, [api]);
 
   const sendInbox = async (command: InboxCommand) => {
@@ -114,6 +122,11 @@ export function App({ api }: { api: LiveTodoApi }) {
                 taskId: selected.id,
                 shown: selected.effects.filter((e) => e.delivery === "まだ" || e.delivery === "書き込めなかった").map(({ id, checked, target, operation }) => ({ id, checked, target, operation })),
               })
+            }
+            onAgent={(command) =>
+              void sendForTask(
+                command._tag === "AskAgent" || command._tag === "RequestAgent" ? { ...command, taskId: selected.id } : command,
+              )
             }
             onClose={() => setSelected(null)} />}
     >

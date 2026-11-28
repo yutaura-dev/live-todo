@@ -62,6 +62,21 @@ export const EffectView = Schema.Struct({
 });
 export type EffectView = typeof EffectView.Type;
 
+/** Claude Code に頼んだ作業 1 回（agent-run.spec）。成果と途中経過を見せる */
+export const AgentRunView = Schema.Struct({
+  id: Schema.String,
+  request: Schema.String,
+  status: Schema.Literals(["待ち行列", "やっている", "判断中", "終わった", "止まった", "取り消した"]),
+  tools: Schema.Literals(["読むだけ", "直す"]),
+  trigger: Schema.Literals(["ユーザーが頼んだ", "Action Item から"]),
+  actionItemId: Schema.NullOr(Schema.String),
+  result: Schema.NullOr(Schema.String),
+  stopReason: Schema.NullOr(Schema.String),
+  progress: Schema.Array(Schema.String),
+  createdAt: Schema.String,
+});
+export type AgentRunView = typeof AgentRunView.Type;
+
 export const TaskView = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
@@ -75,12 +90,15 @@ export const TaskView = Schema.Struct({
   facts: Schema.Array(FactView),
   plan: Schema.NullOr(Schema.Array(PlanRow)),
   effects: Schema.Array(EffectView),
+  agentRuns: Schema.Array(AgentRunView),
   history: Schema.Array(TaskActivity),
   createdAt: Schema.String,
 });
 export type TaskView = typeof TaskView.Type;
 
 const Id = Schema.String.check(Schema.isNonEmpty());
+// 頼む言葉は Claude Code にそのまま渡すので、空と極端に長いものは受け取らない
+const AgentRequestText = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000));
 
 /** 画面からの操作。どれも「ユーザーが」行う（renderer は登場人物を選べない） */
 export const Command = Schema.Union([
@@ -168,10 +186,14 @@ export const InboxCommand = Schema.Union([
   Schema.TaggedStruct("RequestWrite", { taskId: Id, itemId: Id }),
   Schema.TaggedStruct("ApproveWrite", { id: Id }),
   Schema.TaggedStruct("CancelWrite", { id: Id }),
-  /** shown: 押したときに画面が見せていたチェックリスト（見せたあとに変わっていたら、書き込まずに見せ直す） */
   Schema.TaggedStruct("SetOperationLimit", { operation: Id, limit: Schema.NullOr(Schema.Literals(["調べる", "ローカルの書き込み", "外への書き込み（下書き）", "外への書き込み（本番）"])) }),
+  /** shown: 押したときに画面が見せていたチェックリスト（見せたあとに変わっていたら、書き込まずに見せ直す） */
   Schema.TaggedStruct("ConfirmCompletion", { taskId: Id, shown: Schema.Array(Schema.Struct({ id: Id, checked: Schema.Boolean, target: Schema.String, operation: Schema.String })) }),
   Schema.TaggedStruct("EffectAction", { taskId: Id, effectId: Id, action: Schema.Literals(["check", "uncheck", "retry"]) }),
+  Schema.TaggedStruct("AskAgent", { taskId: Id, request: AgentRequestText }),
+  Schema.TaggedStruct("RequestAgent", { taskId: Id, itemId: Id }),
+  Schema.TaggedStruct("StopAgent", { id: Id }),
+  Schema.TaggedStruct("CancelAgent", { id: Id }),
 ]);
 export type InboxCommand = typeof InboxCommand.Type;
 

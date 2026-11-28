@@ -266,6 +266,17 @@ export const receive = Effect.fn("Task.receive")(function* (
   return yield* noted(task, actor, changes, { ...(change.title ? { title: change.title } : {}), ...(change.brief !== undefined ? { brief: change.brief } : {}) }, cause);
 });
 
+/**
+ * AI の作業が始まった・終わった・やめたことを、出来事に残す（Agent Run の段階を受けて、アプリが残す）
+ *
+ * 作業中かは Task に持たず、Agent Run から導く。終わった Task でも、作業が終わった・やめたことは残す（知らないうちに作業が消えないように）
+ */
+export const noteWork = Effect.fn("Task.noteWork")(function* (task: Task, actor: Actor, what: "始まった" | "終わった" | "やめた", cause: string) {
+  yield* guard("noteWork")(actor.kind === "app", "アプリだけ（Agent Run の段階を受ける）");
+  yield* guard("noteWork")(what !== "始まった" || isOpen(task), "作業が始まるのは、やること のときだけ");
+  return yield* noted(task, actor, [{ field: "AI の作業", before: null, after: what, target: null }], {}, cause);
+});
+
 /** 事実を持つ（振り分けが、この Task の事実にすると決めた）。事実は出来事にしない（task-activity.value.ts） */
 export const attachFact = Effect.fn("Task.attachFact")(function* (task: Task, _actor: Actor, sourceItemId: string) {
   yield* guard("attachFact")(task.status !== "終わった", "終わっていないときだけ");

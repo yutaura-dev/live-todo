@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { specOf } from "@yutaura/live-spec/testing";
 import { Effect } from "effect";
 import * as Spec from "../../../specs/action-item.spec.ts";
-import { type Definition, appendItem, chooseOption, completeByWrite, completeItem, completionOf, fromDrafts, type PlanGroup, reopenItem, skipItem, turnOf } from "./plan.js";
+import { type Definition, agentRunOf, appendItem, autoStartAgent, requestAgent, succeedByAgent, chooseOption, completeByWrite, completeItem, completionOf, fromDrafts, type PlanGroup, reopenItem, skipItem, turnOf } from "./plan.js";
 
 const user = { kind: "user" } as const;
 const ai = { kind: "agent" } as const;
@@ -224,5 +224,167 @@ describe(specOf(Spec.completeByWrite), () => {
     Effect.gen(function* () {
       const plan = serial();
       assert.strictEqual(yield* reasonOf(completeByWrite(plan, ids(plan)[0]!, { kind: "app" })), "書き込みで果たされる Action Item だけ");
+    }));
+});
+
+const claude = (title: string, trigger: "auto" | "on_request" = "on_request", completes = false): Definition => ({ title, effort: "easy", due: null, completes, how: { type: "claude", tools: "読むだけ", trigger } });
+const app = { kind: "app" } as const;
+const open = { running: "終わっていない作業はない", task: "開いている" } as const;
+
+describe(specOf(Spec.request), () => {
+  it.effect("Claude Code に頼むと、作業の ID を持つ", () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む")] }, nextId).plan;
+      const id = ids(plan)[0]!;
+      assert.strictEqual(agentRunOf(yield* requestAgent(plan, id, user, open, "ar1"), id), "ar1");
+    }));
+
+  it.effect("番が来る前でも頼める", () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [human("先にやる"), claude("変更点を読む")] }, nextId).plan;
+      const id = ids(plan)[1]!;
+      assert.strictEqual(agentRunOf(yield* requestAgent(plan, id, user, open, "ar1"), id), "ar1");
+    }));
+
+  it.effect(specOf(Spec.request, "ユーザーだけ"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む")] }, nextId).plan;
+      assert.strictEqual(yield* reasonOf(requestAgent(plan, ids(plan)[0]!, app, open, "ar1")), "ユーザーだけ");
+    }));
+
+  it.effect(specOf(Spec.request, "まだのときだけ"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む")] }, nextId).plan;
+      const done = yield* completeItem(plan, ids(plan)[0]!, user);
+      assert.strictEqual(yield* reasonOf(requestAgent(done, ids(plan)[0]!, user, open, "ar1")), "まだのときだけ");
+    }));
+
+  it.effect(specOf(Spec.request, "Claude Code が果たす Action Item だけ"), () =>
+    Effect.gen(function* () {
+      const plan = serial();
+      assert.strictEqual(yield* reasonOf(requestAgent(plan, ids(plan)[0]!, user, open, "ar1")), "Claude Code が果たす Action Item だけ");
+    }));
+
+  it.effect(specOf(Spec.request, "この Action Item の作業が終わっているときだけ（待ち行列も含む）"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む")] }, nextId).plan;
+      assert.strictEqual(
+        yield* reasonOf(requestAgent(plan, ids(plan)[0]!, user, { ...open, running: "終わっていない作業がある" }, "ar1")),
+        "この Action Item の作業が終わっているときだけ（待ち行列も含む）",
+      );
+    }));
+
+  it.effect(specOf(Spec.request, "Task がやること のときだけ（完了待ちの Task では頼まない）"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む")] }, nextId).plan;
+      assert.strictEqual(yield* reasonOf(requestAgent(plan, ids(plan)[0]!, user, { ...open, task: "開いていない" }, "ar1")), "Task がやること のときだけ（完了待ちの Task では頼まない）");
+    }));
+});
+
+describe(specOf(Spec.autoStart), () => {
+  const autoPlan = () => fromDrafts({ type: "serial", items: [claude("変更点を読む", "auto")] }, nextId).plan;
+  const ok = { policy: "範囲に入る", task: "やること" } as const;
+
+  it.effect("番が来た自動でやる Action Item は、一度だけ頼む", () =>
+    Effect.gen(function* () {
+      const plan = autoPlan();
+      const id = ids(plan)[0]!;
+      const started = yield* autoStartAgent(plan, id, app, ok, "ar1");
+      assert.strictEqual(agentRunOf(started, id), "ar1");
+      assert.strictEqual(yield* reasonOf(autoStartAgent(started, id, app, ok, "ar2")), "一度も頼んでいないときだけ");
+    }));
+
+  it.effect(specOf(Spec.autoStart, "アプリだけ"), () =>
+    Effect.gen(function* () {
+      const plan = autoPlan();
+      assert.strictEqual(yield* reasonOf(autoStartAgent(plan, ids(plan)[0]!, user, ok, "ar1")), "アプリだけ");
+    }));
+
+  it.effect(specOf(Spec.autoStart, "番が来ているときだけ"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [human("先にやる"), claude("変更点を読む", "auto")] }, nextId).plan;
+      assert.strictEqual(yield* reasonOf(autoStartAgent(plan, ids(plan)[1]!, app, ok, "ar1")), "番が来ているときだけ");
+    }));
+
+  it.effect(specOf(Spec.autoStart, "自動でやる Action Item だけ"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む")] }, nextId).plan;
+      assert.strictEqual(yield* reasonOf(autoStartAgent(plan, ids(plan)[0]!, app, ok, "ar1")), "自動でやる Action Item だけ");
+    }));
+
+  it.effect(specOf(Spec.autoStart, "一度も頼んでいないときだけ"), () =>
+    Effect.gen(function* () {
+      const plan = autoPlan();
+      const asked = yield* requestAgent(plan, ids(plan)[0]!, user, open, "ar1");
+      assert.strictEqual(yield* reasonOf(autoStartAgent(asked, ids(plan)[0]!, app, ok, "ar2")), "一度も頼んでいないときだけ");
+    }));
+
+  it.effect(specOf(Spec.autoStart, "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）"), () =>
+    Effect.gen(function* () {
+      const plan = autoPlan();
+      assert.strictEqual(yield* reasonOf(autoStartAgent(plan, ids(plan)[0]!, app, { ...ok, policy: "範囲に入らない" }, "ar1")), "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）");
+    }));
+
+  it.effect(specOf(Spec.autoStart, "Task がやること のときだけ（完了待ちでは、自動で頼まない）"), () =>
+    Effect.gen(function* () {
+      const plan = autoPlan();
+      assert.strictEqual(yield* reasonOf(autoStartAgent(plan, ids(plan)[0]!, app, { ...ok, task: "やることでない" }, "ar1")), "Task がやること のときだけ（完了待ちでは、自動で頼まない）");
+    }));
+});
+
+describe(specOf(Spec.succeed), () => {
+  const done = { run: "やり遂げた", subject: "頼んだときのまま" } as const;
+  const asked = () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む", "on_request", true), human("返事する")] }, nextId).plan;
+      return { plan: yield* requestAgent(plan, ids(plan)[0]!, user, open, "ar1"), id: ids(plan)[0]! };
+    });
+
+  it.effect("頼んだ作業がやり遂げたら、Action Item を果たし、次に番が来る", () =>
+    Effect.gen(function* () {
+      const { plan, id } = yield* asked();
+      const next = yield* succeedByAgent(plan, id, app, done);
+      assert.deepStrictEqual([turnOf(next, id), turnOf(next, ids(plan)[1]!)], ["済んだ", "番が来ている"]);
+    }));
+
+  it.effect(specOf(Spec.succeed, "アプリだけ"), () =>
+    Effect.gen(function* () {
+      const { plan, id } = yield* asked();
+      assert.strictEqual(yield* reasonOf(succeedByAgent(plan, id, user, done)), "アプリだけ");
+    }));
+
+  it.effect(specOf(Spec.succeed, "まだのときだけ"), () =>
+    Effect.gen(function* () {
+      const { plan, id } = yield* asked();
+      const once = yield* succeedByAgent(plan, id, app, done);
+      assert.strictEqual(yield* reasonOf(succeedByAgent(once, id, app, done)), "まだのときだけ");
+    }));
+
+  it.effect(specOf(Spec.succeed, "番が来ているときだけ（番が来る前にやり遂げたら、番が来るまで待つ）"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [human("先にやる"), claude("変更点を読む")] }, nextId).plan;
+      const asked2 = yield* requestAgent(plan, ids(plan)[1]!, user, open, "ar1");
+      assert.strictEqual(yield* reasonOf(succeedByAgent(asked2, ids(plan)[1]!, app, done)), "番が来ているときだけ（番が来る前にやり遂げたら、番が来るまで待つ）");
+    }));
+
+  it.effect(specOf(Spec.succeed, "Claude Code に頼んだ Action Item だけ"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [claude("変更点を読む")] }, nextId).plan;
+      assert.strictEqual(yield* reasonOf(succeedByAgent(plan, ids(plan)[0]!, app, done)), "Claude Code に頼んだ Action Item だけ");
+    }));
+
+  it.effect(specOf(Spec.succeed, "頼んだ作業がやり遂げたときだけ"), () =>
+    Effect.gen(function* () {
+      const { plan, id } = yield* asked();
+      assert.strictEqual(yield* reasonOf(succeedByAgent(plan, id, app, { ...done, run: "まだやり遂げていない" })), "頼んだ作業がやり遂げたときだけ");
+    }));
+
+  it.effect(specOf(Spec.succeed, "頼んだときから元の項目（PR の commit など）が変わっていないときだけ（変わっていたら果たさず、もう一度頼むよう見せる）"), () =>
+    Effect.gen(function* () {
+      const { plan, id } = yield* asked();
+      assert.strictEqual(
+        yield* reasonOf(succeedByAgent(plan, id, app, { ...done, subject: "変わった" })),
+        "頼んだときから元の項目（PR の commit など）が変わっていないときだけ（変わっていたら果たさず、もう一度頼むよう見せる）",
+      );
     }));
 });

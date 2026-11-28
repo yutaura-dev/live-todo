@@ -1,5 +1,6 @@
-import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { Effect, Layer, ManagedRuntime } from "effect";
@@ -11,6 +12,8 @@ import { handleAiCommand, handleCommand, handleInbox, handleQuery, syncOnce } fr
 import { SourceGateway } from "./sources/gateway.js";
 import { WriteProvider } from "./writes/write-provider.js";
 import { WriteService } from "./writes/write-service.js";
+import { AgentService } from "./agent/agent-service.js";
+import { ClaudeCodeRunner } from "./agent/claude-code-runner.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { TaskIds, TaskService } from "./task-service.js";
@@ -39,6 +42,14 @@ const runtime = ManagedRuntime.make(
     connector: liveConnector({ env: process.env, commandSucceeds }),
     gateway: SourceGateway.live(process.env),
     writer: (stores) => WriteProvider.live(process.env).pipe(Layer.provide(stores)),
+    agent: ClaudeCodeRunner.live({
+      env: process.env,
+      // Claude Code の会話は作業場所に結び付くので、Task ごとに決まった場所で動かす
+      workRoot: join(app.getPath("userData"), "agent-work"),
+      newSessionId: randomUUID,
+      ensureDir: (path) => void mkdirSync(path, { recursive: true }),
+      spawn: (command, args, options) => spawn(command, [...args], { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "ignore"] }),
+    }),
   }),
 );
 
@@ -74,13 +85,18 @@ app.whenReady().then(async () => {
   await runtime.runPromise(
     Effect.gen(function* () {
       const service = yield* TaskService;
-      yield* service.onChanged(() => BrowserWindow.getAllWindows().forEach((window) => window.webContents.send(CHANNELS.changed)));
+      const broadcast = () => BrowserWindow.getAllWindows().forEach((window) => window.webContents.send(CHANNELS.changed));
+      yield* service.onChanged(broadcast);
+      // Claude Code の答え・途中経過はあとから届くので、届いたら画面に知らせる
+      yield* (yield* AgentService).onChanged(broadcast);
     }),
   );
   // 書き込み中のまま止まっていた書き込みを、やり直さずに確かめる（二重に書き込まないため。write.spec）
   await runtime.runPromise(
     Effect.gen(function* () {
       yield* (yield* WriteService).recover();
+      // やっているまま止まっていた Claude Code の作業は、アプリを閉じたので止まったにする（agent-run.spec）
+      yield* (yield* AgentService).recover();
     }).pipe(Effect.catchCause((cause) => Effect.logWarning("書き込みの後始末ができなかった", cause))),
   );
   runtime.runFork(

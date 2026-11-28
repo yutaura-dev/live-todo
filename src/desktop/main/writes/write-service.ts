@@ -20,10 +20,13 @@ import { TaskIds } from "../task-service.js";
 import { WRITE_OPERATIONS, WriteProvider } from "./write-provider.js";
 import { allowed, AutonomyPolicy, clearOperationLimit, type Level, limitOf, setOperationLimit } from "../../../domain/autonomy/autonomy-policy.js";
 import { SourceItemStore } from "../../../store/source-item-store.js";
+import { AGENT_OPERATIONS } from "../agent/agent-operations.js";
 
 export const writes = documentsOf("write", Write);
 // PC に 1 つなので、決まった ID で 1 件だけ持つ
 const policies = documentsOf("autonomy-policy", Schema.Struct({ id: Schema.String, policy: AutonomyPolicy }));
+export const currentPolicy = Effect.map(policies.find("current"), (found): AutonomyPolicy => (Option.isSome(found) ? found.value.policy : { limits: [] }));
+const OPERATIONS = [...WRITE_OPERATIONS, ...AGENT_OPERATIONS];
 
 export type ShownEffect = { readonly id: string; readonly checked: boolean; readonly target: string; readonly operation: string };
 /** チェックリストに出すもの（まだ頼んでいない・書き込めなかったもの） */
@@ -259,17 +262,17 @@ export class WriteService extends Context.Service<
           return { ok: true, value: null } as const;
         });
 
-      const policyOf = Effect.map(policies.find("current"), (found): AutonomyPolicy => (Option.isSome(found) ? found.value.policy : { limits: [] }));
+      const policyOf = currentPolicy;
 
       const autonomyOf = () =>
         Effect.gen(function* () {
           const policy = yield* policyOf;
-          return WRITE_OPERATIONS.map((op) => ({ operation: op.name, label: op.label, level: op.level, limit: limitOf(policy, op.name) === "決めていない" ? null : (limitOf(policy, op.name) as Level) }));
+          return OPERATIONS.map((op) => ({ operation: op.name, label: op.label, level: op.level, limit: limitOf(policy, op.name) === "決めていない" ? null : (limitOf(policy, op.name) as Level) }));
         });
 
       const setLimitOf = (operation: string, limit: Level | null) =>
         Effect.gen(function* () {
-          if (!WRITE_OPERATIONS.some((op) => op.name === operation)) return { ok: false, reason: "その操作はありません" } as const;
+          if (!OPERATIONS.some((op) => op.name === operation)) return { ok: false, reason: "その操作はありません" } as const;
           const policy = yield* policyOf;
           const next = yield* (limit === null ? clearOperationLimit(policy, user, operation) : setOperationLimit(policy, user, operation, limit)).pipe(Effect.orDie);
           yield* policies.save({ id: "current", policy: next });

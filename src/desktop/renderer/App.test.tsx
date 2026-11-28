@@ -7,6 +7,11 @@ import { App } from "./App.js";
 
 afterEach(cleanup);
 
+const agentRunsOfT1: TaskView["agentRuns"] = [
+  { id: "r1", request: "なぜ CI が落ちている？", status: "終わった", tools: "読むだけ", trigger: "ユーザーが頼んだ", actionItemId: null, result: "型エラーで落ちている", stopReason: null, progress: ["CI のログを読んでいる"], createdAt: "2026-11-28T09:00:00.000Z" },
+  { id: "r2", request: "どのファイル？", status: "やっている", tools: "読むだけ", trigger: "ユーザーが頼んだ", actionItemId: null, result: null, stopReason: null, progress: ["src を探している"], createdAt: "2026-11-28T09:05:00.000Z" },
+];
+
 const view = (card: BoardCard): TaskView => ({
   id: card.id,
   title: card.title,
@@ -23,6 +28,7 @@ const view = (card: BoardCard): TaskView => ({
         { id: "ce1", title: "PR を merge する", target: "github://me@github.com/acme/app/pull/42", operation: "github.merge", checked: true, delivery: "まだ" },
         { id: "ce2", title: "README を直す PR を merge する", target: "github://me@github.com/acme/app/pull/7", operation: "github.merge", checked: true, delivery: "書き込めなかった" },
       ] : [],
+  agentRuns: card.id === "t1" ? agentRunsOfT1 : [],
   history: [{ kind: "できた", by: "ユーザー", occurredAt: "2026-11-28T09:00:00.000Z", changes: [], cause: "手で足した" }],
   createdAt: "2026-11-28T09:00:00.000Z",
 });
@@ -46,6 +52,7 @@ const planRows: NonNullable<TaskView["plan"]> = [
   { kind: "item", id: "a1", title: "PR を読む", depth: 0, turn: "番が来ている", completes: false, how: "human", options: [], chosen: null, added: false },
   { kind: "decision", id: "a2", title: "merge するか", depth: 0, turn: "番待ち", completes: false, how: "decision", options: ["merge する", "調べる"], chosen: null, added: true },
   { kind: "item", id: "a3", title: "PR を merge する", depth: 0, turn: "番が来ている", completes: true, how: "write", options: [], chosen: null, added: false },
+  { kind: "item", id: "a4", title: "CI のログを読む", depth: 0, turn: "番待ち", completes: false, how: "claude", options: [], chosen: null, added: false },
 ];
 
 const emptyInbox: InboxView = { proposals: [], undecided: [], accounts: [], writes: [], autonomy: [] };
@@ -404,5 +411,62 @@ describe("自動でやってよい範囲", () => {
     assert.strictEqual((select as HTMLSelectElement).value, "");
     fireEvent.change(select, { target: { value: "外への書き込み（本番）" } });
     await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "SetOperationLimit", operation: "github.merge", limit: "外への書き込み（本番）" }]));
+  });
+});
+
+describe("Claude Code に頼む", () => {
+  const openTask = async () => {
+    const fake = fakeApi(cards, undefined, {}, emptyInbox);
+    render(<App api={fake.api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /請求書を送る/ }));
+    return { ...fake, section: await screen.findByRole("region", { name: "Claude Code" }) };
+  };
+
+  it("Task について質問を頼める（空のままでは頼めない）", async () => {
+    const { inboxSent, section } = await openTask();
+    const ask = within(section).getByRole("button", { name: "聞く" }) as HTMLButtonElement;
+    assert.isTrue(ask.disabled);
+    fireEvent.change(within(section).getByRole("textbox", { name: "Claude Code に聞くこと" }), { target: { value: "なぜ CI が落ちている？" } });
+    fireEvent.click(ask);
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "AskAgent", taskId: "t1", request: "なぜ CI が落ちている？" }]));
+  });
+
+  it("頼んだ作業の答えと途中経過を見せ、やっている作業は止められる", async () => {
+    const { inboxSent, section } = await openTask();
+    assert.isNotNull(within(section).getByText("型エラーで落ちている"));
+    const running = within(section).getByText("どのファイル？").closest("li")!;
+    assert.isNotNull(within(running as HTMLElement).getByText("src を探している"));
+    fireEvent.click(within(running as HTMLElement).getByRole("button", { name: "止める" }));
+    assert.deepStrictEqual(inboxSent, []);
+    assert.isNotNull(within(running as HTMLElement).getByText(/途中で終わります/));
+    fireEvent.click(within(running as HTMLElement).getByRole("button", { name: "止めることにする" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "StopAgent", id: "r2" }]));
+  });
+
+  it("答えがあとから届いたら、開いている Task を読み直す", async () => {
+    const fake = fakeApi(cards, undefined, {}, emptyInbox);
+    let notify = () => {};
+    let answered = false;
+    const api: LiveTodoApi = {
+      ...fake.api,
+      onChanged: (listener) => ((notify = listener), () => {}),
+      task: async (id) => {
+        const base = view(cards.find((card) => card.id === id)!);
+        return { ok: true, value: answered ? { ...base, brief: "CI は型エラーで落ちている" } : base };
+      },
+    };
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /請求書を送る/ }));
+    await screen.findByRole("region", { name: "Claude Code" });
+    answered = true;
+    notify();
+    assert.isNotNull(await screen.findByText("CI は型エラーで落ちている"));
+  });
+
+  it("計画の Claude Code の Action Item は、番が来る前でも頼める", async () => {
+    const { inboxSent } = await openTask();
+    const plan = await screen.findByRole("region", { name: "計画" });
+    fireEvent.click(within(plan).getByRole("button", { name: "Claude Code に頼む" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "RequestAgent", taskId: "t1", itemId: "a4" }]));
   });
 });

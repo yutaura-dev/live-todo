@@ -7,11 +7,13 @@ import { StoreDatabase } from "../../store/database.js";
 import { AiConnector } from "./ai/connector.js";
 import { SourceGateway } from "./sources/gateway.js";
 import { WriteProvider } from "./writes/write-provider.js";
+import { agentTest } from "../../llm/agent/test-double.js";
+import { unanswered } from "../../llm/shared/answer.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { sequentialIds, TaskService } from "./task-service.js";
 
-const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable, gateway: SourceGateway.live({}), writer: (stores) => WriteProvider.live({}).pipe(Layer.provide(stores)) });
+const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable, gateway: SourceGateway.live({}), writer: (stores) => WriteProvider.live({}).pipe(Layer.provide(stores)), agent: agentTest({ run: () => [], askToStop: () => unanswered("Missing") }).layer });
 const undecided = { status: "未判定", level: null, reason: null } as const;
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
