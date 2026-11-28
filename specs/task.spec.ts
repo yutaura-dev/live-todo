@@ -159,7 +159,10 @@ export const links = [
   { from: receive, to: "priority", action: "basisChanged", label: "期日・事実が変わったら、優先度を決め直す" },
   { from: revisePlan, to: "priority", action: "basisChanged", label: "計画（Action Item の期日・手間）が変わったら、優先度を決め直す" },
   { from: noteProgress, to: "priority", action: "basisChanged", label: "Action Item が済んで残りの手間が変わったら、優先度を決め直す" },
-  { from: reopen, to: "priority", action: "resume", label: "やり直した Task は、優先度を判定し直す" },
+  { from: setDue, to: "priority", action: "basisChanged", label: "期日を直したら、優先度を決め直す" },
+  { from: attachFact, to: "priority", action: "basisChanged", label: "事実が増えたら、優先度を決め直す" },
+  { from: detachFact, to: "priority", action: "basisChanged", label: "事実が外れたら、優先度を決め直す" },
+  { from: reopen, to: "priority", action: "resume", label: "やり直した Task は、優先度を判定し直す（ユーザーが決めたものは、そのまま）" },
   { from: complete, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）。自動で終えたとき（完了条件を満たした）も同じで、途中までの報告を残す。追う項目が片付いて判断中の作業も、Task を終えるほうを先にする（ADR-0016 の判断より優先）" },
   { from: finishCompletion, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）" },
   { from: dismiss, to: "action-item", action: "skip", label: "まだの Action Item をすべてやらなくする（その作業は、Action Item の側からやめる）" },
@@ -212,6 +215,13 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
     { field: "列", before: task.status, after: "closed", target: null },
     { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
+}
+
+/** 期日を直す（ユーザーが。事実から読み取った期日が違っていたとき） */
+export function setDue(task: Task, actor: Actor): Task {
+  ensure(actor.kind === "user", "ユーザーだけ");
+  ensure(isOpen(task), "要確認か todo のときだけ");
+  return noted({ ...task, due: { text: "12 月 15 日まで", earliest: "2026-12-15T00:00", latest: "2026-12-15T23:59", precision: "日" } }, actor, "変わった", [{ field: "期日", before: null, after: "12 月 15 日まで", target: null }]);
 }
 
 /** 優先度の段階が変わった（Priority から届く。だれが決めたかと一緒に出来事に残す。ユーザーが決めたなら既読） */
@@ -485,6 +495,12 @@ export const decisions = {
 };
 
 export const scenarios = {
+  "期日を直せるのは、開いている Task でユーザーだけ": [
+    { do: setDue, by: "ユーザー", denied: "要確認か todo のときだけ" },
+    { do: triage, by: "同期", input: "要確認" },
+    { do: setDue, by: "アプリ", denied: "ユーザーだけ" },
+    { do: setDue, by: "ユーザー" },
+  ],
   "優先度の変化は、開いている Task にだけ残す": [
     { do: notePriority, by: "アプリ", denied: "要確認か todo のときだけ（終わった Task の優先度は判定しない）" },
     { do: triage, by: "同期", input: "要確認" },

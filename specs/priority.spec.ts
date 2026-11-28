@@ -55,7 +55,7 @@ export function initial(actor: Actor): PriorityJudgment {
 export function decideByRule(priority: PriorityJudgment, actor: Actor, rule: RuleResult): PriorityJudgment {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(priority.status === "未判定" || priority.status === "段階未定", "未判定・段階未定のときだけ");
-  ensure(rule !== "規則では決めない", "規則で段階が出たときだけ");
+  ensure(rule !== "規則では決めない" && rule !== "今日中以上（今すぐかは判定）", "規則で段階が出たときだけ");
   return rule === "今日中"
     ? { ...priority, status: "アプリが決めた", level: "今日中", reason: "期日まで余裕がない" }
     : { ...priority, status: "アプリが決めた", level: "3 日以内", reason: "期日まで 3 日" };
@@ -65,12 +65,14 @@ export function decideByRule(priority: PriorityJudgment, actor: Actor, rule: Rul
  * 判定した（規則で決まらなかったものだけ）
  *
  * Decisions で、いちばん確率の高い段階が閾値以上なら、その段階に決める。閾値の間・断られた・形に合わない・答えが返らないなら、段階未定にする。
+ * 他の人を止めているもの（規則で今日中以上）は、今すぐと判定されたときだけ今すぐにし、それ以外（迷ったときも）は今日中にする（止めているので、段階未定にして後回しにしない）。
  */
 export function judge(priority: PriorityJudgment, actor: Actor, rule: RuleResult, result: Level | "閾値の間・断られた・形に合わない" | "答えが返らない", basis: "今の材料" | "古い材料"): PriorityJudgment {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(priority.status === "未判定" || priority.status === "段階未定", "未判定・段階未定のときだけ");
-  ensure(rule === "規則では決めない", "規則で決まらなかったときだけ");
+  ensure(rule === "規則では決めない" || rule === "今日中以上（今すぐかは判定）", "規則で決まらなかったときだけ");
   ensure(basis === "今の材料", "判定に渡した材料が今のものと同じときだけ（判定の間に材料が変わったら、答えを捨てて判定し直す）");
+  if (rule === "今日中以上（今すぐかは判定）" && result !== "今すぐ") return { ...priority, status: "アプリが決めた", level: "今日中", reason: "他の人を止めている" };
   if (result !== "閾値の間・断られた・形に合わない" && result !== "答えが返らない") return { ...priority, status: "アプリが決めた", level: result, reason: "判定した" };
   return { ...priority, status: "段階未定", level: null, reason: null };
 }
@@ -78,6 +80,7 @@ export function judge(priority: PriorityJudgment, actor: Actor, rule: RuleResult
 /** ユーザーが優先度を決める（段階未定に答える・アプリが決めたものを変える） */
 export function setByUser(priority: PriorityJudgment, actor: Actor): PriorityJudgment {
   ensure(actor.kind === "user", "ユーザーだけ");
+  ensure(priority.status !== "判定しない", "判定する Task のときだけ（終わった Task は判定しない）");
   return { ...priority, status: "ユーザーが決めた", level: "今日中", reason: "ユーザーが決めた" };
 }
 
@@ -104,6 +107,7 @@ export function basisChanged(priority: PriorityJudgment, actor: Actor, _why: "�
 export function stop(priority: PriorityJudgment, actor: Actor): PriorityJudgment {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(priority.status !== "判定しない", "判定しているときだけ");
+  ensure(priority.status !== "ユーザーが決めた", "アプリが決めるときだけ（ユーザーが決めたものは、もともと判定しないので、そのまま残す）");
   return { ...priority, status: "判定しない" };
 }
 
@@ -115,7 +119,7 @@ export function resume(priority: PriorityJudgment, actor: Actor): PriorityJudgme
 }
 
 export const inputs = {
-  decideByRule: { 今日中: ["今日中"], "3 日以内": ["3 日以内"], 規則で決まらない: ["規則では決めない"] },
+  decideByRule: { 今日中: ["今日中"], "3 日以内": ["3 日以内"], 規則で決まらない: ["規則では決めない"], 止めている: ["今日中以上（今すぐかは判定）"] },
   judge: {
     今すぐ: ["規則では決めない", "今すぐ", "今の材料"],
     "10 日以内": ["規則では決めない", "10 日以内", "今の材料"],
@@ -124,6 +128,9 @@ export const inputs = {
     答えが返らない: ["規則では決めない", "答えが返らない", "今の材料"],
     規則で決まった: ["今日中", "10 日以内", "今の材料"],
     古い材料: ["規則では決めない", "10 日以内", "古い材料"],
+    "止めている・今すぐ": ["今日中以上（今すぐかは判定）", "今すぐ", "今の材料"],
+    "止めている・急がない": ["今日中以上（今すぐかは判定）", "10 日以内", "今の材料"],
+    "止めている・迷った": ["今日中以上（今すぐかは判定）", "閾値の間・断られた・形に合わない", "今の材料"],
   },
   basisChanged: { 材料: ["材料が変わった"], 日: ["日が変わった"] },
 };
@@ -143,6 +150,25 @@ export const links = [
 ];
 
 export const scenarios = {
+  "他の人を止めているものは、今すぐか今日中にする（迷っても後回しにしない）": [
+    { do: initial, by: "同期" },
+    { do: decideByRule, by: "同期", input: "止めている", denied: "規則で段階が出たときだけ" },
+    { do: judge, by: "AI", input: "止めている・迷った", expect: { level: "今日中" } },
+    { do: basisChanged, by: "同期", input: "材料" },
+    { do: judge, by: "AI", input: "止めている・急がない", expect: { level: "今日中" } },
+    { do: basisChanged, by: "同期", input: "材料" },
+    { do: judge, by: "AI", input: "止めている・今すぐ", expect: { level: "今すぐ" } },
+  ],
+  "ユーザーが決めた優先度は、Task を終えてもやり直してもそのまま": [
+    { do: initial, by: "同期" },
+    { do: setByUser, by: "ユーザー" },
+    { do: stop, by: "同期", denied: "アプリが決めるときだけ（ユーザーが決めたものは、もともと判定しないので、そのまま残す）" },
+  ],
+  "終わった Task の優先度は、ユーザーも決めない": [
+    { do: initial, by: "同期" },
+    { do: stop, by: "同期" },
+    { do: setByUser, by: "ユーザー", denied: "判定する Task のときだけ（終わった Task は判定しない）" },
+  ],
   "判定の間に材料が変わったら、古い材料での答えは捨てる": [
     { do: initial, by: "同期" },
     { do: basisChanged, by: "同期", input: "材料", expect: { status: "未判定" } },
@@ -224,11 +250,12 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "indistinguishable-example:judge:今すぐ,止めている・今すぐ": "今すぐと判定されたら、他の人を止めているかにかかわらず今すぐにする。同じ結果になるのが意図どおり",
+  "indistinguishable-example:judge:止めている・急がない,止めている・迷った": "他の人を止めているものは、急がないと判定されても迷っても今日中にする（段階未定にして後回しにしない）。同じ結果になるのが意図どおり",
+  "equivalent-states:未判定 · level=なし · reason=なし/段階未定 · level=なし · reason=なし/未判定 · 今日中 · 期日まで余裕がない/未判定 · 3 日以内 · 期日まで 3 日/未判定 · 今すぐ · 判定した/未判定 · 10 日以内 · 判定した/未判定 · それより先でよい · 判定した/未判定 · 今日中 · 他の人を止めている/未判定 · 今日中 · ユーザーが決めた": "決め直す間・段階未定は、できること（決める・材料や日が変わったら決め直す・ユーザーが決める）は同じだが、見せ方が違う（前のラベルのまま並べる・段階未定の印を付ける・はじめて決める前は並べない）",
+  "equivalent-states:アプリが決めた · 今日中 · 期日まで余裕がない/アプリが決めた · 3 日以内 · 期日まで 3 日/アプリが決めた · 今すぐ · 判定した/アプリが決めた · 10 日以内 · 判定した/アプリが決めた · それより先でよい · 判定した/アプリが決めた · 今日中 · 他の人を止めている": "アプリが決めたラベルごとに、できることは同じだが、ボードの並びと見せる理由が違う",
+  "equivalent-states:判定しない · level=なし · reason=なし/判定しない · 今日中 · 期日まで余裕がない/判定しない · 3 日以内 · 期日まで 3 日/判定しない · 今すぐ · 判定した/判定しない · 10 日以内 · 判定した/判定しない · それより先でよい · 判定した/判定しない · 今日中 · 他の人を止めている/判定しない · 今日中 · ユーザーが決めた": "判定しない Task のラベルは見せないが、やり直したときに前のラベルのまま並べるために残す",
   "indistinguishable-example:judge:閾値の間,答えが返らない": "どちらも、低い優先度ではなく段階未定に倒す（fail closed）。返らなかったのか、閾値の間・断られた・形に合わないのかは記録では分けるが、できることは同じ",
-  "equivalent-states:未判定 · level=なし · reason=なし/段階未定 · level=なし · reason=なし/未判定 · 今日中 · 期日まで余裕がない/未判定 · 3 日以内 · 期日まで 3 日/未判定 · 今すぐ · 判定した/未判定 · 10 日以内 · 判定した/未判定 · それより先でよい · 判定した/未判定 · 今日中 · ユーザーが決めた": "決め直す間・段階未定は、できること（決める・材料や日が変わったら決め直す・ユーザーが決める）は同じだが、見せ方が違う（前のラベルのまま並べる・段階未定の印を付ける・はじめて決める前は並べない）",
-  "equivalent-states:アプリが決めた · 今日中 · 期日まで余裕がない/アプリが決めた · 3 日以内 · 期日まで 3 日/アプリが決めた · 今すぐ · 判定した/アプリが決めた · 10 日以内 · 判定した/アプリが決めた · それより先でよい · 判定した": "アプリが決めたラベルごとに、できることは同じだが、ボードの並びと見せる理由が違う",
-  "equivalent-states:判定しない · level=なし · reason=なし/判定しない · 今日中 · 期日まで余裕がない/判定しない · 3 日以内 · 期日まで 3 日/判定しない · 今すぐ · 判定した/判定しない · 10 日以内 · 判定した/判定しない · それより先でよい · 判定した/判定しない · 今日中 · ユーザーが決めた": "判定しない Task のラベルは見せないが、やり直したときに前のラベルのまま並べるために残す",
-  "anytime:setByUser": "ユーザーはいつでも優先度を決められる（段階未定に答える・アプリが決めたものを変える・自分で決め直す）",
   "ignores-input:basisChanged": "材料が変わっても日が変わっても、同じく判定し直す。どちらで判定し直したかは記録のために受け取る",
   "unused-field:reason": "なぜその段階かは、ユーザーに見せる一言で、操作の可否は変えない。決まっているときだけあることを、不変条件で確かめるために読んでいる",
 };
