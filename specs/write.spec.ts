@@ -1,4 +1,5 @@
 import { ensure } from "@yutaura/live-spec";
+import type { Level } from "./autonomy-policy.spec.ts";
 import type { Subject } from "./condition.value.ts";
 
 /**
@@ -14,7 +15,7 @@ export type Write = {
   /** 書き込みの段階 */
   stage: Stage;
   /** 承認（まだなければ null）。承認のしかたは、何から頼まれたかで決まる 。自動でやってよい範囲による承認なら、そのときの操作と上限も残す（あとで範囲を変えても、なぜ書き込んだかを追えるように） */
-  approval: { by: "ユーザーが確かめた" | "自動でやってよい範囲" | "完了のボタン"; at: string; policy: { operation: string; limit: string } | null } | null;
+  approval: { by: "ユーザーが確かめた" | "自動でやってよい範囲" | "完了のボタン"; at: string; policy: { operation: string; limit: Level } | null } | null;
   /** Write を見分ける ID */
   id: string;
   /** 何に書き込むか */
@@ -89,7 +90,7 @@ type Request =
       sameAsDefinition: boolean;
       /** その Action Item に、終わっていない書き込みがもうあるか */
       openWrite: boolean;
-      /** 判断表「自動でやってよいか」（Autonomy Policy）の答え。書き込む先が、その Task の事実のどれかと同じアカウントかも含めて決まる */
+      /** 判断表「自動でやってよいか」（Autonomy Policy）の答え。書き込む先が、その Task が追っている事実そのものかも含めて決まる */
       policy: "自動でやる" | "ユーザーが頼む・承認する";
       /** 自動で書き込むとき、計画を立てた（Agent が調べた）ときの対象の版（Action Item の中身に持つ）が今も同じか。中身も Action Item の中身をそのまま写す */
       planVersion: "計画の版のまま" | "変わった";
@@ -261,6 +262,8 @@ const FINISHED: Stage[] = ["書き込んだ", "失敗", "取りやめた"];
 
 export const invariants = {
   "書き込むのは、承認があるときだけ": (write: Write) => APPROVED.includes(write.stage) === (write.approval !== null),
+  "自動でやってよい範囲による承認にだけ、そのときの操作と上限がある": (write: Write) =>
+    write.approval === null || (write.approval.by === "自動でやってよい範囲") === (write.approval.policy !== null),
   "終わった書き込みは、もう変わらない": (before: Write, after: Write) => !FINISHED.includes(before.stage) || before.stage === after.stage,
   "承認の対象（何に・どの操作で・どの中身を・どの版に）は、作ったあと変わらない": (before: Write, after: Write) =>
     before.subject.uri === after.subject.uri &&
