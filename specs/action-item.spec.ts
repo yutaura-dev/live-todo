@@ -84,8 +84,8 @@ const decision: ActionDefinition = {
 export const inputs = {
   initial: {
     人がやる: [{ title: "年末調整の書類を出す", effort: "normal", completes: false, how: { type: "human", place: null } }],
-    頼めばやる: [{ title: "型エラーを直す", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null, tools: "直す" } }],
-    自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null, tools: "読むだけ" } }],
+    頼めばやる: [{ title: "型エラーを直す", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null, tools: "直す", subject: null } }],
+    自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null, tools: "読むだけ", subject: null } }],
     条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, name: "github.merged", afterStart: false, label: "PR #42 が merge される" } } }],
     書き込みで果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge" } }],
     分かれ道: [decision],
@@ -181,6 +181,7 @@ export function autoStart(item: ActionItem, actor: Actor, turn: Turn, policy: "�
 /**
  * Claude Code がやり遂げた作業で、Action Item を果たす（Agent Run がやり遂げたとき、または番が来たとき）
  *
+ * 元の項目は、Action Item の中身が名指しする項目（subject）。名指ししない（null）なら、いつも頼んだときのままとして受け取る。
  * ボタンでは、番が来る前でも頼める（ユーザーが先に進めたいときのため）。ただし、果たすのは番が来てから（やり遂げた成果は Agent Run に残り、番が来たら果たす）。
  */
 export function succeed(item: ActionItem, actor: Actor, turn: Turn, run: "やり遂げた" | "まだやり遂げていない", subject: "頼んだときのまま" | "変わった"): ActionItem {

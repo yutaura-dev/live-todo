@@ -27,7 +27,7 @@ export type AgentRun = {
   sessionId: string;
   /** どう始まったか（Action Item から = 番が来て自動で、またはボタンで） */
   trigger: "ユーザーが頼んだ" | "Action Item から";
-  /** 調べたときの元の項目（PR の head の commit など。質問のように元の項目がなければ null）。変わったら調べ直す。push を頼むときの版（Write の version）にし、直し始めたときから動いていないことを確かめる */
+  /** 調べたときの元の項目（PR の head の commit など。質問のように元の項目がなければ null）。変わったら調べ直す。push を頼むときの版（Write の version）にし、直し始めたときから動いていないことを確かめる。Action Item から始める作業では、Action Item の中身が名指しする項目（subject）の版で、名指ししなければ null（変わったかを見ず、追う項目が片付いた知らせも送らない） */
   subjectFingerprint: string | null;
   /** 追う項目が片付いたことを、もう知らせたか（知らせるのは 1 回だけ） */
   notified: boolean;

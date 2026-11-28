@@ -21,7 +21,7 @@ export type How =
   /** 人が「済んだ」を押して果たす */
   | { type: "human"; place: Place | null }
   /** Claude Code が果たす（人が「済んだ」を押して済ませてもよい） */
-  | { type: "claude"; trigger: Trigger; workspace: string | null; tools: "読むだけ" | "直す" }
+  | { type: "claude"; trigger: Trigger; workspace: string | null; tools: "読むだけ" | "直す"; subject: Subject | null }
   /** 待つ条件が成り立って果たされる。アプリ（Watcher）が見張る */
   | { type: "condition"; condition: Condition }
   /** 外への書き込み（merge する・メールに返信する など）が承認されて成功すると果たされる。何に・どの操作で書き込むかを持つ（書き込み 1 回は、ユーザーが頼んだときにできて、この Action Item を指す） */
