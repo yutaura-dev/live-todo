@@ -29,7 +29,7 @@
 | Pre-work | AI がユーザーの依頼を待たずに先回りして進める作業 |
 | 定期の Task | 決まった時期（毎月 N 日など）に、決まった手順つきで作られる Task。決まりは `recurring_tasks` に持つ（[ADR-0011](docs/decisions/0011-recurring-tasks.md)） |
 | Approval | 外部への書き込み（返信、コメント、送信など）をユーザーが承認する手続き |
-| LLM Profile | 使う LLM プロバイダ・モデル・認証情報の組み合わせ。当面は PC 単位で 1 つ |
+| AI Settings | アプリが使う AI の設定（PC に 1 つ）。使い道ごとに 3 つ持つ: Decisions（分類・確率付きの判定。安い）・Generation（文章を伴う Structured Output。Task の説明・計画を作る）・Agent（Claude Code・Codex などで複雑な作業・調査をする）。安い順に上げていき、3 つは独立して選べる。3 つとも使えないとアプリは使えない |
 | Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる |
 | 未分類 | どの Epic にも入っていない Task |
 | 更新マーク | ユーザーが最後に Task を見たあとに、ユーザー以外が起こした Task Activity がある Task に付く目印。Source 側の変化ではなく、Task の出来事から導く。まだ一度も見ていない Task は「新着」で見せる |
@@ -42,7 +42,7 @@
 ## AI 協働ルール
 
 - 外部サービスへの書き込みを行うコードは、必ず Approval を経由する設計にする。承認を迂回できる経路を作らない
-- 会社アカウントのデータを別の LLM Profile に送る経路を作らない（[charter の前提と制約](docs/charter.md#前提と制約) を参照）
+- 会社アカウントのデータを、会社が許可していない AI（AI Settings に設定していないもの）に送る経路を作らない（[charter の前提と制約](docs/charter.md#前提と制約) を参照）
 - Source Item の本文やトークンをログに出さない
 - テストのない変更を入れない。新しい Source Adapter は実 API ではなくフィクスチャでテストする
 - 判定の refusal や想定外の応答は「要確認」に倒す（fail closed）。否定判定として扱わない

@@ -2,7 +2,7 @@
  * Task に届いたもの 1 つ（Task Input）。Source と Task の間の抽象化を受け持つ型で、保存しない。
  * Task の入口は receive の 1 本で、届いたものを、AI か規則が Task の言葉（項目の変化）に置き換える。項目が変わったときだけ、Task の出来事（Task Activity）が残る。
  * 何も変えなかった入力（関係ないと判定した など）と判定できなかった入力は、Task の外の受け取りのログに残す。ユーザーには見せず、デバッグと判定の精度の見直しに使う（本文やトークンは残さない）。
- * AI の作業の始まり・終わり・やめたは、作業の操作（startWork・finishWork・stopWork）で受け、「AI の作業」の変化として残す。
+ * AI の作業の始まり・終わり・やめたは、作業の操作（startWork・finishWork・stopWork）で受け、「AI の作業」の変化として残す。Agent は Task を直接は変えないので、Agent の成果物（調べた結果・下書き など）は「AI の作業の成果」として届き、Generationが Task の言葉に置き換える。
  */
 export type TaskInput = {
   /** 何が届いたか */
@@ -22,6 +22,8 @@ export const TaskInputKind = {
   factDetached: "事実が外れた",
   /** 外への書き込みができなかった（Action Item の書き込み・完了したときにすることの書き込み） */
   writeFailed: "書き込めなかった",
+  /** Agent の作業の成果（調べた結果・下書き など） */
+  agentResult: "AI の作業の成果",
 } as const;
 export type TaskInputKind = (typeof TaskInputKind)[keyof typeof TaskInputKind];
 
@@ -35,6 +37,7 @@ export const examples = {
     "PR が merge された（事実が変わった）": { kind: "事実が変わった", sourceId: "activity:s1:3", reason: null },
     "Slack で返信が来た（事実が増えた）": { kind: "事実が増えた", sourceId: "activity:s7:1", reason: null },
     "merge できなかった": { kind: "書き込めなかった", sourceId: "write:w1", reason: "権限が足りない" },
+    "Agent が調べ終えた": { kind: "AI の作業の成果", sourceId: "agent-run:ar1", reason: null },
   },
   invalid: {
     "どこから来たかがない": { kind: "事実が変わった", sourceId: "", reason: null },
