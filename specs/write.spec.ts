@@ -14,7 +14,7 @@ export type Write = {
   /** 書き込みの段階 */
   stage: Stage;
   /** 承認（まだなければ null）。承認のしかたは、何から頼まれたかで決まる */
-  approval: { at: string } | null;
+  approval: { by: "ユーザーが確かめた" | "自動でやってよい範囲" | "完了のボタン"; at: string } | null;
   /** Write を見分ける ID */
   id: string;
   /** 何に書き込むか */
@@ -91,6 +91,10 @@ type Request =
       openWrite: boolean;
       /** 自動でやってよい範囲（Autonomy Policy）に入るか（入るなら、アプリが確かめずに書き込める） */
       withinPolicy: boolean;
+      /** 自動で書き込むとき、計画を立てた（Agent が調べた）ときの対象の版が今も同じか */
+      planVersion: "計画の版のまま" | "変わった";
+      /** この Action Item から、もう自動で頼んだことがあるか（自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む） */
+      autoTried: boolean;
     }
   | {
       way: "完了したときにすること";
@@ -123,6 +127,10 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
     "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ",
   );
   ensure(ready === "書き込める", "書き込める状態のときだけ");
+  if (request.way === "Action Item" && actor.kind === "app") {
+    ensure(request.planVersion === "計画の版のまま", "自動で書き込むのは、計画を立てたときの版が今も同じときだけ");
+    ensure(!request.autoTried, "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）");
+  }
   if (request.way === "Action Item") {
     ensure(request.item === "番が来ていて、まだ", "Action Item に番が来ていて、まだ済んでいないときだけ");
     ensure(request.sameAsDefinition, "Action Item の定義と同じ対象と操作だけ");
@@ -135,7 +143,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
   const byEffect = request.way === "完了したときにすること" || actor.kind === "app";
   return {
     stage: byEffect ? "書き込み中" : "確認中",
-    approval: byEffect ? { at: "2026-11-28T00:00:00Z" } : null,
+    approval: byEffect ? { by: request.way === "完了したときにすること" ? "完了のボタン" : "自動でやってよい範囲", at: "2026-11-28T00:00:00Z" } : null,
     id: "w1",
     subject: { uri: "github://yutaura@github.com/acme/app/pull/42" },
     operation: "github.merge",
@@ -160,7 +168,7 @@ export function approve(write: Write, actor: Actor, version: "見せた版のま
   ensure(write.stage === "確認中", "確認中のときだけ");
   ensure(version === "見せた版のまま", "見せた版が今も同じときだけ");
   ensure(ready === "書き込める", "書き込める状態のときだけ");
-  return { ...write, stage: "書き込み中", approval: { at: "2026-11-28T00:00:00Z" } };
+  return { ...write, stage: "書き込み中", approval: { by: "ユーザーが確かめた", at: "2026-11-28T00:00:00Z" } };
 }
 
 /** 確認をやめる */
@@ -215,13 +223,15 @@ export function settle(write: Write, actor: Actor, result: "書けていた" | "
     : { ...write, stage: "失敗", failure: { kind: "書けていなかった", message: "" }, finishedAt: "2026-11-28T00:05:00Z" };
 }
 
-const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, withinPolicy: false };
+const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, withinPolicy: false, planVersion: "計画の版のまま", autoTried: false };
 const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true, openWrite: false, version: "版を持たない" };
 
 export const inputs = {
   initial: {
     "Action Item から": [FROM_ITEM, "書き込める"],
     自動でやってよい範囲: [{ ...FROM_ITEM, withinPolicy: true }, "書き込める"],
+    "自動だが、計画のあとに版が変わった": [{ ...FROM_ITEM, withinPolicy: true, planVersion: "変わった" }, "書き込める"],
+    "自動で一度頼んで失敗した": [{ ...FROM_ITEM, withinPolicy: true, autoTried: true }, "書き込める"],
     書き込めない: [FROM_ITEM, "書き込めない"],
     番待ち: [{ ...FROM_ITEM, item: "番待ち" }, "書き込める"],
     済んだ: [{ ...FROM_ITEM, item: "済んでいる" }, "書き込める"],
@@ -261,8 +271,14 @@ export const links = [
 ];
 
 export const scenarios = {
+  "自動で書き込むのは、計画を立てたときの版が今も同じときだけ": [
+    { do: initial, by: "アプリ", input: "自動だが、計画のあとに版が変わった", denied: "自動で書き込むのは、計画を立てたときの版が今も同じときだけ" },
+  ],
+  "自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む": [
+    { do: initial, by: "アプリ", input: "自動で一度頼んで失敗した", denied: "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）" },
+  ],
   "自動でやってよい範囲の書き込みは、アプリが確かめずに書き込む（draft の PR を作る など）": [
-    { do: initial, by: "アプリ", input: "自動でやってよい範囲", expect: { stage: "書き込み中", requestedBy: { type: "actionItem" } } },
+    { do: initial, by: "アプリ", input: "自動でやってよい範囲", expect: { stage: "書き込み中", requestedBy: { type: "actionItem" }, approval: { by: "自動でやってよい範囲" } } },
     { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
   ],
   "完了のボタンを押したら、完了したときにすることを確かめずに書き込む": [
