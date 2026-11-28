@@ -122,6 +122,17 @@ export const AccountView = Schema.Struct({
 });
 export type AccountView = typeof AccountView.Type;
 
+/** 承認の画面に出す書き込み（承認待ちと、書き込めなかったもの） */
+export const WriteView = Schema.Struct({
+  id: Schema.String,
+  taskId: Schema.String,
+  taskTitle: Schema.String,
+  summary: Schema.String,
+  stage: Schema.Literals(["承認待ち", "書き込み中", "書けたか分からない", "書き込んだ", "失敗", "取りやめた"]),
+  failure: Schema.NullOr(Schema.String),
+});
+export type WriteView = typeof WriteView.Type;
+
 /** 提案・事実・アカウントの操作（どれもユーザーが行う） */
 export const InboxCommand = Schema.Union([
   Schema.TaggedStruct("AcceptProposal", { id: Id }),
@@ -133,10 +144,13 @@ export const InboxCommand = Schema.Union([
   Schema.TaggedStruct("AddGitHubAccount", { key: Schema.String, label: Schema.String }),
   Schema.TaggedStruct("RemoveAccount", { id: Id }),
   Schema.TaggedStruct("SyncNow", {}),
+  Schema.TaggedStruct("RequestWrite", { taskId: Id, itemId: Id }),
+  Schema.TaggedStruct("ApproveWrite", { id: Id }),
+  Schema.TaggedStruct("CancelWrite", { id: Id }),
 ]);
 export type InboxCommand = typeof InboxCommand.Type;
 
-export const InboxView = Schema.Struct({ proposals: Schema.Array(ProposalView), undecided: Schema.Array(FactView), accounts: Schema.Array(AccountView) });
+export const InboxView = Schema.Struct({ proposals: Schema.Array(ProposalView), undecided: Schema.Array(FactView), accounts: Schema.Array(AccountView), writes: Schema.Array(WriteView) });
 export type InboxView = typeof InboxView.Type;
 
 const AiOptionView = Schema.Struct({ id: Schema.String, label: Schema.String, secret: Schema.NullOr(Schema.String) });

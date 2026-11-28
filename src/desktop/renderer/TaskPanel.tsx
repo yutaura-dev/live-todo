@@ -29,7 +29,7 @@ const CLOSURE_LABELS = { done: "やり終えた", dismissed: "やらないこと
 const timeOf = (iso: string) => new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
 /** Task の詳細。手で足した Task は計画を持たないので、完了条件と操作・履歴だけを見せる */
-export function TaskPanel(props: { task: TaskView; problem: string | null; onCommand: (command: PanelCommand) => void; onClose: () => void }) {
+export function TaskPanel(props: { task: TaskView; problem: string | null; onCommand: (command: PanelCommand) => void; onRequestWrite?: (itemId: string) => void; onClose: () => void }) {
   const { task } = props;
   const open = task.status === "やること";
   return (
@@ -107,7 +107,7 @@ export function TaskPanel(props: { task: TaskView; problem: string | null; onCom
         </section>
       )}
 
-      <PlanView rows={task.plan} open={open} onCommand={props.onCommand} />
+      <PlanView rows={task.plan} open={open} onCommand={props.onCommand} {...(props.onRequestWrite ? { onRequestWrite: props.onRequestWrite } : {})} />
 
       {task.plan === null && (
       <section className="ui-section" aria-labelledby="completion-title">

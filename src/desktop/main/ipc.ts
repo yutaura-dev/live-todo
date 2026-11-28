@@ -3,6 +3,7 @@ import { AiCommand, Command, InboxCommand, type InboxView, Query, type Reply } f
 import { ProposalService } from "./proposals/proposal-service.js";
 import { AccountService } from "./sources/account-service.js";
 import { SyncRunner } from "./sources/sync-runner.js";
+import { WriteService } from "./writes/write-service.js";
 import { AiSettingsService } from "./ai/ai-settings-service.js";
 import { TaskService } from "./task-service.js";
 
@@ -54,7 +55,8 @@ export const handleAiCommand = (raw: unknown) =>
 const inboxView = Effect.gen(function* () {
   const proposals = yield* ProposalService;
   const accounts = yield* AccountService;
-  return { proposals: yield* proposals.list(), undecided: yield* proposals.undecided(), accounts: yield* accounts.list() } as InboxView;
+  const writes = yield* WriteService;
+  return { proposals: yield* proposals.list(), undecided: yield* proposals.undecided(), accounts: yield* accounts.list(), writes: yield* writes.list() } as InboxView;
 });
 
 /** 取り込みを 1 回回し、変わった Task を画面に知らせる（起動したとき・決まった間隔で・ユーザーが頼んだとき） */
@@ -72,6 +74,7 @@ export const handleInbox = (raw: unknown) =>
     const proposals = yield* ProposalService;
     const accounts = yield* AccountService;
     const tasks = yield* TaskService;
+    const writes = yield* WriteService;
     if (raw !== null) {
       const decoded = yield* decodeInboxCommand(raw).pipe(Effect.option);
       if (decoded._tag === "None") return { ok: false, reason: "操作の形が正しくありません" } as Reply<InboxView>;
@@ -87,7 +90,13 @@ export const handleInbox = (raw: unknown) =>
                 ? yield* accounts.addGitHub({ key: command.key, label: command.label })
                 : command._tag === "RemoveAccount"
                   ? yield* accounts.remove(command.id)
-                  : { ok: true, value: yield* syncOnce };
+                  : command._tag === "RequestWrite"
+                    ? yield* writes.requestFromItem(command.taskId, command.itemId)
+                    : command._tag === "ApproveWrite"
+                      ? yield* writes.approve(command.id)
+                      : command._tag === "CancelWrite"
+                        ? yield* writes.cancel(command.id)
+                        : { ok: true, value: yield* syncOnce };
       if (!result.ok) return result as Reply<InboxView>;
       const value = result.value as { taskId?: string | null } | null;
       if (value !== null && typeof value === "object" && "taskId" in value && typeof value.taskId === "string") yield* tasks.notify(value.taskId);

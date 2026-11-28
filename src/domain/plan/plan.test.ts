@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { specOf } from "@yutaura/live-spec/testing";
 import { Effect } from "effect";
 import * as Spec from "../../../specs/action-item.spec.ts";
-import { type Definition, appendItem, chooseOption, completeItem, completionOf, fromDrafts, type PlanGroup, reopenItem, skipItem, turnOf } from "./plan.js";
+import { type Definition, appendItem, chooseOption, completeByWrite, completeItem, completionOf, fromDrafts, type PlanGroup, reopenItem, skipItem, turnOf } from "./plan.js";
 
 const user = { kind: "user" } as const;
 const ai = { kind: "agent" } as const;
@@ -186,4 +186,43 @@ describe("事実から計画に足す", () => {
     const last = plan.nodes.at(-1);
     assert.deepStrictEqual(last?.type === "item" ? [last.item.id, last.item.addedFrom] : null, ["added", "s1"]);
   });
+});
+
+describe(specOf(Spec.completeByWrite), () => {
+  const writePlan = () =>
+    fromDrafts(
+      { type: "serial", items: [{ title: "merge する", effort: "easy", due: null, completes: true, how: { type: "write", subjectUri: "github://me@github.com/acme/app/pull/42", operation: "github.merge", paramsJson: "{}", trigger: "on_request" } }, human("告知する")] },
+      nextId,
+    ).plan;
+
+  it.effect("書き込みが成功したら、その Action Item を果たす", () =>
+    Effect.gen(function* () {
+      const plan = writePlan();
+      assert.strictEqual(turnOf(yield* completeByWrite(plan, ids(plan)[0]!, { kind: "app" }), ids(plan)[0]!), "済んだ");
+    }));
+
+  it.effect(specOf(Spec.completeByWrite, "アプリだけ"), () =>
+    Effect.gen(function* () {
+      const plan = writePlan();
+      assert.strictEqual(yield* reasonOf(completeByWrite(plan, ids(plan)[0]!, user)), "アプリだけ");
+    }));
+
+  it.effect(specOf(Spec.completeByWrite, "まだのときだけ"), () =>
+    Effect.gen(function* () {
+      const plan = writePlan();
+      const done = yield* completeByWrite(plan, ids(plan)[0]!, { kind: "app" });
+      assert.strictEqual(yield* reasonOf(completeByWrite(done, ids(plan)[0]!, { kind: "app" })), "まだのときだけ");
+    }));
+
+  it.effect(specOf(Spec.completeByWrite, "番が来ているときだけ"), () =>
+    Effect.gen(function* () {
+      const plan = fromDrafts({ type: "serial", items: [human("先にやる"), { title: "merge する", effort: "easy", due: null, completes: true, how: { type: "write", subjectUri: "x", operation: "github.merge", paramsJson: "{}", trigger: "on_request" } }] }, nextId).plan;
+      assert.strictEqual(yield* reasonOf(completeByWrite(plan, ids(plan)[1]!, { kind: "app" })), "番が来ているときだけ");
+    }));
+
+  it.effect(specOf(Spec.completeByWrite, "書き込みで果たされる Action Item だけ"), () =>
+    Effect.gen(function* () {
+      const plan = serial();
+      assert.strictEqual(yield* reasonOf(completeByWrite(plan, ids(plan)[0]!, { kind: "app" })), "書き込みで果たされる Action Item だけ");
+    }));
 });

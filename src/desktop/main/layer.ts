@@ -17,6 +17,8 @@ import { Planner } from "./plan/planner.js";
 import { AccountService } from "./sources/account-service.js";
 import type { SourceGateway } from "./sources/gateway.js";
 import { SyncRunner } from "./sources/sync-runner.js";
+import type { WriteProvider } from "./writes/write-provider.js";
+import { WriteService } from "./writes/write-service.js";
 import { TaskService, type TaskIds } from "./task-service.js";
 
 /** main プロセスの層の組み立て（起動とテストで同じ形にする）。AI につなぐ口（connector）は、起動とテストで差し替える */
@@ -26,6 +28,7 @@ export const desktopLayer = (options: {
   ids: Layer.Layer<TaskIds>;
   connector: Layer.Layer<AiConnector>;
   gateway: Layer.Layer<SourceGateway>;
+  writer: (stores: Layer.Layer<DocumentStore>) => Layer.Layer<WriteProvider>;
 }) => {
   const stores = Layer.mergeAll(TaskStore.layer, PrioritizationStore.layer, AiSettingsStore.layer, SourceItemStore.layer, DocumentStore.layer).pipe(Layer.provide(options.database));
   const ai = AiServices.live;
@@ -43,5 +46,6 @@ export const desktopLayer = (options: {
     ProposalService.layer.pipe(Layer.provide(base)),
     AccountService.layer.pipe(Layer.provide(base)),
     sync,
+    WriteService.layer.pipe(Layer.provide(Layer.mergeAll(base, options.writer(stores)))),
   );
 };

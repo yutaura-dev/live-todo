@@ -41,9 +41,10 @@ const settingsWith = (status: AiSettingsView["status"], problem: AiSettingsView[
 const planRows: NonNullable<TaskView["plan"]> = [
   { kind: "item", id: "a1", title: "PR を読む", depth: 0, turn: "番が来ている", completes: false, how: "human", options: [], chosen: null, added: false },
   { kind: "decision", id: "a2", title: "merge するか", depth: 0, turn: "番待ち", completes: false, how: "decision", options: ["merge する", "調べる"], chosen: null, added: true },
+  { kind: "item", id: "a3", title: "PR を merge する", depth: 0, turn: "番が来ている", completes: true, how: "write", options: [], chosen: null, added: false },
 ];
 
-const emptyInbox: InboxView = { proposals: [], undecided: [], accounts: [] };
+const emptyInbox: InboxView = { proposals: [], undecided: [], accounts: [], writes: [] };
 
 function fakeApi(
   cards: BoardCard[],
@@ -231,6 +232,7 @@ const inboxWith: InboxView = {
   ],
   undecided: [{ ...fact, id: "s2", title: "週次の連絡" }],
   accounts: [{ id: "github-work", label: "会社の GitHub", origin: "github://me@github.com", status: "つないでいる", problem: null, secret: "LIVE_TODO_SECRET_GITHUB_WORK_TOKEN" }],
+  writes: [],
 };
 
 describe("提案", () => {
@@ -303,5 +305,41 @@ describe("計画", () => {
     const plan = await openFirst(api);
     fireEvent.click(within(plan).getByRole("button", { name: "計画を立て直す" }));
     await waitFor(() => assert.deepStrictEqual(sent.at(-1), { _tag: "RevisePlan", id: "t1" }));
+  });
+});
+
+describe("承認", () => {
+  const writesInbox: InboxView = {
+    ...emptyInbox,
+    writes: [
+      { id: "w1", taskId: "t1", taskTitle: "請求書を送る", summary: "「axios を上げる」（acme/app#42）を squash で merge する", stage: "承認待ち", failure: null },
+      { id: "w2", taskId: "t1", taskTitle: "請求書を送る", summary: "「README」（acme/app#7）を squash で merge する", stage: "失敗", failure: "merge する権限がありません" },
+    ],
+  };
+
+  it("計画の書き込みの Action Item から、書き込みを頼める（すぐには書き込まない）", async () => {
+    const { api, inboxSent } = fakeApi(cards, undefined, {}, emptyInbox);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /請求書を送る/ }));
+    const plan = await screen.findByRole("region", { name: "計画" });
+    fireEvent.click(within(plan).getByRole("button", { name: "書き込みを頼む" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "RequestWrite", taskId: "t1", itemId: "a3" }]));
+  });
+
+  it("左のレールに承認を待つ書き込みと書き込めなかったものの件数を出し、中身を見せて承認・やめるを送る", async () => {
+    const { api, inboxSent } = fakeApi(cards, undefined, {}, writesInbox);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /承認\s*2 件/ }));
+    const request = (await screen.findByText("「axios を上げる」（acme/app#42）を squash で merge する")).closest("article")!;
+    fireEvent.click(within(request as HTMLElement).getByRole("button", { name: "承認して書き込む" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "ApproveWrite", id: "w1" }]));
+    fireEvent.click(within(request as HTMLElement).getByRole("button", { name: "やめる" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent.at(-1), { _tag: "CancelWrite", id: "w1" }));
+  });
+
+  it("書き込めなかったものは、理由を見せる", async () => {
+    render(<App api={fakeApi(cards, undefined, {}, writesInbox).api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /承認/ }));
+    assert.isNotNull(await screen.findByText("merge する権限がありません"));
   });
 });

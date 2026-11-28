@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppShell, type View } from "../../design/AppShell.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
 import type { AiCommand, AiSettingsView, BoardCard, InboxCommand, InboxView, LiveTodoApi, TaskView } from "../shared/api.js";
+import { Approvals } from "./Approvals.js";
 import { Proposals } from "./Proposals.js";
 import { AddTaskDialog } from "./AddTaskDialog.js";
 import { Kanban } from "./Kanban.js";
@@ -17,7 +18,7 @@ export function App({ api }: { api: LiveTodoApi }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
-  const [inbox, setInbox] = useState<InboxView>({ proposals: [], undecided: [], accounts: [] });
+  const [inbox, setInbox] = useState<InboxView>({ proposals: [], undecided: [], accounts: [], writes: [] });
   const locked = ai !== null && ai.status !== "使える";
 
   useEffect(() => {
@@ -44,6 +45,14 @@ export function App({ api }: { api: LiveTodoApi }) {
     setInbox(reply.value);
     await reload();
     return null;
+  };
+
+  // 頼んだだけでは書き込まない。中身を確かめて承認するよう、承認の画面へ移る
+  const requestWrite = async (itemId: string) => {
+    if (!selected) return;
+    const problemText = await sendInbox({ _tag: "RequestWrite", taskId: selected.id, itemId });
+    if (problemText) setProblem(problemText);
+    else setView("承認");
   };
 
   useEffect(() => {
@@ -86,15 +95,17 @@ export function App({ api }: { api: LiveTodoApi }) {
     <AppShell
       current={locked ? "設定" : view}
       locked={locked}
-      counts={{ 提案: inbox.proposals.filter((p) => p.status === "提案中").length + inbox.undecided.length }}
+      counts={{ 提案: inbox.proposals.filter((p) => p.status === "提案中").length + inbox.undecided.length, 承認: inbox.writes.length }}
       sync={{ state: "ok", text: "まだ取り込みはありません" }}
       onNavigate={setView}
-      inspector={selected && <TaskPanel task={selected} problem={problem} onCommand={(command) => void run(command)} onClose={() => setSelected(null)} />}
+      inspector={selected && <TaskPanel task={selected} problem={problem} onCommand={(command) => void run(command)} onRequestWrite={(itemId) => void requestWrite(itemId)} onClose={() => setSelected(null)} />}
     >
       {ai === null ? null : locked || view === "設定" ? (
         <Settings settings={ai} onConfigure={configureAi} accounts={inbox.accounts} onInbox={sendInbox} />
       ) : view === "提案" ? (
         <Proposals inbox={inbox} openTasks={cards.filter((card) => card.status === "やること")} onCommand={(command) => void sendInbox(command)} />
+      ) : view === "承認" ? (
+        <Approvals writes={inbox.writes} onCommand={(command) => void sendInbox(command)} />
       ) : view === "見通し" ? (
         <Horizon cards={cards} selectedId={selected?.id ?? null} onOpen={(id) => void open(id)} onAdd={() => setAdding(true)} onSetPriority={(id, level) => void setPriority(id, level)} />
       ) : view === "カンバン" ? (

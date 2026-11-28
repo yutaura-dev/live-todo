@@ -1,16 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
 import { specOf } from "@yutaura/live-spec/testing";
-import { DateTime, Effect } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
 import { StoreDatabase } from "../../store/database.js";
 import { AiConnector } from "./ai/connector.js";
 import { SourceGateway } from "./sources/gateway.js";
+import { WriteProvider } from "./writes/write-provider.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { sequentialIds, TaskService } from "./task-service.js";
 
-const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable, gateway: SourceGateway.live({}) });
+const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable, gateway: SourceGateway.live({}), writer: (stores) => WriteProvider.live({}).pipe(Layer.provide(stores)) });
 const undecided = { status: "未判定", level: null, reason: null } as const;
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
