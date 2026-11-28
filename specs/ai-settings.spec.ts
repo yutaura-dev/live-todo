@@ -1,33 +1,40 @@
 import { ensure } from "@yutaura/live-spec";
 
 /**
- * AI の設定（PC に 1 つ）。アプリが使う AI を、使い道ごとに 3 つ持つ（中の AI Use）。3 つとも設定して確かめるまで、アプリは使えない。
- * 使い道は、安く簡単なものから順に上げていく。
- * - Decisions: 分類・確率付きの判定。コストが安い。まずこれを使う
- * - Generation: 文章を伴う Structured Output（Task の説明・計画を作る など）。Decisions でできないことに使う。Agent の成果物も入力にする
- * - Agent: 複雑な作業・調査（Claude Code・Codex・agy・OpenCode・pi code など）。Generationでできないことに使う。Task を直接は変えず、成果物をGenerationが受け取って Task の言葉にする
- * 3 つは独立して選べる（Decisions は OpenAI、Generationは Gemini、Agent は Claude Code、など）。
- * どれかの認証が通らなくなったら、アプリ全体を使えない状態にする（直すまで、同期・判定・AI の作業を止める）。
- * 会社の PC には会社が許可したものだけを設定する（charter の前提と制約: 1 台の PC には、会社用か私用か一方のデータだけを入れる）。認証情報（API キー）は .env.local に置き、renderer には渡さない。
+ * AI Settings（アプリが使う AI の設定。PC に 1 つ）。使い道ごとに 3 つを、独立して選ぶ（Decisions は OpenAI、Generation は Gemini、Agent は Claude Code、など）。
+ * 3 つの違いは役割で、確かさの段ではない（Decisions で分からないことが、Generation に聞けば分かるわけではない）。どれを使うかは、Task が届いたものを受け取るところなど、使う側の判断表で決める（ADR-0022）。
+ * - Decisions: 分類・確率付きの判定（安い）
+ * - Generation: 文章を伴う Structured Output（Task の説明・計画を作る。Agent の成果物も入力にする）
+ * - Agent: 複雑な作業・調査（Claude Code・Codex・agy・OpenCode・pi code など）。計画の中の Action Item から頼まれたときだけ動き、Task は直接変えない
+ * 3 つとも設定して確かめるまで、アプリは使えない。どれかの認証が通らなくなったら、直すまでアプリ全体を使えない（同期・判定・AI の作業を止める）。
+ * 会社の PC には、会社が許可したものだけを設定する（charter の前提と制約）。認証情報（API キー）は .env.local に置き、renderer には渡さない。
+ * Decisions の閾値は固定で、判定ごとに決める（architecture.md）。設定には持たない。
  */
 export type AiSettings = {
   /** アプリを使えるか */
   status: Status;
+  /** 使い道ごとに、どれを使うか（まだ設定していなければ null） */
+  uses: { decisions: Choice | null; generation: Choice | null; agent: Choice | null };
+  /** 認証が通らないとき、どの使い道で・なぜか */
+  problem: { use: "Decisions" | "Generation" | "Agent"; reason: "API キーが切れた" | "権限がない" } | null;
 };
+
+/** どれを使うか（Decisions・Generation ならプロバイダとモデル、Agent ならどの Agent か。形は provider が決める） */
+export type Choice = { provider: string; model: string | null };
 
 export const Status = {
   /** 3 つのどれかが、まだ設定されていない。アプリは使えない（設定の画面だけ出す） */
   setup: "初期設定中",
   /** 3 つとも設定して確かめた */
   ready: "使える",
-  /** どれかの認証が通らない（API キーが切れた など）。直すまで、アプリ全体を使えない（設定の画面だけ出す） */
+  /** どれかの認証が通らない。直すまで、アプリ全体を使えない（設定の画面だけ出す） */
   suspended: "使えない",
 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
 
 type Actor = { kind: "user" } | { kind: "app" };
 
-/** アプリ: 3 つとも設定されたかを確かめる */
+/** アプリ: AI を呼んで、認証が通らないことに気づく */
 export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
   アプリ: { kind: "app" },
@@ -36,60 +43,60 @@ export const actors: Record<string, Actor> = {
 /** アプリを初めて起動した（まだ何も設定していない） */
 export function initial(actor: Actor): AiSettings {
   ensure(actor.kind === "app", "アプリだけ");
-  return { status: "初期設定中" };
+  return { status: "初期設定中", uses: { decisions: null, generation: null, agent: null }, problem: null };
 }
 
-/** 3 つとも設定して確かめたので、アプリを使えるようにする */
-export function finishSetup(settings: AiSettings, actor: Actor, uses: "3 つとも使える" | "まだ足りない"): AiSettings {
-  ensure(actor.kind === "app", "アプリだけ");
-  ensure(settings.status === "初期設定中", "初期設定中のときだけ");
-  ensure(uses === "3 つとも使える", "Decisions・Generation・Agent の 3 つとも、設定して確かめたときだけ");
-  return { status: "使える" };
+/**
+ * 使い道を 1 つ設定する・選び直す・直す（どれを使うかを選び、認証を確かめて通ったときだけ）
+ *
+ * 3 つとも設定して確かめたら、アプリを使えるようにする。認証が通らなかった使い道を直したときも、使えるようにする。
+ */
+export function configure(settings: AiSettings, actor: Actor, check: "通った" | "通らない", rest: "3 つそろう" | "まだ足りない"): AiSettings {
+  ensure(actor.kind === "user", "ユーザーだけ");
+  ensure(check === "通った", "認証を確かめて通ったときだけ");
+  const uses = { ...settings.uses, decisions: { provider: "openai", model: "gpt-6-luna" } };
+  if (settings.status === "初期設定中" && rest === "まだ足りない") return { ...settings, uses };
+  return { status: "使える", uses, problem: null };
 }
 
-/** どれかの認証が通らなくなったので、アプリ全体を使えない状態にする */
-export function suspend(settings: AiSettings, actor: Actor): AiSettings {
+/** 認証が通らなかった（呼んだら断られた）。直すまで、アプリ全体を使えない */
+export function reject(settings: AiSettings, actor: Actor): AiSettings {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(settings.status === "使える", "使えるときだけ");
-  return { status: "使えない" };
-}
-
-/** 認証が通らなかったものを直して、3 つとも使えるようになったので、また使えるようにする */
-export function resume(settings: AiSettings, actor: Actor, uses: "3 つとも使える" | "まだ足りない"): AiSettings {
-  ensure(actor.kind === "app", "アプリだけ");
-  ensure(settings.status === "使えない", "使えないときだけ");
-  ensure(uses === "3 つとも使える", "Decisions・Generation・Agent の 3 つとも、設定して確かめたときだけ");
-  return { status: "使える" };
+  return { ...settings, status: "使えない", problem: { use: "Decisions", reason: "API キーが切れた" } };
 }
 
 export const inputs = {
-  finishSetup: { そろった: ["3 つとも使える"], 足りない: ["まだ足りない"] },
-  resume: { そろった: ["3 つとも使える"], 足りない: ["まだ足りない"] },
+  configure: { "最後の 1 つ": ["通った", "3 つそろう"], まだ足りない: ["通った", "まだ足りない"], 通らない: ["通らない", "3 つそろう"] },
 };
 
 export const invariants = {
   "使えるようになったら、初期設定中には戻らない": (before: AiSettings, after: AiSettings) => before.status === "初期設定中" || after.status !== "初期設定中",
+  "使えないときだけ、どの使い道でなぜかがある": (settings: AiSettings) => (settings.status === "使えない") === (settings.problem !== null),
+};
+
+export const reviewed = {
+  "anytime:configure": "どれを使うかは、いつでも選び直せる（初期設定中・使える・使えない のどれでも）。使えないときに直すのも、これで行う",
+  "unused-field:uses": "どれを使うかは呼び出し先を決めるもので、可否は変えない（可否は段階で決まる）",
+  "unused-field:problem": "どの使い道で・なぜ通らないかは、ユーザーに見せるもので、可否は変えない。使えないときだけあることを、不変条件で確かめるために読んでいる",
 };
 
 export const scenarios = {
   "3 つとも設定したら、アプリを使えるようになる": [
     { do: initial, by: "アプリ", expect: { status: "初期設定中" } },
-    { do: finishSetup, by: "アプリ", input: "足りない", denied: "Decisions・Generation・Agent の 3 つとも、設定して確かめたときだけ" },
-    { do: finishSetup, by: "ユーザー", input: "そろった", denied: "アプリだけ" },
-    { do: finishSetup, by: "アプリ", input: "そろった", expect: { status: "使える" } },
-    { do: finishSetup, by: "アプリ", input: "そろった", denied: "初期設定中のときだけ" },
+    { do: configure, by: "ユーザー", input: "通らない", denied: "認証を確かめて通ったときだけ" },
+    { do: configure, by: "アプリ", input: "まだ足りない", denied: "ユーザーだけ" },
+    { do: configure, by: "ユーザー", input: "まだ足りない", expect: { status: "初期設定中" } },
+    { do: reject, by: "アプリ", denied: "使えるときだけ" },
+    { do: configure, by: "ユーザー", input: "最後の 1 つ", expect: { status: "使える" } },
   ],
   "どれかの認証が通らなくなったら、直すまでアプリ全体を使えない": [
     { do: initial, by: "アプリ" },
-    { do: suspend, by: "アプリ", denied: "使えるときだけ" },
-    { do: finishSetup, by: "アプリ", input: "そろった" },
-    { do: suspend, by: "ユーザー", denied: "アプリだけ" },
-    { do: suspend, by: "アプリ", expect: { status: "使えない" } },
-    { do: resume, by: "アプリ", input: "足りない", denied: "Decisions・Generation・Agent の 3 つとも、設定して確かめたときだけ" },
-    { do: resume, by: "ユーザー", input: "そろった", denied: "アプリだけ" },
-    { do: resume, by: "アプリ", input: "そろった", expect: { status: "使える" } },
-    { do: resume, by: "アプリ", input: "そろった", denied: "使えないときだけ" },
+    { do: configure, by: "ユーザー", input: "最後の 1 つ" },
+    { do: reject, by: "ユーザー", denied: "アプリだけ" },
+    { do: reject, by: "アプリ", expect: { status: "使えない", problem: { use: "Decisions" } } },
+    { do: reject, by: "アプリ", denied: "使えるときだけ" },
+    { do: configure, by: "ユーザー", input: "最後の 1 つ", expect: { status: "使える", problem: null } },
   ],
   "設定を始めるのはアプリだけ": [{ do: initial, by: "ユーザー", denied: "アプリだけ" }],
 };
-

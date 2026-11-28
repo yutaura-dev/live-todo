@@ -152,7 +152,7 @@ export const links = [
   { from: confirmCompletion, to: "completion-effect", action: "fire", label: "☑ が付いている完了したときにすることの書き込みを頼む" },
   { from: dismiss, to: "completion-effect", action: "withdraw", label: "やらないことにしたら、まだ頼んでいない完了したときにすることを取りやめる" },
   { from: detachFact, to: "completion-effect", action: "withdraw", label: "外した事実に書き込む完了したときにすることは、Decisions を通さずに取りやめる（完了待ちでは計画を直せないので、先に外す）" },
-  { from: detachFact, to: "task", action: "revisePlan", label: "計画を見直す必要があるかを Decisions で軽く判定し、要るなら AI が計画を直す（外れた事実への、完了したときにすることも）" },
+  { from: detachFact, to: "task", action: "receive", label: "事実が外れた、として届く（Decisions で計画を見直す必要があるかを判定し、要るなら Generation が計画を直す）" },
 ];
 
 export const actors: Record<string, Actor> = {
@@ -296,13 +296,14 @@ export function stopWork(task: Task, actor: Actor): Task {
 }
 
 /**
- * 計画を立てる・立て直す
+ * 計画を立て直す（Generation が、Task の dossier と届いたものから計画を書く）
  *
- * AI が、済んだ Action Item は残して、残りの計画を作り直す。完了条件を必ず 1 つ以上付ける。確かめられる完了条件が見つからなければ、「やり終えたと自分で確かめる」（人が果たす完了条件）を置く。
+ * 計画を立てるのは Generation で、Agent ではない（Generation は Structured Output なので、材料と問いの立て方を直しやすく、答えの形もそろえやすい）。Generation の呼び出しは AI の作業にしない（作業中は Agent が動いている間だけ）。
+ * 調べないと決められないときは、計画に「Claude Code で調べる」の Action Item を足す。自動でやるかボタンで頼むかは、ほかの Action Item と同じく、計画の中で決める。Agent に頼むのは、この Action Item からだけ。
  */
 export function revisePlan(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
-  ensure(task.work === "作業中", "AI が作業中のときだけ");
+  ensure(isOpen(task), "要確認か todo のときだけ");
   return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "計画", before: null, after: null, target: null }]);
 }
 
@@ -418,12 +419,37 @@ export const invariants = {
 };
 
 /** 更新マークと新着（保存せず、履歴と最後に見た時刻から導いて見せる） */
+/** 届いたものを、どの使い道で Task の言葉にするか（使い道は役割で分け、確かさで上げていかない。ADR-0022） */
+function translateBy(input: {
+  届いたもの: "事実" | "書き込めなかった" | "AI の作業の成果";
+  "Decisions の答え": "使わない" | "関係ない" | "列・終わり方が変わる" | "文章・計画が変わる" | "迷った（閾値の間・refusal・形に合わない）";
+}): "規則で今の状況を書く" | "Generation が書く" | "列を変え、今の状況は Generation が書く" | "何も変えない" | "要確認に倒す" {
+  if (input.届いたもの === "書き込めなかった") return "規則で今の状況を書く";
+  if (input.届いたもの === "AI の作業の成果") return "Generation が書く";
+  const answer = input["Decisions の答え"];
+  if (answer === "関係ない") return "何も変えない";
+  if (answer === "列・終わり方が変わる") return "列を変え、今の状況は Generation が書く";
+  if (answer === "文章・計画が変わる") return "Generation が書く";
+  return "要確認に倒す";
+}
+
 function mark(input: { 最後に見た時刻: "ある" | "ない"; "最後に見たあとの、項目ごとの最後の変化": "ユーザー以外が変えた項目がある" | "どの項目もユーザーが最後に変えた" | "変化がない" }): "新着" | "更新マーク" | "なし" {
   if (input.最後に見た時刻 === "ない") return "新着";
   return input["最後に見たあとの、項目ごとの最後の変化"] === "ユーザー以外が変えた項目がある" ? "更新マーク" : "なし";
 }
 
 export const decisions = {
+  "届いたものを、どの使い道で Task の言葉にするか": {
+    decide: translateBy,
+    cases: [
+      { input: { 届いたもの: "書き込めなかった", "Decisions の答え": "使わない" }, expect: "規則で今の状況を書く" },
+      { input: { 届いたもの: "AI の作業の成果", "Decisions の答え": "使わない" }, expect: "Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "関係ない" }, expect: "何も変えない" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "列・終わり方が変わる" }, expect: "列を変え、今の状況は Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "文章・計画が変わる" }, expect: "Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "迷った（閾値の間・refusal・形に合わない）" }, expect: "要確認に倒す" },
+    ],
+  },
   "更新マークと新着": {
     decide: mark,
     cases: [
@@ -565,6 +591,7 @@ export const scenarios = {
     { do: receive, by: "AI", input: "事実で項目が変わる", denied: "仕分けたあとだけ" },
     { do: defineCompletionByHand, by: "ユーザー", denied: "要確認か todo のときだけ" },
     { do: makeUndetermined, by: "ユーザー", denied: "要確認か todo のときだけ" },
+    { do: revisePlan, by: "AI", denied: "要確認か todo のときだけ" },
     { do: triage, by: "ユーザー", input: "要確認", denied: "要確認にするのは同期だけ" },
     { do: triage, by: "AI", input: "todo" },
     { do: triage, by: "AI", input: "todo", denied: "仕分け中のときだけ" },
@@ -572,7 +599,7 @@ export const scenarios = {
     { do: move, by: "同期", input: "要確認へ", denied: "ユーザーだけ" },
     { do: defineCompletionByHand, by: "AI", denied: "ユーザーだけ" },
     { do: makeUndetermined, by: "AI", denied: "ユーザーだけ" },
-    { do: revisePlan, by: "AI", denied: "AI が作業中のときだけ" },
+    { do: revisePlan, by: "アプリ", denied: "AI だけ" },
     { do: startWork, by: "同期", denied: "ユーザーか AI だけ" },
     { do: startWork, by: "AI" },
     { do: revisePlan, by: "ユーザー", denied: "AI だけ" },
