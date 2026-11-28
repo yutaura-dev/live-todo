@@ -3,6 +3,7 @@ import { ensure } from "@yutaura/live-spec";
 /**
  * Agent Thread（Task ごとの AI との会話）。Task について頼んだ作業（Agent Run）を、同じ会話として続けるためのもの。
  * Claude Code の会話（session）は作業場所に結び付くので、続けるときは同じ場所で動かす。続けられなくなったら、次の作業で新しい会話を始める。
+ * 会話は、Task の最初の作業を始めるときに作る。
  */
 export type AgentThread = {
   /** 会話を続けられるか */
@@ -39,10 +40,11 @@ export function initial(actor: Actor): AgentThread {
   return { status: "続けられる", taskId: "t1", provider: "claude-code", sessionId: "s1", workspace: "~/live-todo/work/t1" };
 }
 
-/** 続けられなくなった（作業場所が消えた・会話が切れた） */
-export function lose(thread: AgentThread, actor: Actor): AgentThread {
+/** 続けられなくなった（作業場所が消えた・会話が切れた）。動いている作業があれば、先に止まったことにする */
+export function lose(thread: AgentThread, actor: Actor, running: "動いている作業がない" | "動いている作業がある"): AgentThread {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(thread.status === "続けられる", "続けられるときだけ");
+  ensure(running === "動いている作業がない", "動いている作業がないときだけ");
   return { ...thread, status: "続けられない" };
 }
 
@@ -53,13 +55,18 @@ export function renew(thread: AgentThread, actor: Actor): AgentThread {
   return { ...thread, status: "続けられる", sessionId: "s2" };
 }
 
+export const inputs = { lose: { 動いていない: ["動いている作業がない"], 動いている: ["動いている作業がある"] } };
+
+export const links = [{ from: lose, to: "agent-run", action: "fail", label: "動いている作業があったなら、先に止まったことにしてから続けられなくする" }];
+
 export const scenarios = {
   "作業場所が消えたら、次の作業で新しい会話を始める": [
     { do: initial, by: "アプリ", expect: { status: "続けられる" } },
     { do: renew, by: "アプリ", denied: "続けられないときだけ" },
-    { do: lose, by: "ユーザー", denied: "アプリだけ" },
-    { do: lose, by: "アプリ", expect: { status: "続けられない" } },
-    { do: lose, by: "アプリ", denied: "続けられるときだけ" },
+    { do: lose, by: "ユーザー", input: "動いていない", denied: "アプリだけ" },
+    { do: lose, by: "アプリ", input: "動いている", denied: "動いている作業がないときだけ" },
+    { do: lose, by: "アプリ", input: "動いていない", expect: { status: "続けられない" } },
+    { do: lose, by: "アプリ", input: "動いていない", denied: "続けられるときだけ" },
     { do: renew, by: "ユーザー", denied: "アプリだけ" },
     { do: renew, by: "アプリ", expect: { status: "続けられる" } },
   ],

@@ -300,7 +300,7 @@ export const links = [
   { from: choose, to: "task", action: "startWork", label: "選んでから考える選択肢なら、AI に先の計画を考えさせる" },
   { from: rechoose, to: "action-item", action: "skip", label: "前に選んだ枝の、まだの Action Item をやらなくする" },
   { from: rechoose, to: "task", action: "addPendingCriteria", label: "新しく選んだ選択肢の先を差し込む" },
-  { from: request, to: "task", action: "startWork", label: "AI が作業中になる" },
+  { from: request, to: "agent-thread", label: "Claude Code に、この Action Item をやる作業を頼む（作業を始めたら、Task が AI の作業中になる）" },
   { from: observeCondition, to: "action-item", action: "finishByCondition", label: "成り立ったとき番が来ていれば、すぐ果たす" },
   { from: observeCondition, to: "watch-target", action: "removeWaiter", label: "結果が出たら（成り立った・達成できない）、その対象を待つのをやめる" },
   { from: observeCondition, to: "task", label: "達成できなくなったら、Task が受け取る（AI が計画を立て直すか、ユーザーに知らせる）" },
@@ -313,7 +313,7 @@ export const links = [
   { from: resetCondition, to: "watch-target", action: "addWaiter", label: "また待つので、その対象を待つ" },
   { from: skip, to: "write", action: "withdraw", label: "書き込みで果たされる Action Item をやらなくなったら、確認中の書き込みを取りやめる" },
   { to: "watch-target", action: "addWaiter", label: "待つ条件の Action Item を作ったら、その対象を待つ（見張っていなければ見張りを始める）" },
-  { from: autoStart, to: "task", action: "startWork", label: "AI が作業中になる" },
+  { from: autoStart, to: "agent-thread", label: "Claude Code に、この Action Item をやる作業を頼む（作業を始めたら、Task が AI の作業中になる）" },
 ];
 
 export const scenarios = {
