@@ -45,7 +45,7 @@ export type RequestedBy =
     }
   /** ルール（ユーザーが作ったルールか、ユーザーが有効にした組み込みのルール）。ルールを決めたことが承認になる */
   | { type: "rule"; ruleId: string }
-  /** 完了したときにすること（Task が完了したら書き込む）。ユーザーが足した・☑ を付けたことが承認になる */
+  /** 完了したときにすること。ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したことが承認になる */
   | {
       type: "completionEffect";
       /** @ref task */
@@ -102,8 +102,8 @@ type Request =
     }
   | {
       way: "完了したときにすること";
-      /** Task が完了した（done）か */
-      taskDone: boolean;
+      /** 完了待ちで、ユーザーが完了のボタンを押したか */
+      confirmed: boolean;
     };
 
 type Actor = { kind: "user" } | { kind: "app" } | { kind: "sync" } | { kind: "target" };
@@ -129,7 +129,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
     ensure(request.sameAsDefinition, "Action Item の定義と同じ対象と操作だけ");
     ensure(!request.openWrite, "その Action Item に、終わっていない書き込みがないときだけ");
   } else if (request.way === "完了したときにすること") {
-    ensure(request.taskDone, "Task が完了したときだけ（やらないことにしたときは書き込まない）");
+    ensure(request.confirmed, "ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したときだけ");
   } else {
     ensure(request.rule === "有効", "有効なルールだけ（組み込みのルールは、ユーザーが有効にしたものだけ）");
     ensure(request.inScope, "ルールの範囲の操作だけ");
@@ -224,7 +224,7 @@ export function settle(write: Write, actor: Actor, result: "書けていた" | "
 
 const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false };
 const FROM_RULE: Request = { way: "ルール", rule: "有効", inScope: true, alreadyWritten: false };
-const FROM_EFFECT: Request = { way: "完了したときにすること", taskDone: true };
+const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true };
 
 export const inputs = {
   initial: {
@@ -239,7 +239,7 @@ export const inputs = {
     範囲の外: [{ ...FROM_RULE, inScope: false }, "書き込める"],
     書き込み済み: [{ ...FROM_RULE, alreadyWritten: true }, "書き込める"],
     完了したときにすること: [FROM_EFFECT, "書き込める"],
-    やらないことにした: [{ way: "完了したときにすること", taskDone: false }, "書き込める"],
+    ボタンを押していない: [{ way: "完了したときにすること", confirmed: false }, "書き込める"],
   },
   approve: { 見せたとおり: ["見せた版のまま", "書き込める"], 版が変わった: ["変わった", "書き込める"], "CI が落ちた": ["見せた版のまま", "書き込めない"] },
   fail: { 権限: ["権限が足りない"], 書き込み先: ["書き込み先のエラー"] },
@@ -266,11 +266,11 @@ export const links = [
 ];
 
 export const scenarios = {
-  "Task が完了したら、完了したときにすることを確かめずに書き込む": [
+  "完了のボタンを押したら、完了したときにすることを確かめずに書き込む": [
     { do: initial, by: "アプリ", input: "完了したときにすること", expect: { stage: "書き込み中", requestedBy: { type: "completionEffect" } } },
   ],
-  "やらないことにした Task の、完了したときにすることは書き込まない": [
-    { do: initial, by: "アプリ", input: "やらないことにした", denied: "Task が完了したときだけ（やらないことにしたときは書き込まない）" },
+  "完了のボタンを押すまで、完了したときにすることは書き込まない": [
+    { do: initial, by: "アプリ", input: "ボタンを押していない", denied: "ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したときだけ" },
   ],
   "merge の中身を確かめて承認し、merge する": [
     { do: initial, by: "ユーザー", input: "Action Item から", expect: { stage: "確認中", approval: null } },
