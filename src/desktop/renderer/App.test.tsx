@@ -2,7 +2,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
-import type { AiCommand, AiSettingsView, BoardCard, Command, LiveTodoApi, Reply, TaskView } from "../shared/api.js";
+import type { AiCommand, AiSettingsView, BoardCard, Command, InboxCommand, InboxView, LiveTodoApi, Reply, TaskView } from "../shared/api.js";
 import { App } from "./App.js";
 
 afterEach(cleanup);
@@ -17,6 +17,7 @@ const view = (card: BoardCard): TaskView => ({
   due: null,
   mark: card.mark,
   priority: card.priority,
+  facts: [],
   history: [{ kind: "できた", by: "ユーザー", occurredAt: "2026-11-28T09:00:00.000Z", changes: [], cause: "手で足した" }],
   createdAt: "2026-11-28T09:00:00.000Z",
 });
@@ -36,9 +37,17 @@ const settingsWith = (status: AiSettingsView["status"], problem: AiSettingsView[
   },
 });
 
-function fakeApi(cards: BoardCard[], reply?: (command: Command) => Reply<TaskView> | undefined, ai: { settings?: AiSettingsView; configure?: (command: AiCommand) => Reply<AiSettingsView> } = {}) {
+const emptyInbox: InboxView = { proposals: [], undecided: [], accounts: [] };
+
+function fakeApi(
+  cards: BoardCard[],
+  reply?: (command: Command) => Reply<TaskView> | undefined,
+  ai: { settings?: AiSettingsView; configure?: (command: AiCommand) => Reply<AiSettingsView> } = {},
+  inbox: InboxView = emptyInbox,
+) {
   const sent: Command[] = [];
   const aiSent: AiCommand[] = [];
+  const inboxSent: InboxCommand[] = [];
   const api: LiveTodoApi = {
     command: async (command) => {
       sent.push(command);
@@ -51,17 +60,22 @@ function fakeApi(cards: BoardCard[], reply?: (command: Command) => Reply<TaskVie
     task: async (id) => ({ ok: true, value: view(cards.find((card) => card.id === id)!) }),
     onChanged: () => () => {},
     aiSettings: async () => ({ ok: true, value: ai.settings ?? settingsWith("使える") }),
+    inbox: async () => ({ ok: true, value: inbox }),
+    inboxCommand: async (command) => {
+      inboxSent.push(command);
+      return { ok: true, value: inbox };
+    },
     configureAi: async (command) => {
       aiSent.push(command);
       return ai.configure?.(command) ?? { ok: true, value: ai.settings ?? settingsWith("使える") };
     },
   };
-  return { api, sent, aiSent };
+  return { api, sent, aiSent, inboxSent };
 }
 
 const cards: BoardCard[] = [
-  { id: "t1", title: "請求書を送る", status: "やること", mark: "新着", due: "金曜まで", blocksOthers: false, priority: { status: "アプリが決めた", level: "3 日以内", reason: "期日まで 3 日" } },
-  { id: "t2", title: "週報を書く", status: "終わった", mark: "なし", due: null, blocksOthers: false, priority: { status: "決めるのをやめた", level: null, reason: null } },
+  { id: "t1", title: "請求書を送る", status: "やること", mark: "新着", due: "金曜まで", blocksOthers: false, priority: { status: "アプリが決めた", level: "3 日以内", reason: "期日まで 3 日" }, sources: [] },
+  { id: "t2", title: "週報を書く", status: "終わった", mark: "なし", due: null, blocksOthers: false, priority: { status: "決めるのをやめた", level: null, reason: null }, sources: [] },
 ];
 
 const openKanban = async () => fireEvent.click(await screen.findByRole("button", { name: "カンバン" }));
@@ -201,5 +215,54 @@ describe("AI 設定", () => {
     render(<App api={fakeApi(cards, undefined, { settings: settingsWith("使えない", { use: "Decisions", reason: "API キーが切れた" }) }).api} />);
     assert.isNotNull(await screen.findByText("Decisions の認証が通りません（API キーが切れた）"));
     assert.isTrue((screen.getByRole("button", { name: "カンバン" }) as HTMLButtonElement).disabled);
+  });
+});
+const fact = { id: "s1", source: "github", title: "Fix login", url: "https://github.com/acme/app/pull/42", lines: ["状態: 開いている"], present: true };
+const inboxWith: InboxView = {
+  proposals: [
+    { id: "p1", status: "提案中", kind: "新しい Task", title: "PR #42 をレビューする", brief: "レビューを頼まれた", targetTaskId: null, targetTitle: null, facts: [fact], createdAt: "2026-11-28T00:00:00.000Z" },
+    { id: "p2", status: "見送った", kind: "既存の Task に足す", title: "CI を直す", brief: "x", targetTaskId: "t1", targetTitle: "請求書を送る", facts: [fact], createdAt: "2026-11-28T00:00:00.000Z" },
+  ],
+  undecided: [{ ...fact, id: "s2", title: "週次の連絡" }],
+  accounts: [{ id: "github-work", label: "会社の GitHub", origin: "github://me@github.com", status: "つないでいる", problem: null, secret: "LIVE_TODO_SECRET_GITHUB_WORK_TOKEN" }],
+};
+
+describe("提案", () => {
+  it("左のレールに、決めることの件数（提案中の提案と、決められなかった事実）を出す", async () => {
+    render(<App api={fakeApi(cards, undefined, {}, inboxWith).api} />);
+    assert.isNotNull(await screen.findByRole("button", { name: /提案\s*2 件/ }));
+  });
+
+  it("提案を受け入れる・見送るを送る", async () => {
+    const { api, inboxSent } = fakeApi(cards, undefined, {}, inboxWith);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /提案/ }));
+    const card = (await screen.findByRole("heading", { name: "PR #42 をレビューする" })).closest("article")!;
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Task にする" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "AcceptProposal", id: "p1" }]));
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "見送る" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent.at(-1), { _tag: "DeclineProposal", id: "p1" }));
+  });
+
+  it("AI が決められなかった事実を、新しい Task にするか、対象外にするか選べる", async () => {
+    const { api, inboxSent } = fakeApi(cards, undefined, {}, inboxWith);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /提案/ }));
+    const item = (await screen.findByText("週次の連絡")).closest("li")!;
+    fireEvent.click(within(item as HTMLElement).getByRole("button", { name: "対象外にする" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "RouteFact", id: "s2", to: { _tag: "Ignore" } }]));
+  });
+});
+
+describe("アカウント", () => {
+  it("GitHub のアカウントを足すときは、.env.local に書くトークンの名前を見せて、足してつなぐを送る", async () => {
+    const { api, inboxSent } = fakeApi(cards, undefined, {}, emptyInbox);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: "設定" }));
+    fireEvent.change(await screen.findByLabelText("名前（英小文字・数字・ハイフン）"), { target: { value: "work" } });
+    fireEvent.change(screen.getByLabelText("画面に出す名前"), { target: { value: "会社の GitHub" } });
+    assert.isNotNull(screen.getByText(/LIVE_TODO_SECRET_GITHUB_WORK_TOKEN/));
+    fireEvent.click(screen.getByRole("button", { name: "足してつなぐ" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "AddGitHubAccount", key: "work", label: "会社の GitHub" }]));
   });
 });

@@ -30,6 +30,8 @@ export const Task = Schema.Struct({
   brief: Schema.NullOr(Schema.String),
   due: Schema.NullOr(DueDate),
   blocksOthers: Schema.Boolean,
+  /** この Task についての事実（つながりの持ち主は Task。1 つの事実を、いくつの Task が持ってもよい） */
+  sourceItemIds: Schema.Array(Schema.String),
   history: Schema.Array(TaskActivity),
   lastSeenAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
@@ -66,7 +68,16 @@ const noted = (task: Task, actor: Actor, changes: ReadonlyArray<TaskFieldChange>
     return { ...task, ...next, history: [...task.history, activity], updatedAt: occurredAt };
   });
 
-export const create = Effect.fn("Task.create")(function* (input: { id: string; title: string; actor: Actor; origin: Origin; brief?: string | null }) {
+export const create = Effect.fn("Task.create")(function* (input: {
+  id: string;
+  title: string;
+  actor: Actor;
+  origin: Origin;
+  brief?: string | null;
+  due?: DueDate | null;
+  blocksOthers?: boolean;
+  sourceItemIds?: ReadonlyArray<string>;
+}) {
   const ensure = guard("initial");
   yield* ensure(input.actor.kind === CREATED_BY[input.origin], "事実から自動で作るのは AI、提案を受け入れる・手で足す・切り出すのはユーザー、定期の Task の回はアプリだけ");
   // spec にはない、実装の入力の検証（題のない Task はボードで見分けられない）
@@ -80,8 +91,9 @@ export const create = Effect.fn("Task.create")(function* (input: { id: string; t
     completion: "未定",
     title: input.title.trim(),
     brief: input.brief ?? null,
-    due: null,
-    blocksOthers: false,
+    due: input.due ?? null,
+    blocksOthers: input.blocksOthers ?? false,
+    sourceItemIds: [...(input.sourceItemIds ?? [])],
     history: [{ kind: "できた", by: BY[input.actor.kind], occurredAt: now, changes: [], cause: input.origin }],
     lastSeenAt: null,
     createdAt: now,
@@ -165,6 +177,18 @@ export const defineCompletionByHand = Effect.fn("Task.defineCompletionByHand")(f
   yield* ensure(isOpen(task), "やること のときだけ");
   yield* ensure(task.completion === "未定", "完了条件が決まっていないときだけ");
   return yield* noted(task, actor, [{ field: "完了条件", before: "未定", after: "まだ", target: null }], { completion: "まだ" });
+});
+
+/** 事実を持つ（振り分けが、この Task の事実にすると決めた）。事実は出来事にしない（task-activity.value.ts） */
+export const attachFact = Effect.fn("Task.attachFact")(function* (task: Task, _actor: Actor, sourceItemId: string) {
+  yield* guard("attachFact")(task.status !== "終わった", "終わっていないときだけ");
+  return task.sourceItemIds.includes(sourceItemId) ? task : { ...task, sourceItemIds: [...task.sourceItemIds, sourceItemId] };
+});
+
+/** 事実を外す（ユーザーが外した・別の Task に移した・対象外にした） */
+export const detachFact = Effect.fn("Task.detachFact")(function* (task: Task, actor: Actor, sourceItemId: string) {
+  yield* guard("detachFact")(actor.kind === "user", "ユーザーだけ");
+  return { ...task, sourceItemIds: task.sourceItemIds.filter((id) => id !== sourceItemId) };
 });
 
 /** 優先度の段階が変わった（優先度の決まり方から届く）。ラベル未定は「ラベル未定」として残す */

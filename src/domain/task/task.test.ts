@@ -3,7 +3,7 @@ import { specOf } from "@yutaura/live-spec/testing";
 import { DateTime, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
-import { complete, create, defineCompletionByHand, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
+import { attachFact, complete, create, defineCompletionByHand, detachFact, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
 const user = { kind: "user" } as const;
@@ -280,5 +280,32 @@ describe(specOf(Spec.notePriority), () => {
     Effect.gen(function* () {
       const gone = yield* dismiss(yield* byHand(), user, "自分で片付けた", "頼んだものはない");
       assert.strictEqual(yield* denied(notePriority(gone, app, null, "今日中")), "やること のときだけ（終わった Task の優先度は判定しない）");
+    }));
+});
+
+describe(specOf(Spec.attachFact), () => {
+  it.effect("事実を持たせ、同じ事実は二度持たない", () =>
+    Effect.gen(function* () {
+      const once = yield* attachFact(yield* byHand(), ai, "s1");
+      assert.deepStrictEqual((yield* attachFact(once, ai, "s1")).sourceItemIds, ["s1"]);
+    }));
+
+  it.effect(specOf(Spec.attachFact, "終わっていないときだけ"), () =>
+    Effect.gen(function* () {
+      const gone = yield* dismiss(yield* byHand(), user, "自分で片付けた", "頼んだものはない");
+      assert.strictEqual(yield* denied(attachFact(gone, ai, "s1")), "終わっていないときだけ");
+    }));
+});
+
+describe(specOf(Spec.detachFact), () => {
+  it.effect("事実を外す", () =>
+    Effect.gen(function* () {
+      const task = yield* detachFact(yield* attachFact(yield* byHand(), ai, "s1"), user, "s1");
+      assert.deepStrictEqual(task.sourceItemIds, []);
+    }));
+
+  it.effect(specOf(Spec.detachFact, "ユーザーだけ"), () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* denied(detachFact(yield* attachFact(yield* byHand(), ai, "s1"), ai, "s1")), "ユーザーだけ");
     }));
 });

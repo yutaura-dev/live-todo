@@ -1,6 +1,5 @@
 import { Context, DateTime, Effect, Layer, Option } from "effect";
 import { blockingNowQuestion, interpretBlockingNow, interpretPriorityLevel, priorityLevelQuestion } from "../../llm/decision/questions/index.js";
-import type { TaskMaterial } from "../../llm/shared/materials.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
 import {
   basisChanged,
@@ -17,6 +16,7 @@ import { daysUntil, ruleLevel, type RuleResult } from "../../domain/priority/rul
 import { notePriority, type Task } from "../../domain/task/task.js";
 import { PrioritizationStore } from "../../store/prioritization-store.js";
 import { AiServices } from "./ai/ai-services.js";
+import { taskMaterialOf } from "./materials.js";
 import type { StoreCorrupted } from "../../store/task-store.js";
 
 /** 今日の日付と地域。期日までの日数を数えるのに使う（テストでは固定する） */
@@ -36,17 +36,7 @@ const canDecide = (p: Prioritization) => p.status === "未判定" || p.status ==
 const shown = (p: Prioritization | null): string | null => (p === null ? null : p.status === "ラベル未定" ? "ラベル未定" : (p.priority?.level ?? null));
 const isLevel = (rule: RuleResult): rule is PriorityLevel => rule !== "規則では決めない" && rule !== "今日中以上（今すぐかは判定）";
 
-const materialOf = (task: Task): TaskMaterial => ({
-  id: task.id,
-  title: task.title,
-  brief: task.brief ?? "",
-  status: task.status,
-  completion: task.completion,
-  due: task.due,
-  blocksOthers: task.blocksOthers,
-  plan: [],
-  facts: [],
-});
+const materialOf = (task: Task) => taskMaterialOf(task);
 
 /**
  * Task の優先度を決める。規則で決まればそれで決め、決まらなければ Decisions に聞く（prioritization.spec）。

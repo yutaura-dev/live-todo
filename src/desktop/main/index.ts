@@ -7,7 +7,8 @@ import { Duration, Schedule } from "effect";
 import { StoreDatabase } from "../../store/database.js";
 import { CHANNELS } from "../shared/api.js";
 import { liveConnector } from "./ai/connector-live.js";
-import { handleAiCommand, handleCommand, handleQuery } from "./ipc.js";
+import { handleAiCommand, handleCommand, handleInbox, handleQuery, syncOnce } from "./ipc.js";
+import { SourceGateway } from "./sources/gateway.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { TaskIds, TaskService } from "./task-service.js";
@@ -34,11 +35,13 @@ const runtime = ManagedRuntime.make(
     calendar: Calendar.system,
     ids: TaskIds.random,
     connector: liveConnector({ env: process.env, commandSucceeds }),
+    gateway: SourceGateway.live(process.env),
   }),
 );
 
 // 日が変わったら期日までの日数が変わるので、起動したときと 1 時間おきに優先度を決め直す（変わらなければ何も起きない）
 const REFRESH_EVERY = Duration.hours(1);
+const SYNC_TICK = Duration.seconds(30);
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -64,6 +67,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.command, (_event, raw: unknown) => runtime.runPromise(handleCommand(raw)));
   ipcMain.handle(CHANNELS.query, (_event, raw: unknown) => runtime.runPromise(handleQuery(raw)));
   ipcMain.handle(CHANNELS.ai, (_event, raw: unknown) => runtime.runPromise(handleAiCommand(raw)));
+  ipcMain.handle(CHANNELS.inbox, (_event, raw: unknown) => runtime.runPromise(handleInbox(raw)));
   await runtime.runPromise(
     Effect.gen(function* () {
       const service = yield* TaskService;
@@ -75,6 +79,8 @@ app.whenReady().then(async () => {
       yield* (yield* TaskService).refreshAll();
     }).pipe(Effect.repeat(Schedule.spaced(REFRESH_EVERY))),
   );
+  // 取り込みは 30 秒おきに見に行く（アカウントごとの間隔と失敗のときの延ばし方は SyncRunner が決める）
+  runtime.runFork(syncOnce.pipe(Effect.catchCause((cause) => Effect.logWarning("取り込めなかった", cause)), Effect.repeat(Schedule.spaced(SYNC_TICK))));
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

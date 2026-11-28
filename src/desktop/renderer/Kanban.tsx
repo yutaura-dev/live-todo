@@ -1,5 +1,5 @@
 import { ScreenHead } from "../../design/AppShell.js";
-import { Button, Pill } from "../../design/components.js";
+import { Button, Pill, SourceMarks } from "../../design/components.js";
 import type { BoardCard } from "../shared/api.js";
 
 const COLUMNS = [
@@ -41,6 +41,7 @@ export function Kanban(props: { cards: ReadonlyArray<BoardCard>; selectedId: str
                     <button type="button" className="ui-task-open ui-kcard-title" aria-current={props.selectedId === card.id ? "true" : undefined} onClick={() => props.onOpen(card.id)}>
                       {card.title}
                     </button>
+                    {card.sources.length > 0 && <SourceMarks sources={[...card.sources]} />}
                     {(card.due || card.priority.level) && (
                       <p className="ui-kcard-foot ui-sub">{[card.due, column.status === "やること" ? card.priority.level : null].filter(Boolean).join("・")}</p>
                     )}
