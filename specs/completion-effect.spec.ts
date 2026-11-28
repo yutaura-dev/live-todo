@@ -149,8 +149,6 @@ export const invariants = {
 export const links = [
   { from: fire, to: "write", label: "完了したときにすることから、書き込みを頼む（ユーザーがチェックリストを確かめて完了のボタンを押したので、確かめずにすぐ書き込む。版を持つ操作は、見せたときの版のままか確かめる）。頼めなかったら、書き込めなかったにする" },
   { from: retry, to: "write", label: "もう一度、書き込みを頼む" },
-  { from: written, to: "task-change", label: "書き込めたことを、変化として残す" },
-  { from: failed, to: "task-change", label: "書き込めなかったことを、変化として残す（完了待ちのレーンで気づけるように）" },
   { from: written, to: "task", action: "finishCompletion", label: "完了したときにすることが、すべて書き込めた・外されたら、Task が終わる" },
   { from: uncheck, to: "task", action: "finishCompletion", label: "書き込めなかったものを外して、すべて済んだら、Task が終わる" },
 ];

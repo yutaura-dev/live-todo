@@ -1,6 +1,7 @@
 import { ensure } from "@yutaura/live-spec";
 import type { ActionItem } from "./action-item.spec.ts";
 import type { CompletionEffect } from "./completion-effect.spec.ts";
+import type { TaskActivity } from "./task-activity.value.ts";
 import type { Arrangement } from "./action-definition.value.ts";
 
 /**
@@ -28,8 +29,10 @@ export type Task = {
   plan: Plan | null;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
-  /** 初めて開いた日時（まだ開いていなければ null で、新着の印を出す） */
-  firstOpenedAt: string | null;
+  /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す */
+  history: TaskActivity[];
+  /** ユーザーが最後に Task を見た時刻（まだ一度も見ていなければ null で、新着の印を出す）。これより後に、ユーザー以外が起こした出来事があれば、更新マークが付く */
+  lastSeenAt: string | null;
   /** 作った日時・最後に変えた日時 */
   createdAt: string;
   updatedAt: string;
@@ -131,7 +134,8 @@ export const initial: Task = {
   brief: null,
   plan: null,
   sourceItemIds: [],
-  firstOpenedAt: null,
+  history: [],
+  lastSeenAt: null,
   createdAt: "2026-11-28T00:00:00Z",
   updatedAt: "2026-11-28T00:00:00Z",
 };
@@ -141,18 +145,6 @@ export const links = [
   { from: dismiss, to: "completion-effect", action: "withdraw", label: "やらないことにしたら、まだ頼んでいない完了したときにすることを取りやめる" },
   { from: detachFact, to: "completion-effect", action: "withdraw", label: "外した事実に書き込む完了したときにすることは、Decisions を通さずに取りやめる（完了待ちでは計画を直せないので、先に外す）" },
   { from: detachFact, to: "task", action: "revisePlan", label: "計画を見直す必要があるかを Decisions で軽く判定し、要るなら AI が計画を直す（外れた事実への、完了したときにすることも）" },
-  { from: move, to: "task-change", label: "列が変わったことを、変化として残す" },
-  { from: complete, to: "task-change", label: "終わったこと（列・どう終わったか）を、変化として残す" },
-  { from: dismiss, to: "task-change", label: "やらないことにした（列・どう終わったか）を、変化として残す" },
-  { from: reopen, to: "task-change", label: "やり直すことになった（列）を、変化として残す" },
-  { from: revisePlan, to: "task-change", label: "計画が変わったことを、変化として残す" },
-  { from: defineCompletionByHand, to: "task-change", label: "完了条件が変わったことを、変化として残す" },
-  { from: makeUndetermined, to: "task-change", label: "完了条件が未定になったことを、変化として残す" },
-  { from: addPendingCriteria, to: "task-change", label: "完了条件が変わったことを、変化として残す" },
-  { from: satisfyCompletion, to: "task-change", label: "完了条件を満たしたことを、変化として残す" },
-  { from: receiveFact, to: "task-change", label: "事実の変化を受け取って、Task の項目（今の状況と次の一手・列 など）が変わったときだけ、変化として残す" },
-  { from: confirmCompletion, to: "task-change", label: "完了のボタンを押したことは、ユーザーが変えたので既読の変化として残す" },
-  { from: finishCompletion, to: "task-change", label: "完了待ちから終わったこと（列・どう終わったか）を、変化として残す" },
 ];
 
 export const actors: Record<string, Actor> = {
@@ -194,6 +186,16 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
   ensure(reason !== "完了条件を満たした" || (task.status === "todo" && task.completion === "満たした"), "完了条件で終えるのは、todo で完了条件をすべて満たしたときだけ");
   if (effects === "完了したときにすることがある") return { ...task, status: "完了待ち" };
   return { ...task, status: "closed", closure: { outcome: "done", reason } };
+}
+
+/**
+ * Task を見る（開く）
+ *
+ * 最後に見た時刻を進める。新着の印と、それまでの更新マークが消える。
+ */
+export function view(task: Task, actor: Actor): Task {
+  ensure(actor.kind === "user", "ユーザーだけ");
+  return { ...task, lastSeenAt: "2026-11-28T00:00:00Z" };
 }
 
 /**
@@ -376,6 +378,12 @@ export const invariants = {
 };
 
 export const scenarios = {
+  "Task を見たら、新着と更新マークが消える（見るのはユーザーだけ）": [
+    { do: triage, by: "同期", input: "todo", expect: { lastSeenAt: null } },
+    { do: view, by: "AI", denied: "ユーザーだけ" },
+    { do: view, by: "アプリ", denied: "ユーザーだけ" },
+    { do: view, by: "ユーザー", expect: { lastSeenAt: "2026-11-28T00:00:00Z" } },
+  ],
   "完了したときにすることがあれば、完了待ちでチェックリストを確かめてから終わる": [
     { do: triage, by: "同期", input: "todo" },
     { do: startWork, by: "AI" },
@@ -507,6 +515,7 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "anytime:view": "Task は、どの列でもユーザーが見られる（終わった Task も、最近片付いたものから見る）",
   "anyone-can:attachFact": "事実を持たせるのは、振り分けた人（同期・AI・ユーザー）の決定の結果。誰が決めても、Task は同じように持つ",
   "same-for-similar-actors:attachFact": "事実を持たせるのは、誰が振り分けたかによらない",
   "anytime:detachFact": "ユーザーは、いつでも Task から事実を外せる（終わった Task でも、記録を直すために外せる）",
