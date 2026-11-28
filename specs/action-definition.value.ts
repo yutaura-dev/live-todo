@@ -1,6 +1,7 @@
 import type { Condition, Subject } from "./condition.value.ts";
 import type { Place } from "./place.value.ts";
 import type { DueDate } from "./due-date.value.ts";
+import type { WaitEstimate } from "./wait-estimate.value.ts";
 
 /**
  * やることの中身（何をするか・何によって果たされるか）。Action Item はこれを持つ。
@@ -25,8 +26,8 @@ export type How =
   | { type: "human"; place: Place | null }
   /** Claude Code が果たす（人が「済んだ」を押して済ませてもよい） */
   | { type: "claude"; trigger: Trigger; workspace: string | null; tools: "読むだけ" | "直す"; subject: Subject | null }
-  /** 待つ条件が成り立って果たされる。アプリ（Watcher）が見張る */
-  | { type: "condition"; condition: Condition }
+  /** 待つ条件が成り立って果たされる。アプリ（Watcher）が見張る。どれくらい待つ見込みか（分からなければ null）を持ち、優先度の材料にする */
+  | { type: "condition"; condition: Condition; expectedWait: WaitEstimate | null }
   /** 外への書き込み（merge する・メールに返信する など）が承認されて成功すると果たされる。何に・どの操作で・どの中身を・作る操作ならどこに作るか（作る場所。元の事実の URI が作る場所の URI の中にあるとき「同じ場所」）と、計画を立てたときの対象の版を持つ（自動でやってよい範囲に入るなら、この中身と版のまま自動で書き込む。書き込み 1 回は、頼んだときにできて、この Action Item を指す） */
   | { type: "write"; subject: Subject; operation: string; params: unknown; version: string | null; trigger: Trigger; place: Subject | null }
   /** ユーザーが選択肢から 1 つ選んで果たす。選ぶと、選んだ選択肢の先が計画に差し込まれる */

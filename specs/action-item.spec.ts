@@ -86,7 +86,7 @@ export const inputs = {
     人がやる: [{ title: "年末調整の書類を出す", effort: "normal", due: null, completes: false, how: { type: "human", place: null } }],
     頼めばやる: [{ title: "型エラーを直す", effort: "normal", due: null, completes: false, how: { type: "claude", trigger: "on_request", workspace: null, tools: "直す", subject: null } }],
     自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", due: null, completes: false, how: { type: "claude", trigger: "auto", workspace: null, tools: "読むだけ", subject: null } }],
-    条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", due: null, completes: true, how: { type: "condition", condition: { subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, name: "github.merged", afterStart: false, label: "PR #42 が merge される" } } }],
+    条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", due: null, completes: true, how: { type: "condition", condition: { subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, name: "github.merged", afterStart: false, label: "PR #42 が merge される" }, expectedWait: { text: "2〜3 営業日でレビューすると言われている", minDays: 2, maxDays: 3, businessDays: true } } }],
     書き込みで果たす: [{ title: "merge する", effort: "easy", due: null, completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request", place: null } }],
     分かれ道: [decision],
   },
