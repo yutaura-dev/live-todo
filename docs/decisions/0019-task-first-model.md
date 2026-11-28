@@ -20,7 +20,7 @@ ADR-0007 で Task・Source Item・Link を分け、1 つの Task に複数の So
 ### Task が主、Source Item は事実
 
 - Task は自分がやること。Source Item は外の世界の写し（事実）、Activity はそれに起きた出来事。Task は事実を 0 件以上持つ（Link。役割の区別は持たない）
-- 1 つの Source Item が属せる Task は 1 つまで（ADR-0007 のまま）
+- 1 つの Source Item は複数の Task の事実になれる。AI が振り分けるのは 1 つ目だけで、2 つ目以降は識別子で決まるときかユーザーが足したときだけ（specs/routing.spec.ts）
 
 ### 届いた事実を、Task に振り分ける（Source に依らない）
 

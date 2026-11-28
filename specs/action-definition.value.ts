@@ -24,8 +24,8 @@ export type How =
   | { type: "claude"; trigger: Trigger; workspace: string | null }
   /** 待つ条件が成り立って果たされる。アプリ（Watcher）が見張る */
   | { type: "condition"; condition: Condition }
-  /** 外への書き込み（merge する・メールに返信する など）が承認されて成功すると果たされる。何に・どの操作で・どの中身を書き込むかと、計画を立てたときの対象の版を持つ（自動でやってよい範囲に入るなら、この中身と版のまま自動で書き込む。書き込み 1 回は、頼んだときにできて、この Action Item を指す） */
-  | { type: "write"; subject: Subject; operation: string; params: unknown; version: string | null; trigger: Trigger }
+  /** 外への書き込み（merge する・メールに返信する など）が承認されて成功すると果たされる。何に・どの操作で・どの中身を・作る操作ならどこに作るか（作る場所。元の事実の URI が作る場所の URI の中にあるとき「同じ場所」）と、計画を立てたときの対象の版を持つ（自動でやってよい範囲に入るなら、この中身と版のまま自動で書き込む。書き込み 1 回は、頼んだときにできて、この Action Item を指す） */
+  | { type: "write"; subject: Subject; operation: string; params: unknown; version: string | null; trigger: Trigger; place: Subject | null }
   /** ユーザーが選択肢から 1 つ選んで果たす。選ぶと、選んだ選択肢の先が計画に差し込まれる */
   | Decision;
 
@@ -142,7 +142,7 @@ export const invariants = {
     definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => o.then.type !== "planLater" || o.then.direction.trim() !== "")),
 };
 
-const merge: ActionDefinition = { title: "merge する", effort: "easy", completes: true, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request" } };
+const merge: ActionDefinition = { title: "merge する", effort: "easy", completes: true, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request", place: null } };
 
 export const examples = {
   valid: {

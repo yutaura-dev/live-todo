@@ -19,7 +19,7 @@
 | Source Adapter | Source ごとの取得・正規化・差分検知を担う実装。共通インターフェースを持つ |
 | Source Item | Source から取得した 1 件（PR、スレッド、メール、予定など）。外の世界の写しで、Task とは別の概念（[ADR-0007](docs/decisions/0007-separate-source-items-from-tasks.md)） |
 | Activity | Source Item に起きた出来事（appeared / changed / resolved / reopened / removed）。そのままでは更新マークにならない |
-| Link | Task と Source Item のつながり（その Item が Task の事実になる）。役割の区別は持たない。1 つの Item が属せる Task は 1 つまで |
+| Link | Task と Source Item のつながり（その Item が Task の事実になる）。役割の区別は持たない。1 つの Item は複数の Task の事実になれるが、AI が振り分けるのは 1 つ目だけ（2 つ目以降は識別子で決まるときかユーザーが足したときだけ） |
 | Task | 自分がやること。Source の言葉ではなく自分にとっての意味（title: 何をするか、brief: 今の状況と次の一手）で持つ。手動追加の Task もある |
 | Task Activity | Task に起きた出来事（項目が変わった・AI が作業をやめた・書き込めなかった など）。Task が起きた順に足すだけで持つ。Source Item の Activity（Source の出来事）とは別 |
 | triage | Source Item の仕分け状態（pending: 未判定 / linked: Task に紐づけ済み / ignored: 対象外） |

@@ -21,7 +21,7 @@
 | **Link** | Task と Source Item のつながり（その Item が Task の事実になる）。つながりに役割の区別は持たない |
 | **Task** | 自分がやること。Source の言葉ではなく、自分にとっての意味（何をするか、今の状況と次の一手）で書く |
 
-- **1 つの Source Item が属せる Task は 1 つまで**。同じ Item が 2 つの Task にまたがると、Item の完了でどちらを done にするかがあいまいになるため
+- **1 つの Source Item が属せる Task は 1 つまで**。同じ Item が 2 つの Task にまたがると、Item の完了でどちらを done にするかがあいまいになるため（のちに見直した。今は複数の Task の事実になれ、AI が振り分けるのは 1 つ目だけ。2 つ目以降は識別子で決まるときかユーザーが足したときだけ。Item の変化は持っているすべての Task に届く。specs/routing.spec.ts）
 - **更新マークは Task Change にだけ付ける**。Activity はそのままでは更新マークにならず、「その出来事が Task にとって何を意味するか」を解釈して Task の項目が実際に変わったときだけ Task Change を記録する
 - Task が終わるかは、つながった Item の状態から直接は導かず、計画の完了条件（Action Item）で決める（specs/task.spec.ts）。つながりに「完了を決める（tracks）」「関連情報（context）」の役割を持たせる案は、どの事実で終わるかを Task の計画が決めるようになったので外した
 - Source Item は Task を作らなかったもの（対象外）も保存する。判定のやり直しや、あとからの紐づけに使う
@@ -35,7 +35,7 @@
 ## Alternatives Considered
 
 - **Source Item = Task のまま、Task に複数の URL を持たせる**: Source ごとの状態（PR はマージ済み、スレッドは未解決）を持てず、完了の判定ができない
-- **1 つの Source Item を複数の Task に属せるようにする**: Item の変化をどの Task が受け取るかがあいまいになる。必要になったら見直す
+- **1 つの Source Item を複数の Task に属せるようにする**: Item の完了でどの Task を done にするかがあいまいになる（のちに、完了を計画の完了条件で決めるようにしたので、複数の Task が持てるように見直した）
 - **Source の変化（fingerprint）で更新マークを付ける**: 画面に出ない値の変化で更新マークが付き、Task の項目が変わっていないのに目印だけが出る
 
 ## Consequences

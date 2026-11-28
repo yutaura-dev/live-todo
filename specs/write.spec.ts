@@ -141,7 +141,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
   }
   if (request.way === "Action Item") {
     ensure(request.item === "番が来ていて、まだ", "Action Item に番が来ていて、まだ済んでいないときだけ");
-    ensure(request.sameAsDefinition, "Action Item の定義と同じ対象と操作だけ");
+    ensure(request.sameAsDefinition, "Action Item の定義と同じ対象・操作・作る場所だけ");
     ensure(!request.openWrite, "その Action Item に、終わっていない書き込みがないときだけ");
   } else if (request.way === "完了したときにすること") {
     ensure(request.confirmed, "ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したときだけ");
@@ -321,7 +321,7 @@ export const scenarios = {
   ],
   "番が来ていない Action Item からは頼めない": [{ do: initial, by: "ユーザー", input: "番待ち", denied: "Action Item に番が来ていて、まだ済んでいないときだけ" }],
   "済んだ Action Item からは頼めない": [{ do: initial, by: "ユーザー", input: "済んだ", denied: "Action Item に番が来ていて、まだ済んでいないときだけ" }],
-  "Action Item の定義と違う書き込みは頼めない": [{ do: initial, by: "ユーザー", input: "定義と違う", denied: "Action Item の定義と同じ対象と操作だけ" }],
+  "Action Item の定義と違う書き込みは頼めない": [{ do: initial, by: "ユーザー", input: "定義と違う", denied: "Action Item の定義と同じ対象・操作・作る場所だけ" }],
   "同じ Action Item から二重には頼めない": [{ do: initial, by: "ユーザー", input: "書き込みがもうある", denied: "その Action Item に、終わっていない書き込みがないときだけ" }],
   "CI が通っていなければ、merge を頼めない": [{ do: initial, by: "ユーザー", input: "書き込めない", denied: "書き込める状態のときだけ" }],
   "見せたあとに PR が変わった・CI が落ちたら、merge しない": [

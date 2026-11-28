@@ -87,7 +87,7 @@ const decision: ActionDefinition = {
     type: "decision",
     question: "型エラーが出ている。直してから merge するか",
     options: [
-      { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request" } }] } } },
+      { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request", place: null } }] } } },
       { label: "ひとまず調査する", then: { type: "planLater", direction: "型エラーの原因と影響範囲を調べる" } },
     ],
   },
@@ -99,7 +99,7 @@ export const inputs = {
     頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null } }],
     自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null } }],
     条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, name: "github.merged", afterStart: false, label: "PR #42 が merge される" } } }],
-    書き込みで果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request" } }],
+    書き込みで果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request", place: null } }],
     分かれ道: [decision],
   },
   complete: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
