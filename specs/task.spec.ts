@@ -152,7 +152,7 @@ export const links = [
   { from: confirmCompletion, to: "completion-effect", action: "fire", label: "☑ が付いている完了したときにすることの書き込みを頼む" },
   { from: dismiss, to: "completion-effect", action: "withdraw", label: "やらないことにしたら、まだ頼んでいない完了したときにすることを取りやめる" },
   { from: detachFact, to: "completion-effect", action: "withdraw", label: "外した事実に書き込む完了したときにすることは、Decisions を通さずに取りやめる（完了待ちでは計画を直せないので、先に外す）" },
-  { from: detachFact, to: "task", action: "revisePlan", label: "計画を見直す必要があるかを Decisions で軽く判定し、要るなら AI が計画を直す（外れた事実への、完了したときにすることも）" },
+  { from: detachFact, to: "task", action: "receive", label: "事実が外れた、として届く（Decisions で計画を見直す必要があるかを判定し、要るなら Generation が計画を直す）" },
 ];
 
 export const actors: Record<string, Actor> = {
@@ -296,13 +296,14 @@ export function stopWork(task: Task, actor: Actor): Task {
 }
 
 /**
- * 計画を立てる・立て直す
+ * 計画を立て直す（Generation が、Task の dossier と届いたものから計画を書く）
  *
- * AI が、済んだ Action Item は残して、残りの計画を作り直す。完了条件を必ず 1 つ以上付ける。確かめられる完了条件が見つからなければ、「やり終えたと自分で確かめる」（人が果たす完了条件）を置く。
+ * 計画を立てるのは Generation で、Agent ではない（Generation は Structured Output なので、材料と問いの立て方を直しやすく、答えの形もそろえやすい）。Generation の呼び出しは AI の作業にしない（作業中は Agent が動いている間だけ）。
+ * 調べないと決められないときは、計画に「Claude Code で調べる」の Action Item を足す。自動でやるかボタンで頼むかは、ほかの Action Item と同じく、計画の中で決める。Agent に頼むのは、この Action Item からだけ。
  */
 export function revisePlan(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
-  ensure(task.work === "作業中", "AI が作業中のときだけ");
+  ensure(isOpen(task), "要確認か todo のときだけ");
   return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "計画", before: null, after: null, target: null }]);
 }
 
@@ -349,14 +350,14 @@ export function satisfyCompletion(task: Task, _actor: Actor): Task {
 /**
  * 届いたもの（Task Input）を受け取る
  *
- * 事実が増えた・変わった・外れたは AI が、書き込めなかったは規則（アプリ）が、Task の言葉に置き換える。
+ * 事実が増えた・変わった・外れたは AI が、書き込めなかったは規則（アプリ）が、AI の作業の成果はGenerationが、Task の言葉に置き換える。AI は、まず Decisions で済むかを見て、済まなければ Generation を使う。
  * - 項目が変わる: 置き換えた項目の変化を、どの入力から来たかと一緒に出来事に残す
  * - 何も変わらない（関係ないと判定した など）: Task は変えない。Task の外の受け取りのログにだけ残す
  * - 判定できなかった（refusal・閾値の間・想定外の応答）: 開いている Task は要確認に倒す（fail closed）。終わった Task は、今の状況に「確かめる」を書く
  * 同じ入力が 2 度届いても、反映は 1 回にする（出来事の cause で分かる）。
  */
-export function receive(task: Task, actor: Actor, input: "事実" | "書き込めなかった", outcome: "項目が変わる" | "何も変わらない" | "判定できなかった"): Task {
-  ensure(input === "書き込めなかった" ? actor.kind === "app" : actor.kind === "agent", "事実は AI、書き込めなかったはアプリだけ");
+export function receive(task: Task, actor: Actor, input: "事実" | "書き込めなかった" | "AI の作業の成果", outcome: "項目が変わる" | "何も変わらない" | "判定できなかった"): Task {
+  ensure(input === "書き込めなかった" ? actor.kind === "app" : actor.kind === "agent", "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ");
   ensure(task.status !== "triaging", "仕分けたあとだけ");
   if (outcome === "何も変わらない") return { ...task };
   if (outcome === "判定できなかった") {
@@ -396,6 +397,7 @@ export const inputs = {
     事実で何も変わらない: ["事実", "何も変わらない"],
     事実を判定できなかった: ["事実", "判定できなかった"],
     書き込めなかった: ["書き込めなかった", "項目が変わる"],
+    "AI の作業の成果": ["AI の作業の成果", "項目が変わる"],
   },
   noteProgress: { "Action Item": ["Action Item の進み"], 完了したときにすること: ["完了したときにすること"] },
   finishCompletion: { 済んだ: ["すべて済んだ", "完了条件を満たした"], 自分で完了にして済んだ: ["すべて済んだ", "自分で完了にした"], まだ: ["まだ・書き込めなかったものがある", "完了条件を満たした"] },
@@ -417,12 +419,37 @@ export const invariants = {
 };
 
 /** 更新マークと新着（保存せず、履歴と最後に見た時刻から導いて見せる） */
+/** 届いたものを、どの使い道で Task の言葉にするか（使い道は役割で分け、確かさで上げていかない。ADR-0022） */
+function translateBy(input: {
+  届いたもの: "事実" | "書き込めなかった" | "AI の作業の成果";
+  "Decisions の答え": "使わない" | "関係ない" | "列・終わり方が変わる" | "文章・計画が変わる" | "迷った（閾値の間・refusal・形に合わない）";
+}): "規則で今の状況を書く" | "Generation が書く" | "列を変え、今の状況は Generation が書く" | "何も変えない" | "要確認に倒す" {
+  if (input.届いたもの === "書き込めなかった") return "規則で今の状況を書く";
+  if (input.届いたもの === "AI の作業の成果") return "Generation が書く";
+  const answer = input["Decisions の答え"];
+  if (answer === "関係ない") return "何も変えない";
+  if (answer === "列・終わり方が変わる") return "列を変え、今の状況は Generation が書く";
+  if (answer === "文章・計画が変わる") return "Generation が書く";
+  return "要確認に倒す";
+}
+
 function mark(input: { 最後に見た時刻: "ある" | "ない"; "最後に見たあとの、項目ごとの最後の変化": "ユーザー以外が変えた項目がある" | "どの項目もユーザーが最後に変えた" | "変化がない" }): "新着" | "更新マーク" | "なし" {
   if (input.最後に見た時刻 === "ない") return "新着";
   return input["最後に見たあとの、項目ごとの最後の変化"] === "ユーザー以外が変えた項目がある" ? "更新マーク" : "なし";
 }
 
 export const decisions = {
+  "届いたものを、どの使い道で Task の言葉にするか": {
+    decide: translateBy,
+    cases: [
+      { input: { 届いたもの: "書き込めなかった", "Decisions の答え": "使わない" }, expect: "規則で今の状況を書く" },
+      { input: { 届いたもの: "AI の作業の成果", "Decisions の答え": "使わない" }, expect: "Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "関係ない" }, expect: "何も変えない" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "列・終わり方が変わる" }, expect: "列を変え、今の状況は Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "文章・計画が変わる" }, expect: "Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "迷った（閾値の間・refusal・形に合わない）" }, expect: "要確認に倒す" },
+    ],
+  },
   "更新マークと新着": {
     decide: mark,
     cases: [
@@ -437,10 +464,12 @@ export const decisions = {
 export const scenarios = {
   "届いたものは、事実は AI が、書き込めなかったはアプリが受け取る": [
     { do: triage, by: "同期", input: "todo" },
-    { do: receive, by: "アプリ", input: "事実で項目が変わる", denied: "事実は AI、書き込めなかったはアプリだけ" },
-    { do: receive, by: "AI", input: "書き込めなかった", denied: "事実は AI、書き込めなかったはアプリだけ" },
+    { do: receive, by: "アプリ", input: "事実で項目が変わる", denied: "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ" },
+    { do: receive, by: "AI", input: "書き込めなかった", denied: "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ" },
     { do: receive, by: "AI", input: "事実で何も変わらない", expect: { status: "todo" } },
     { do: receive, by: "アプリ", input: "書き込めなかった", expect: { status: "todo" } },
+    { do: receive, by: "アプリ", input: "AI の作業の成果", denied: "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ" },
+    { do: receive, by: "AI", input: "AI の作業の成果", expect: { status: "todo" } },
     { do: receive, by: "AI", input: "事実を判定できなかった", expect: { status: "needs_review" } },
     { do: noteProgress, by: "同期", input: "Action Item" },
   ],
@@ -562,14 +591,15 @@ export const scenarios = {
     { do: receive, by: "AI", input: "事実で項目が変わる", denied: "仕分けたあとだけ" },
     { do: defineCompletionByHand, by: "ユーザー", denied: "要確認か todo のときだけ" },
     { do: makeUndetermined, by: "ユーザー", denied: "要確認か todo のときだけ" },
+    { do: revisePlan, by: "AI", denied: "要確認か todo のときだけ" },
     { do: triage, by: "ユーザー", input: "要確認", denied: "要確認にするのは同期だけ" },
     { do: triage, by: "AI", input: "todo" },
     { do: triage, by: "AI", input: "todo", denied: "仕分け中のときだけ" },
-    { do: receive, by: "同期", input: "事実で項目が変わる", denied: "事実は AI、書き込めなかったはアプリだけ" },
+    { do: receive, by: "同期", input: "事実で項目が変わる", denied: "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ" },
     { do: move, by: "同期", input: "要確認へ", denied: "ユーザーだけ" },
     { do: defineCompletionByHand, by: "AI", denied: "ユーザーだけ" },
     { do: makeUndetermined, by: "AI", denied: "ユーザーだけ" },
-    { do: revisePlan, by: "AI", denied: "AI が作業中のときだけ" },
+    { do: revisePlan, by: "アプリ", denied: "AI だけ" },
     { do: startWork, by: "同期", denied: "ユーザーか AI だけ" },
     { do: startWork, by: "AI" },
     { do: revisePlan, by: "ユーザー", denied: "AI だけ" },
@@ -581,7 +611,7 @@ export const scenarios = {
 };
 
 export const reviewed = {
-  "indistinguishable-example:receive:事実で項目が変わる,事実で何も変わらない": "項目が変わるかどうかは、Task の出来事が残るかどうか（更新マークが付くかどうか）に出る。列などの状態は変わらないので、状態としては同じに見える",
+  "indistinguishable-example:receive:事実で項目が変わる,事実で何も変わらない,AI の作業の成果": "項目が変わるかどうかは、Task の出来事が残るかどうか（更新マークが付くかどうか）に出る。列などの状態は変わらないので、状態としては同じに見える",
   "anyone-can:noteProgress": "計画の中の Action Item・完了したときにすることが進んだことは、だれが進めても（ユーザー・AI・同期・アプリ）出来事として残す。だれが進めたかは出来事の by に残り、ユーザーが進めたものは更新マークにしない",
   "anytime:noteProgress": "計画の中の Action Item・完了したときにすることが進んだことは、だれが進めても（ユーザー・AI・同期・アプリ）出来事として残す。だれが進めたかは出来事の by に残り、ユーザーが進めたものは更新マークにしない",
   "ignores-input:noteProgress": "Action Item の進みか、完了したときにすることかは、出来事のどの項目かが違うだけで、Task の振る舞いは変えない",

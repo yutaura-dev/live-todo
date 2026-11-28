@@ -1,6 +1,6 @@
 > **Stability**: 🪨 stable
-> **最終更新**: 2026-11-26
-> **直近の変更 ADR**: [ADR-0014](decisions/0014-user-defined-gmail-rules.md)
+> **最終更新**: 2026-11-28
+> **直近の変更 ADR**: [ADR-0022](decisions/0022-ai-uses-by-role.md)
 
 # Charter — live-todo
 
@@ -66,5 +66,5 @@ TBD（次回更新時に決定）。データはローカル DB にあるため�
 
 - **データはローカルに置く**: Source Item、Task、Agent Thread、認証情報はすべて利用者の PC に保存する
 - **推論は外部の LLM API を使う**: タスクの内容は、選択した LLM プロバイダに送信される
-- **会社と私用で使える LLM が違う**: 会社のデータは会社が許可した LLM プロバイダにだけ送る。当面は「1 台の PC には会社用か私用か一方のデータだけを入れ、LLM Profile は PC 単位で 1 つ」という運用でこの制約を守る。将来はアカウントごとに LLM Profile を切り替えられるようにする
+- **会社と私用で使える AI が違う**: 会社のデータは会社が許可した AI にだけ送る。「1 台の PC には会社用か私用か一方のデータだけを入れ、AI Settings は PC 単位で 1 つにし、会社の PC には会社が許可したものだけを設定する」という運用でこの制約を守る（[ADR-0022](decisions/0022-ai-uses-by-role.md)）
 - 各 Source の API 利用規約とレート制限に従う
