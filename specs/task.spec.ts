@@ -4,6 +4,7 @@ import type { CompletionEffect } from "./completion-effect.spec.ts";
 import type { TaskActivity } from "./task-activity.value.ts";
 import type { Arrangement } from "./action-definition.value.ts";
 import type { DueDate } from "./due-date.value.ts";
+import type { Rule } from "./recurring-task.spec.ts";
 
 /**
  * Task（自分がやること）。カンバンのどの列に出るかを status で持つ。
@@ -38,7 +39,7 @@ export type Task = {
   /** @ref recurring-task */
   recurrence: { recurringTaskId: string; occurrence: string } | null;
   /** AI が「定期の Task にしませんか」と置いた下書き（なければ null）。決まりを作るのは、ユーザーが承認してから */
-  recurringDraft: { title: string; schedule: string } | null;
+  recurringDraft: { title: string; rule: Rule } | null;
   /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す。ユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（反応は links で書く） */
   history: TaskActivity[];
   /** ユーザーが最後に Task を見た時刻（まだ一度も見ていなければ null で、新着の印を出す）。更新マーク・新着・最近片付いたものは、保存せず、履歴とこの時刻から導いて見せる（判断表「更新マークと新着」）。見ても、最後に変えた日時は変えない */
@@ -163,7 +164,7 @@ export const initial: Task = {
 };
 
 export const links = [
-  { from: proposeRecurring, to: "recurring-task", label: "ユーザーが下書きを承認したら、定期の Task の決まりを作る（承認しなければ作らない）" },
+  { from: approveRecurring, to: "recurring-task", label: "下書きから、定期の Task の決まりを作る（見送ったら作らない）" },
   { from: triage, to: "prioritization", label: "要確認か todo に仕分けたら、優先度を決め始める（仕分け中の Task は判定しない）" },
   { from: complete, to: "prioritization", action: "stop", label: "終わった・完了待ちの Task は、優先度を判定しない" },
   { from: dismiss, to: "prioritization", action: "stop", label: "やらないことにした Task は、優先度を判定しない" },
@@ -232,7 +233,21 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
 export function proposeRecurring(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(isOpen(task) || task.status === "closed", "仕分けたあとの Task だけ");
-  return { ...task, recurringDraft: { title: "請求書を送る", schedule: "毎月 1 日" } };
+  return { ...task, recurringDraft: { title: "請求書を送る", rule: { type: "毎月", day: 1 } } };
+}
+
+/** ユーザーが下書きを承認する（定期の Task の決まりを作り、下書きを消す） */
+export function approveRecurring(task: Task, actor: Actor, draft: "ある" | "ない"): Task {
+  ensure(actor.kind === "user", "ユーザーだけ");
+  ensure(draft === "ある", "下書きがあるときだけ");
+  return { ...task, recurringDraft: null };
+}
+
+/** ユーザーが下書きを見送る（決まりは作らず、下書きを消す） */
+export function dismissRecurring(task: Task, actor: Actor, draft: "ある" | "ない"): Task {
+  ensure(actor.kind === "user", "ユーザーだけ");
+  ensure(draft === "ある", "下書きがあるときだけ");
+  return { ...task, recurringDraft: null };
 }
 
 /** 期日を直す（ユーザーが。事実から読み取った期日が違っていたとき） */
@@ -434,6 +449,8 @@ export function detachFact(task: Task, actor: Actor): Task {
 }
 
 export const inputs = {
+  approveRecurring: { ある: ["ある"], ない: ["ない"] },
+  dismissRecurring: { ある: ["ある"], ない: ["ない"] },
   triage: { todo: ["todo"], 要確認: ["needs_review"] },
   move: { 要確認へ: ["needs_review"], todoへ: ["todo"] },
   complete: {
@@ -518,6 +535,11 @@ export const scenarios = {
     { do: triage, by: "同期", input: "todo" },
     { do: proposeRecurring, by: "ユーザー", denied: "AI だけ" },
     { do: proposeRecurring, by: "AI" },
+    { do: approveRecurring, by: "AI", input: "ある", denied: "ユーザーだけ" },
+    { do: approveRecurring, by: "ユーザー", input: "ない", denied: "下書きがあるときだけ" },
+    { do: approveRecurring, by: "ユーザー", input: "ある", expect: { recurringDraft: null } },
+    { do: dismissRecurring, by: "AI", input: "ある", denied: "ユーザーだけ" },
+    { do: dismissRecurring, by: "ユーザー", input: "ない", denied: "下書きがあるときだけ" },
   ],
   "期日を直せるのは、開いている Task でユーザーだけ": [
     { do: setDue, by: "ユーザー", denied: "要確認か todo のときだけ" },
@@ -671,6 +693,8 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "anytime:approveRecurring": "下書きがあれば、どの列の Task からでも承認できる（終わった Task から、毎月の決まりにすることもある）。下書きがあるかは入力で確かめる",
+  "anytime:dismissRecurring": "下書きがあれば、どの列の Task からでも見送れる。下書きがあるかは入力で確かめる",
   "anyone-can:notePriority": "優先度を決めた人（同期の規則・AI の判定・ユーザー）が、そのまま出来事に残る。だれが決めてよいかは Priority の側で確かめる",
   "same-for-similar-actors:notePriority": "優先度を決めた人を出来事に残すだけで、だれが決めてよいかは Priority の側で確かめる",
   "indistinguishable-example:receive:事実で項目が変わる,事実で何も変わらない,AI の作業の成果": "項目が変わるかどうかは、Task の出来事が残るかどうか（更新マークが付くかどうか）に出る。列などの状態は変わらないので、状態としては同じに見える",

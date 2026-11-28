@@ -60,8 +60,8 @@ export const actors: Record<string, Actor> = {
   アプリ: { kind: "app" },
 };
 
-/** 判断表「今、作るか」の答え（最後に作った回と直近の回から、アプリが確かめる） */
-type Due = "直近の回は作った" | "直近の回をまだ作っていない";
+/** 判断表「今、作るか」の答え（最後に作った回と直近の回から、アプリが確かめる。まだ回が来ていないときも「作る回はない」） */
+type Latest = "作る回はない" | "作る回がある";
 
 /**
  * 決まりを作る（手で登録する・Task から作る・AI の下書きを承認する）
@@ -83,27 +83,32 @@ export function initial(actor: Actor, title: "ある" | "空", latest: "作る" 
 }
 
 /** 直近の回をまだ作っていないので、作る（1 時間おきの確かめで） */
-export function create(task: RecurringTask, actor: Actor, due: Due): RecurringTask {
+export function create(task: RecurringTask, actor: Actor, due: Latest): RecurringTask {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(task.status === "使っている", "使っているときだけ");
-  ensure(due === "直近の回をまだ作っていない", "直近の回をまだ作っていないときだけ");
+  ensure(due === "作る回がある", "直近の回をまだ作っていないときだけ");
   return { ...task, lastOccurrence: "2026-12-01" };
 }
 
 /** 予告から「今すぐ作る」（作る日を待たずに、次の回を作る。直近の回をまだ作っていなければ、先にそちらを作る） */
-export function createNow(task: RecurringTask, actor: Actor, due: Due): RecurringTask {
+export function createNow(task: RecurringTask, actor: Actor, due: Latest, preview: "出す" | "出さない"): RecurringTask {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status === "使っている", "使っているときだけ");
-  ensure(due === "直近の回は作った", "直近の回を作ったあとだけ（作り損ねた回があれば、先にそちらを作る）");
+  ensure(due === "作る回はない", "直近の回を作ったあとだけ（作り損ねた回があれば、先にそちらを作る）");
+  ensure(preview === "出す", "予告を出しているときだけ（次の回を作ったら予告は消えるので、次の次の回までは先に作らない）");
   return { ...task, lastOccurrence: "2027-01-01" };
 }
 
-/** 決まりを直す（タイトル・メモ・ひな形・いつ作るか）。直しても、最後に作った回は戻さない */
-export function edit(task: RecurringTask, actor: Actor, title: "ある" | "空"): RecurringTask {
+/**
+ * 決まりを直す（タイトル・メモ・ひな形・いつ作るか）。直しても、最後に作った回は戻さない
+ *
+ * いつ作るかを直して、直近の回が新しく過ぎた扱いになるなら（毎月 1 日を 11/20 に毎月 15 日へ直すと 11/15 の回が過ぎている）、登録のときと同じく作るか見送るかを選ぶ（同じ月に 2 つ目の Task が知らないうちにできないように）。
+ */
+export function edit(task: RecurringTask, actor: Actor, title: "ある" | "空", latest: "作る" | "見送る"): RecurringTask {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status !== "消した", "消していないときだけ");
   ensure(title === "ある", "タイトルが要る");
-  return { ...task, note: "今回は先方の担当が変わる" };
+  return latest === "見送る" ? { ...task, note: "今回は先方の担当が変わる", lastOccurrence: "2026-12-01" } : { ...task, note: "今回は先方の担当が変わる" };
 }
 
 /** 止める（作らない・予告も出さない） */
@@ -129,23 +134,23 @@ export function remove(task: RecurringTask, actor: Actor): RecurringTask {
 
 export const inputs = {
   initial: { 直近の回も作る: ["ある", "作る"], 直近の回は見送る: ["ある", "見送る"], タイトルが空: ["空", "作る"] },
-  create: { まだ作っていない: ["直近の回をまだ作っていない"], もう作った: ["直近の回は作った"] },
-  createNow: { 直近の回は作った: ["直近の回は作った"], 作り損ねた: ["直近の回をまだ作っていない"] },
-  edit: { ある: ["ある"], 空: ["空"] },
+  create: { まだ作っていない: ["作る回がある"], もう作った: ["作る回はない"] },
+  createNow: { 予告を出している: ["作る回はない", "出す"], 予告を出していない: ["作る回はない", "出さない"], 作り損ねた: ["作る回がある", "出す"] },
+  edit: { ある: ["ある", "作る"], 見送る: ["ある", "見送る"], 空: ["空", "作る"] },
   resume: { 直近の回も作る: ["作る"], 直近の回は見送る: ["見送る"] },
 };
 
 /** 今、作るか（最後に作った回の予定日と、作る日を過ぎた回のうちいちばん新しい回の予定日を比べる） */
-function whetherToCreate(input: { 最後に作った回: string | null; 直近の回: string | null }): Due {
-  if (input.直近の回 === null) return "直近の回は作った";
-  if (input.最後に作った回 !== null && input.最後に作った回 >= input.直近の回) return "直近の回は作った";
-  return "直近の回をまだ作っていない";
+function whetherToCreate(input: { 最後に作った回: string | null; 直近の回: string | null }): Latest {
+  if (input.直近の回 === null) return "作る回はない";
+  if (input.最後に作った回 !== null && input.最後に作った回 >= input.直近の回) return "作る回はない";
+  return "作る回がある";
 }
 
 /**
  * 予告を出すか（次の回の作る日まで、予告を出す日数以内なら出す）
  *
- * 予告を出す日数は、7 日と「回と回の間」の短いほうから 1 日引いたもの（毎週なら前日だけ）。毎日の決まりは、次の回がいつも明日で予告が出っぱなしになるので出さない。
+ * 毎月・毎年は作る日の 7 日前から、毎週は前日だけ（7 日前からだと、いつも次の週の分が見える）、毎日は出さない（次の回がいつも明日で、出っぱなしになる）。
  */
 function whetherToPreview(input: { 決まり方: Rule["type"]; 次の回の作る日まで: number; 次の回をもう作った: boolean }): "出す" | "出さない" {
   if (input.決まり方 === "毎日" || input.次の回をもう作った) return "出さない";
@@ -169,12 +174,12 @@ export const decisions = {
   "今、作るか": {
     decide: whetherToCreate,
     cases: [
-      { input: { 最後に作った回: "2026-11-01", 直近の回: "2026-12-01" }, expect: "直近の回をまだ作っていない" },
-      { input: { 最後に作った回: "2026-12-01", 直近の回: "2026-12-01" }, expect: "直近の回は作った" },
-      { input: { 最後に作った回: null, 直近の回: "2026-12-07" }, expect: "直近の回をまだ作っていない" },
-      { input: { 最後に作った回: null, 直近の回: null }, expect: "直近の回は作った" },
-      { input: { 最後に作った回: "2027-01-01", 直近の回: "2026-12-01" }, expect: "直近の回は作った" },
-      { input: { 最後に作った回: "2026-10-01", 直近の回: "2026-12-01" }, expect: "直近の回をまだ作っていない" },
+      { input: { 最後に作った回: "2026-11-01", 直近の回: "2026-12-01" }, expect: "作る回がある" },
+      { input: { 最後に作った回: "2026-12-01", 直近の回: "2026-12-01" }, expect: "作る回はない" },
+      { input: { 最後に作った回: null, 直近の回: "2026-12-07" }, expect: "作る回がある" },
+      { input: { 最後に作った回: null, 直近の回: null }, expect: "作る回はない" },
+      { input: { 最後に作った回: "2027-01-01", 直近の回: "2026-12-01" }, expect: "作る回はない" },
+      { input: { 最後に作った回: "2026-10-01", 直近の回: "2026-12-01" }, expect: "作る回がある" },
     ],
   },
 };
@@ -182,10 +187,16 @@ export const decisions = {
 const validRule = (rule: Rule) =>
   rule.type === "毎日" || rule.type === "毎週" || (rule.type === "毎月" ? rule.day >= 1 && rule.day <= 31 : rule.month >= 1 && rule.month <= 12 && rule.day >= 1 && rule.day <= 31);
 
+/** 前倒しの上限（回と回の間より短くしないと、どれが直近の回か決まらない） */
+const MAX_ADVANCE: Record<Rule["type"], number> = { 毎日: 0, 毎週: 6, 毎月: 27, 毎年: 364 };
+
 export const invariants = {
   "消した決まりは、もう変わらない": (before: RecurringTask, after: RecurringTask) => before.status !== "消した" || after.status === "消した",
-  "決まり方の日付は正しく、前倒しと期日は 0 日以上": (task: RecurringTask) =>
-    validRule(task.schedule.rule) && task.schedule.advanceDays >= 0 && (task.schedule.dueAfterDays === null || task.schedule.dueAfterDays >= 0),
+  "決まり方の日付は正しく、前倒しは 0 日以上で回と回の間より短く（毎日 0・毎週 6・毎月 27・毎年 364 日まで）、期日は 0 日以上": (task: RecurringTask) =>
+    validRule(task.schedule.rule) &&
+    task.schedule.advanceDays >= 0 &&
+    task.schedule.advanceDays <= MAX_ADVANCE[task.schedule.rule.type] &&
+    (task.schedule.dueAfterDays === null || task.schedule.dueAfterDays >= 0),
   "ひな形は期日と版を持たない（毎回同じものを写すので、決まった日付・古い版を持ち込まない。期日は dueAfterDays で付ける）": (task: RecurringTask) =>
     task.template.every((d) => d.due === null && (d.how.type !== "write" || d.how.version === null)),
 };
@@ -209,15 +220,16 @@ export const scenarios = {
     { do: initial, by: "ユーザー", input: "直近の回も作る" },
     { do: createNow, by: "ユーザー", input: "作り損ねた", denied: "直近の回を作ったあとだけ（作り損ねた回があれば、先にそちらを作る）" },
     { do: create, by: "アプリ", input: "まだ作っていない" },
-    { do: createNow, by: "アプリ", input: "直近の回は作った", denied: "ユーザーだけ" },
-    { do: createNow, by: "ユーザー", input: "直近の回は作った", expect: { lastOccurrence: "2027-01-01" } },
+    { do: createNow, by: "アプリ", input: "予告を出している", denied: "ユーザーだけ" },
+    { do: createNow, by: "ユーザー", input: "予告を出している", expect: { lastOccurrence: "2027-01-01" } },
+    { do: createNow, by: "ユーザー", input: "予告を出していない", denied: "予告を出しているときだけ（次の回を作ったら予告は消えるので、次の次の回までは先に作らない）" },
   ],
   "止めている間は作らず、また使うときは直近の回を作るか見送るかを選ぶ": [
     { do: initial, by: "ユーザー", input: "直近の回は見送る" },
     { do: pause, by: "ユーザー", expect: { status: "止めている" } },
     { do: pause, by: "ユーザー", denied: "使っているときだけ" },
     { do: create, by: "アプリ", input: "まだ作っていない", denied: "使っているときだけ" },
-    { do: createNow, by: "ユーザー", input: "直近の回は作った", denied: "使っているときだけ" },
+    { do: createNow, by: "ユーザー", input: "予告を出している", denied: "使っているときだけ" },
     { do: resume, by: "アプリ", input: "直近の回も作る", denied: "ユーザーだけ" },
     { do: resume, by: "ユーザー", input: "直近の回は見送る", expect: { status: "使っている", lastOccurrence: "2026-12-01" } },
     { do: resume, by: "ユーザー", input: "直近の回も作る", denied: "止めているときだけ" },
@@ -242,6 +254,7 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "indistinguishable-example:edit:ある,見送る": "直しても直近の回が新しく過ぎないなら、作っても見送っても同じ。見送ったときだけ最後に作った回を進める（例では、その回がもう作った回と同じ日になるので、結果が同じに見える）",
   "unused-field:schedule": "いつ作るかはユーザーが決める値で、直近の回を作ったかはアプリが判断表「今、作るか」で確かめて入力で渡す。値の範囲を、不変条件で確かめるために読んでいる",
   "ignores-input:resume": "直近の回を作っても見送っても、また使う。見送ったときだけ最後に作った回を進める（例では、その回がもう作った回と同じ日になるので、結果が同じに見える）",
 };
