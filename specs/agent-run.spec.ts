@@ -8,6 +8,7 @@ import { ensure } from "@yutaura/live-spec";
  * Agent は外に書き込まない（ADR-0012・0013）。書き込みは、許可しないコマンド・渡さない認証情報・sandbox の 3 つを重ねて止める。
  * merge を承認して走る処理は、merge 自体が目的なので Agent Run ではない（追う項目が片付いても知らせない。ADR-0016）。
  */
+/** 止まった・取り消した理由（StopReason）は状態に持たず、作業の記録に残す（ユーザーが止めたのか、やらなくなって止まったのかは記録で分かる。理由ごとに状態を分けると、状態遷移図が読めなくなるため） */
 export type AgentRun = {
   /** 作業の段階 */
   status: Status;
@@ -33,8 +34,6 @@ export type AgentRun = {
   notified: boolean;
   /** 結果（回答・報告・差分）。終わったときだけ */
   result: string | null;
-  /** 終わらなかった理由 */
-  stopReason: StopReason | null;
 };
 
 export type Kind = "質問に答える" | "Action Item をやる（読むだけ）" | "Action Item をやる（直す）" | "依存の更新を調べる" | "PR を直す" | "コンフリクトを直す";
@@ -99,7 +98,6 @@ export function initial(actor: Actor, kind: Kind, task: "開いている" | "開
     subjectFingerprint: kind === "質問に答える" ? null : "abc1234",
     notified: false,
     result: null,
-    stopReason: null,
   };
 }
 
@@ -125,17 +123,17 @@ export function succeed(run: AgentRun, actor: Actor): AgentRun {
 }
 
 /** うまくいかなかった・アプリを閉じて止まった（判断中に閉じたときも） */
-export function fail(run: AgentRun, actor: Actor, reason: "うまくいかなかった" | "アプリを閉じた" | "作業場所が消えた"): AgentRun {
+export function fail(run: AgentRun, actor: Actor, _reason: "うまくいかなかった" | "アプリを閉じた" | "作業場所が消えた"): AgentRun {
   ensure(actor.kind === "agent" || actor.kind === "app", "AI かアプリだけ");
   ensure(run.status === "やっている" || run.status === "判断中", "やっている・判断中のときだけ");
-  return { ...run, status: "止まった", stopReason: reason };
+  return { ...run, status: "止まった" };
 }
 
 /** ユーザーが止める（画面では、注意のダイアログで確かめてから止める） */
 export function stop(run: AgentRun, actor: Actor): AgentRun {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(run.status === "やっている" || run.status === "判断中", "やっている・判断中のときだけ");
-  return { ...run, status: "止まった", stopReason: "ユーザーが止めた" };
+  return { ...run, status: "止まった" };
 }
 
 /**
@@ -156,7 +154,7 @@ export function decide(run: AgentRun, actor: Actor, answer: "やめる" | "続�
   ensure(actor.kind === "agent", "AI だけ");
   ensure(run.status === "判断中", "判断中のときだけ");
   if (answer === "続ける") return { ...run, status: "やっている" };
-  return { ...run, status: "止まった", stopReason: answer === "やめる" ? "追う項目が片付いたのでやめた" : "決まった形の答えが返らない" };
+  return { ...run, status: "止まった" };
 }
 
 /**
@@ -164,10 +162,10 @@ export function decide(run: AgentRun, actor: Actor, answer: "やめる" | "続�
  *
  * アプリがやめる。ユーザーが止めたのか、やらなくなって止まったのかを、理由で分ける。待ち行列なら取り消す。やっていた作業は、途中までの報告を残す（ユーザーが頼んだ作業が、知らないうちに跡形もなく消えないように）。
  */
-export function withdraw(run: AgentRun, actor: Actor, reason: "やらなくなった" | "ユーザーが済ませた"): AgentRun {
+export function withdraw(run: AgentRun, actor: Actor, _reason: "やらなくなった" | "ユーザーが済ませた"): AgentRun {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(run.status === "待ち行列" || run.status === "やっている" || run.status === "判断中", "終わっていないときだけ");
-  return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった", stopReason: reason };
+  return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった" };
 }
 
 /**
@@ -175,10 +173,10 @@ export function withdraw(run: AgentRun, actor: Actor, reason: "やらなくな�
  *
  * 追う項目が片付いた・ユーザーが取り消した。判断させずに取り消す。ADR-0016
  */
-export function cancel(run: AgentRun, actor: Actor, reason: "ユーザーが取り消した" | "追う項目が片付いたので取り消した"): AgentRun {
+export function cancel(run: AgentRun, actor: Actor, _reason: "ユーザーが取り消した" | "追う項目が片付いたので取り消した"): AgentRun {
   ensure(actor.kind === "app" || actor.kind === "user", "アプリかユーザーだけ");
   ensure(run.status === "待ち行列", "待ち行列のときだけ");
-  return { ...run, status: "取り消した", stopReason: reason };
+  return { ...run, status: "取り消した" };
 }
 
 export const inputs = {
@@ -202,7 +200,6 @@ const FINISHED: Status[] = ["終わった", "止まった", "取り消した"];
 
 export const invariants = {
   "終わった作業は、もう変わらない": (before: AgentRun, after: AgentRun) => !FINISHED.includes(before.status) || before.status === after.status,
-  "止まった・取り消したときだけ、理由がある": (run: AgentRun) => (run.status === "止まった" || run.status === "取り消した") === (run.stopReason !== null),
   "渡す道具は、作ったあと変わらない": (before: AgentRun, after: AgentRun) => before.tools === after.tools,
   "終わったときだけ、結果がある": (run: AgentRun) => (run.status === "終わった") === (run.result !== null),
 };
@@ -224,12 +221,12 @@ export const scenarios = {
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: withdraw, by: "ユーザー", input: "やらなくなった", denied: "アプリだけ" },
-    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "止まった", stopReason: "やらなくなった" } },
+    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "止まった" } },
     { do: withdraw, by: "アプリ", input: "やらなくなった", denied: "終わっていないときだけ" },
   ],
   "待ち行列のうちにやらなくなったら、取り消す": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
-    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "取り消した", stopReason: "やらなくなった" } },
+    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "取り消した" } },
   ],
   "質問を頼み、Claude Code が調べて答える": [
     { do: initial, by: "ユーザー", input: "質問", expect: { status: "待ち行列", tools: "読むだけ", trigger: "ユーザーが頼んだ" } },
@@ -251,7 +248,7 @@ export const scenarios = {
   "ユーザーが自分で済ませたら、アプリが作業をやめる": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
     { do: start, by: "アプリ", input: "続けられる" },
-    { do: withdraw, by: "アプリ", input: "済ませた", expect: { status: "止まった", stopReason: "ユーザーが済ませた" } },
+    { do: withdraw, by: "アプリ", input: "済ませた", expect: { status: "止まった" } },
   ],
   "同じ Task で同時に動く作業は 1 つまで": [
     { do: initial, by: "ユーザー", input: "質問" },
@@ -282,7 +279,7 @@ export const scenarios = {
     { do: initial, by: "ユーザー", input: "PR を直す" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: interrupt, by: "アプリ" },
-    { do: decide, by: "AI", input: "やめる", expect: { status: "止まった", stopReason: "追う項目が片付いたのでやめた" } },
+    { do: decide, by: "AI", input: "やめる", expect: { status: "止まった" } },
   ],
   "判断中にアプリを閉じたら、止まったことにする": [
     { do: initial, by: "ユーザー", input: "PR を直す" },
@@ -294,7 +291,7 @@ export const scenarios = {
     { do: initial, by: "ユーザー", input: "PR を直す" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: interrupt, by: "アプリ" },
-    { do: decide, by: "AI", input: "答えが返らない", expect: { status: "止まった", stopReason: "決まった形の答えが返らない" } },
+    { do: decide, by: "AI", input: "答えが返らない", expect: { status: "止まった" } },
   ],
   "待ち行列のうちに追う項目が片付いたら、判断させずに取り消す": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
@@ -306,13 +303,13 @@ export const scenarios = {
     { do: initial, by: "ユーザー", input: "質問" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: stop, by: "AI", denied: "ユーザーだけ" },
-    { do: stop, by: "ユーザー", expect: { status: "止まった", stopReason: "ユーザーが止めた" } },
+    { do: stop, by: "ユーザー", expect: { status: "止まった" } },
     { do: succeed, by: "AI", denied: "やっているときだけ" },
   ],
   "アプリを閉じたら、止まったことにする": [
     { do: initial, by: "ユーザー", input: "質問" },
     { do: start, by: "アプリ", input: "続けられる" },
-    { do: fail, by: "アプリ", input: "アプリを閉じた", expect: { status: "止まった", stopReason: "アプリを閉じた" } },
+    { do: fail, by: "アプリ", input: "アプリを閉じた", expect: { status: "止まった" } },
   ],
   "作業を進めるのは決まった人だけ": [
     { do: initial, by: "AI", input: "Action Item（読むだけ）", denied: "ユーザーか、Action Item から始めるアプリだけ" },
@@ -337,6 +334,10 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "ignores-input:fail": "止まった・取り消した理由は、状態に持たず作業の記録に残す（ユーザーが止めたのか、やらなくなったのかは記録で分かる）。どの理由でも、できることは同じ",
+  "ignores-input:withdraw": "止まった・取り消した理由は、状態に持たず作業の記録に残す（ユーザーが止めたのか、やらなくなったのかは記録で分かる）。どの理由でも、できることは同じ",
+  "ignores-input:cancel": "止まった・取り消した理由は、状態に持たず作業の記録に残す（ユーザーが止めたのか、やらなくなったのかは記録で分かる）。どの理由でも、できることは同じ",
+  "indistinguishable-example:decide:やめる,答えが返らない": "どちらも作業を止める。やめた（追う項目が片付いた）のか、答えが返らなかったのかは、作業の記録に残す。片付いた追う項目は、事実の変化として Task が受け取る",
   "unused-field:result": "結果（回答・報告・差分）はユーザーに見せるもので、操作の可否は変えない。終わったときだけあることを、不変条件で確かめるために読んでいる",
   "same-for-similar-actors:fail": "うまくいかなかったことには Claude Code が、アプリを閉じて止まったことにはアプリが気づく。どちらでも止まったになり、理由で分ける",
   "same-for-similar-actors:cancel": "待ち行列の作業は、追う項目が片付いたらアプリが、要らなくなったらユーザーが取り消す。どちらでも取り消したになる",
