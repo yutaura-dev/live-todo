@@ -36,7 +36,7 @@ export type Status = (typeof Status)[keyof typeof Status];
  * 変化に数える項目。Task の言葉で持つ項目だけ
  * - 数えない: 事実（Source Item）が増えた・変わった・外れた（Source 側の変化。受け取って、ここの項目が変わったときだけ数える）、AI が作業中か（作業中の印で見せる）、最後に変えた日時
  */
-export type ChangedField = "列" | "どう終わったか" | "何をするか" | "今の状況と次の一手" | "計画" | "Action Item の進み" | "完了条件";
+export type ChangedField = "列" | "どう終わったか" | "何をするか" | "今の状況と次の一手" | "計画" | "Action Item の進み" | "完了条件" | "完了したときにすること";
 
 /** だれが変えたか */
 export type Changer = "ユーザー" | "AI" | "同期" | "ルール" | "アプリ";
@@ -44,7 +44,7 @@ export type Changer = "ユーザー" | "AI" | "同期" | "ルール" | "アプ�
 /** 変化の例（数える項目と、数えない項目） */
 type Field = ChangedField | "事実" | "AI が作業中か" | "最後に変えた日時";
 
-const COUNTED: Field[] = ["列", "どう終わったか", "何をするか", "今の状況と次の一手", "計画", "Action Item の進み", "完了条件"];
+const COUNTED: Field[] = ["列", "どう終わったか", "何をするか", "今の状況と次の一手", "計画", "Action Item の進み", "完了条件", "完了したときにすること"];
 
 type Actor = { kind: "user" } | { kind: "agent" } | { kind: "sync" } | { kind: "rule" } | { kind: "app" };
 
@@ -100,6 +100,7 @@ export const inputs = {
     今の状況が変わった: ["今の状況と次の一手"],
     列が変わった: ["列"],
     "Action Item が済んだ": ["Action Item の進み"],
+    完了したときにすることを書き込めなかった: ["完了したときにすること"],
     事実が変わった: ["事実"],
     作業中になった: ["AI が作業中か"],
     日時だけ変わった: ["最後に変えた日時"],
@@ -126,6 +127,7 @@ export const scenarios = {
   "承認した書き込みで Action Item が果たされたら、更新マークが付く": [{ do: initial, by: "アプリ", input: "Action Item が済んだ", expect: { status: "未読", by: "アプリ" } }],
   "Claude Code が Action Item を果たしたら、更新マークが付く": [{ do: initial, by: "AI", input: "Action Item が済んだ", expect: { status: "未読" } }],
   "待つ条件が成り立って Action Item が果たされたら、更新マークが付く": [{ do: initial, by: "同期", input: "Action Item が済んだ", expect: { status: "未読", by: "同期" } }],
+  "完了したときにすることを書き込めなかったら、更新マークが付く": [{ do: initial, by: "アプリ", input: "完了したときにすることを書き込めなかった", expect: { status: "未読", by: "アプリ" } }],
   "ルールで Task を完了にしたら、更新マークが付く": [{ do: initial, by: "ルール", input: "列が変わった", expect: { status: "未読", by: "ルール" } }],
   "自分で列を動かしても、更新マークは付かない": [{ do: initial, by: "ユーザー", input: "列が変わった", expect: { status: "既読", by: "ユーザー" } }],
   "事実が変わっただけでは、更新マークは付かない": [
@@ -140,7 +142,7 @@ export const scenarios = {
 };
 
 export const reviewed = {
-  "equivalent-states:既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読": "どの項目が・だれが変えたかは、見せるための記録で、見たかの振る舞いは変えない（入力の例ごとに値が違うので、別の状態に見えている）",
+  "equivalent-states:既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読/既読": "どの項目が・だれが変えたかは、見せるための記録で、見たかの振る舞いは変えない（入力の例ごとに値が違うので、別の状態に見えている）",
   "anytime:openTask": "Task を開いたら、その Task の変化をまとめて既読にする。既読の変化は既読のまま変わらないので、どの状態でも通してよい",
 };
 
