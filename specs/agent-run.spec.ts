@@ -2,9 +2,10 @@ import { ensure } from "@yutaura/live-spec";
 
 /**
  * Agent Run（AI に任せた作業 1 回）。Agent Thread の中にあり、Agent Thread を通してだけ扱う。
- * 作業: 質問に答える・計画を考える・Action Item をやる・依存の更新を調べる・PR を直す・コンフリクトを直す。ユーザーが頼むことも、AI が先回りして始めること（Pre-work）もある。
- * Claude Code は外に書き込まない（ADR-0012・0013）。書き込みは、許可しないコマンド・渡さない認証情報・sandbox の 3 つを重ねて止める。外への書き込み（push・返信・merge など）は、結果から計画に Action Item を足し、ユーザーが確かめて承認する（Write）。
- * Claude Code は、どの LLM Profile を選んでいても Anthropic に送る。そのため、Task の事実のアカウントがどれも Claude Code を使うのを有効にしているときだけ、作業を始められる。
+ * Agent（AI Settings で選んだ Claude Code・Codex など）が、複雑な作業・調査をする（ADR-0022）。作業: 質問に答える・Action Item をやる・依存の更新を調べる・PR を直す・コンフリクトを直す。計画を考えるのは Agent ではなく Generation（Agent の作業にしない）。
+ * 始め方は 2 つ: ユーザーが直接頼む（質問・PR を直す など）か、計画の Action Item（Claude Code が果たす）から始める（番が来たら自動で・ボタンで。どちらにするかは計画の中で決める。先回り（Pre-work）はこれで表す）。AI が自分で作業を始めることはしない。
+ * Agent は Task を直接変えない。成果（回答・報告・差分）は、Task に「AI の作業の成果」として届き、Generation が Task の言葉に置き換える。外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足し、ユーザーが確かめて承認する（Write）。
+ * Agent は外に書き込まない（ADR-0012・0013）。書き込みは、許可しないコマンド・渡さない認証情報・sandbox の 3 つを重ねて止める。
  * merge を承認して走る処理は、merge 自体が目的なので Agent Run ではない（追う項目が片付いても知らせない。ADR-0016）。
  */
 export type AgentRun = {
@@ -12,7 +13,7 @@ export type AgentRun = {
   status: Status;
   /**
    * 渡す道具
-   * - 読むだけ: ファイルを読む・探す、Web の検索とページ、gws と gh の読むだけのコマンド（Claude Code を有効にしたアカウントだけ）。編集の道具は渡さない（ADR-0013）
+   * - 読むだけ: ファイルを読む・探す、Web の検索とページ、gws と gh の読むだけのコマンド。編集の道具は渡さない（ADR-0013）
    * - 直す: 作業場所のファイルを読む・書く、Bash（sandbox の中。書けるのは作業場所とパッケージのキャッシュ、通信は npm・yarn のレジストリだけ）。外の API の認証情報も、Web・gws・gh も渡さない（ADR-0012）。読むだけの上に重ねない
    */
   tools: Tools;
@@ -24,8 +25,8 @@ export type AgentRun = {
   actionItemId: string | null;
   /** どの会話で動いたか（新しい会話を始めても、前の作業がどの会話だったかを追えるように） */
   sessionId: string;
-  /** だれが始めたか */
-  trigger: "ユーザーが頼んだ" | "先回り";
+  /** どう始まったか */
+  trigger: "ユーザーが頼んだ" | "Action Item から";
   /** 調べたときの元の項目（PR の head の commit など。質問のように元の項目がなければ null）。変わったら調べ直す。push を頼むときの版（Write の version）にし、直し始めたときから動いていないことを確かめる */
   subjectFingerprint: string | null;
   /** 追う項目が片付いたことを、もう知らせたか（知らせるのは 1 回だけ） */
@@ -36,7 +37,7 @@ export type AgentRun = {
   stopReason: StopReason | null;
 };
 
-export type Kind = "質問に答える" | "計画を考える" | "Action Item をやる" | "依存の更新を調べる" | "PR を直す" | "コンフリクトを直す";
+export type Kind = "質問に答える" | "Action Item をやる" | "依存の更新を調べる" | "PR を直す" | "コンフリクトを直す";
 export type Tools = "読むだけ" | "直す";
 export type StopReason = "ユーザーが止めた" | "追う項目が片付いたのでやめた" | "うまくいかなかった" | "アプリを閉じた" | "決まった形の答えが返らない";
 
@@ -68,13 +69,13 @@ export const actors: Record<string, Actor> = {
 };
 
 /**
- * 作業を頼む・先回りして始める
+ * 作業を頼む・Action Item から始める
  *
  * 直す道具（Edit・Write・Bash）を渡すのは、PR を直す・コンフリクトを直すときだけ。それ以外は読むだけ。
  */
-export function initial(actor: Actor, kind: Kind, accounts: "すべて有効" | "有効でないアカウントがある"): AgentRun {
-  ensure(actor.kind === "user" || actor.kind === "agent", "ユーザーか、先回りする AI だけ");
-  ensure(accounts === "すべて有効", "Task の事実のアカウントが、どれも Claude Code を使うのを有効にしているときだけ");
+export function initial(actor: Actor, kind: Kind): AgentRun {
+  ensure(actor.kind === "user" || actor.kind === "app", "ユーザーか、Action Item から始めるアプリだけ");
+  ensure(actor.kind === "user" || kind === "Action Item をやる", "アプリが始めるのは、Action Item をやる作業だけ");
   return {
     status: "待ち行列",
     tools: FIXES.includes(kind) ? "直す" : "読むだけ",
@@ -82,7 +83,7 @@ export function initial(actor: Actor, kind: Kind, accounts: "すべて有効" | 
     kind,
     actionItemId: kind === "Action Item をやる" ? "a2" : null,
     sessionId: "s1",
-    trigger: actor.kind === "user" ? "ユーザーが頼んだ" : "先回り",
+    trigger: actor.kind === "user" ? "ユーザーが頼んだ" : "Action Item から",
     subjectFingerprint: kind === "質問に答える" ? null : "abc1234",
     notified: false,
     result: null,
@@ -147,13 +148,11 @@ export function cancel(run: AgentRun, actor: Actor): AgentRun {
 
 export const inputs = {
   initial: {
-    質問: ["質問に答える", "すべて有効"],
-    "PR を直す": ["PR を直す", "すべて有効"],
-    コンフリクト: ["コンフリクトを直す", "すべて有効"],
-    計画: ["計画を考える", "すべて有効"],
-    "Action Item": ["Action Item をやる", "すべて有効"],
-    依存の更新: ["依存の更新を調べる", "すべて有効"],
-    有効でないアカウント: ["質問に答える", "有効でないアカウントがある"],
+    質問: ["質問に答える"],
+    "PR を直す": ["PR を直す"],
+    コンフリクト: ["コンフリクトを直す"],
+    "Action Item": ["Action Item をやる"],
+    依存の更新: ["依存の更新を調べる"],
   },
   fail: { うまくいかなかった: ["うまくいかなかった"], アプリを閉じた: ["アプリを閉じた"] },
   decide: { やめる: ["やめる"], 続ける: ["続ける"], 答えが返らない: ["答えが返らない"] },
@@ -170,7 +169,8 @@ export const invariants = {
 
 export const links = [
   { from: start, to: "task", action: "startWork", label: "Task を AI が作業中にする（待ち行列のあいだは作業中にしない）" },
-  { from: succeed, to: "task", label: "AI の作業が終わる（finishWork）。Action Item をやる作業なら、その Action Item を果たす。外への書き込み（push・返信など）が要るなら、計画に書き込みで果たされる Action Item を足す（ユーザーが確かめて承認する。push の版はこの作業の元の項目）" },
+  { from: succeed, to: "task", action: "finishWork", label: "AI の作業が終わる。Action Item をやる作業なら、その Action Item を果たす" },
+  { from: succeed, to: "task", action: "receive", label: "成果が「AI の作業の成果」として届き、Generation が Task の言葉にする（外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足す。push の版はこの作業の元の項目）" },
   { from: fail, to: "task", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
   { from: stop, to: "task", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
   { from: decide, to: "task", label: "やめたなら、片付いた追う項目を事実の変化として受け取り、やめた理由を変化として残す。答えが返らないなら、AI の作業が終わったことにする" },
@@ -185,8 +185,12 @@ export const scenarios = {
     { do: stop, by: "ユーザー", denied: "やっている・判断中のときだけ" },
   ],
   "PR を直すときだけ、直す道具を渡す": [{ do: initial, by: "ユーザー", input: "PR を直す", expect: { tools: "直す" } }],
-  "コンフリクトを直すときも、直す道具を渡す": [{ do: initial, by: "AI", input: "コンフリクト", expect: { tools: "直す", trigger: "先回り" } }],
-  "計画を考えるときは、読むだけ": [{ do: initial, by: "AI", input: "計画", expect: { tools: "読むだけ" } }],
+  "コンフリクトを直すときも、直す道具を渡す": [{ do: initial, by: "ユーザー", input: "コンフリクト", expect: { tools: "直す" } }],
+  "Action Item から始める（番が来たら自動で・ボタンで）": [{ do: initial, by: "アプリ", input: "Action Item", expect: { trigger: "Action Item から", tools: "読むだけ" } }],
+  "アプリが始めるのは、Action Item をやる作業だけ（AI が自分で作業を始めない）": [
+    { do: initial, by: "アプリ", input: "PR を直す", denied: "アプリが始めるのは、Action Item をやる作業だけ" },
+  ],
+  "AI は自分で作業を始めない": [{ do: initial, by: "AI", input: "質問", denied: "ユーザーか、Action Item から始めるアプリだけ" }],
   "作業中に PR が merge されたら、Claude Code がやめるか続けるかを判断する（続ける）": [
     { do: initial, by: "ユーザー", input: "PR を直す" },
     { do: start, by: "アプリ" },
@@ -207,9 +211,6 @@ export const scenarios = {
     { do: interrupt, by: "アプリ" },
     { do: fail, by: "アプリ", input: "アプリを閉じた", expect: { status: "止まった" } },
   ],
-  "Claude Code を有効にしていないアカウントの事実を持つ Task では、作業を始めない": [
-    { do: initial, by: "AI", input: "有効でないアカウント", denied: "Task の事実のアカウントが、どれも Claude Code を使うのを有効にしているときだけ" },
-  ],
   "判断の答えが返らなければ、うまくいかなかったのと同じに扱う": [
     { do: initial, by: "ユーザー", input: "PR を直す" },
     { do: start, by: "アプリ" },
@@ -217,7 +218,7 @@ export const scenarios = {
     { do: decide, by: "AI", input: "答えが返らない", expect: { status: "止まった", stopReason: "決まった形の答えが返らない" } },
   ],
   "待ち行列のうちに追う項目が片付いたら、判断させずに取り消す": [
-    { do: initial, by: "AI", input: "計画" },
+    { do: initial, by: "アプリ", input: "Action Item" },
     { do: cancel, by: "AI", denied: "アプリかユーザーだけ" },
     { do: cancel, by: "アプリ", expect: { status: "取り消した" } },
     { do: start, by: "アプリ", denied: "待ち行列のときだけ" },
@@ -235,7 +236,7 @@ export const scenarios = {
     { do: fail, by: "アプリ", input: "アプリを閉じた", expect: { status: "止まった", stopReason: "アプリを閉じた" } },
   ],
   "作業を進めるのは決まった人だけ": [
-    { do: initial, by: "アプリ", input: "質問", denied: "ユーザーか、先回りする AI だけ" },
+    { do: initial, by: "AI", input: "Action Item", denied: "ユーザーか、Action Item から始めるアプリだけ" },
   ],
   "作業の段階を進めるのは決まった人だけ": [
     { do: initial, by: "ユーザー", input: "質問" },
@@ -264,11 +265,7 @@ export const reviewed = {
 
 export const questions = [
   {
-    ask: "AI が先回りして始めてよい作業はどこまでか？（今の spec はどの作業も先回りで始められる。PR を直す・コンフリクトを直すは、直したあと push の承認が要るので外には書き込まないが、作業場所と費用を使い、作業場所の中ではパッケージのインストールスクリプトが動く）",
-    about: initial,
-  },
-  {
-    ask: "Claude Code（Anthropic）を、会社が許可した LLM とみなすか？ Claude Code は LLM Profile に関係なく Anthropic に送る。今の spec は、Task の事実のアカウントがどれも Claude Code を有効にしているときだけ始める（アカウントごとに決める）。会社のアカウントで有効にしてよいかは、LLM Profile・Account の未決事項と一緒に決めたい",
+    ask: "Generation が計画に足す「Claude Code で調べる・直す」の Action Item を、番が来たら自動でやる（先回り）にしてよい作業はどこまでか？（PR を直す・コンフリクトを直すは、外には書き込まないが、作業場所と費用を使い、作業場所の中ではパッケージのインストールスクリプトが動く）",
     about: initial,
   },
   {
