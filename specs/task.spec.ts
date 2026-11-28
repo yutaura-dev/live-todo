@@ -33,7 +33,7 @@ export type Task = {
   plan: Plan | null;
   /** 期日（ない・分からなければ null）。事実から Generation が読み取り、ユーザーが直すこともできる。優先度の材料になる */
   due: DueDate | null;
-  /** 自分の返事が他の人を止めているか（PR のレビュー・返信するだけのもの・自分がブロッカーになっているもの）。事実から Generation が読み取る。優先度の材料になる */
+  /** 自分の返事が他の人を止めているか（PR のレビュー・返信するだけのもの・自分がブロッカーになっているもの）。事実から Decisions が判定する。優先度の材料になる */
   blocksOthers: boolean;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
