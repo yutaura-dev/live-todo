@@ -145,6 +145,15 @@ export const WriteView = Schema.Struct({
 });
 export type WriteView = typeof WriteView.Type;
 
+/** 自動でやってよい範囲の 1 行（操作と、その段・上限。上限 null は決めていない＝ローカルの書き込みまで） */
+export const AutonomyView = Schema.Struct({
+  operation: Schema.String,
+  label: Schema.String,
+  level: Schema.Literals(["調べる", "ローカルの書き込み", "外への書き込み（下書き）", "外への書き込み（本番）"]),
+  limit: Schema.NullOr(Schema.Literals(["調べる", "ローカルの書き込み", "外への書き込み（下書き）", "外への書き込み（本番）"])),
+});
+export type AutonomyView = typeof AutonomyView.Type;
+
 /** 提案・事実・アカウントの操作（どれもユーザーが行う） */
 export const InboxCommand = Schema.Union([
   Schema.TaggedStruct("AcceptProposal", { id: Id }),
@@ -160,12 +169,13 @@ export const InboxCommand = Schema.Union([
   Schema.TaggedStruct("ApproveWrite", { id: Id }),
   Schema.TaggedStruct("CancelWrite", { id: Id }),
   /** shown: 押したときに画面が見せていたチェックリスト（見せたあとに変わっていたら、書き込まずに見せ直す） */
+  Schema.TaggedStruct("SetOperationLimit", { operation: Id, limit: Schema.NullOr(Schema.Literals(["調べる", "ローカルの書き込み", "外への書き込み（下書き）", "外への書き込み（本番）"])) }),
   Schema.TaggedStruct("ConfirmCompletion", { taskId: Id, shown: Schema.Array(Schema.Struct({ id: Id, checked: Schema.Boolean, target: Schema.String, operation: Schema.String })) }),
   Schema.TaggedStruct("EffectAction", { taskId: Id, effectId: Id, action: Schema.Literals(["check", "uncheck", "retry"]) }),
 ]);
 export type InboxCommand = typeof InboxCommand.Type;
 
-export const InboxView = Schema.Struct({ proposals: Schema.Array(ProposalView), undecided: Schema.Array(FactView), accounts: Schema.Array(AccountView), writes: Schema.Array(WriteView) });
+export const InboxView = Schema.Struct({ proposals: Schema.Array(ProposalView), undecided: Schema.Array(FactView), accounts: Schema.Array(AccountView), writes: Schema.Array(WriteView), autonomy: Schema.Array(AutonomyView) });
 export type InboxView = typeof InboxView.Type;
 
 const AiOptionView = Schema.Struct({ id: Schema.String, label: Schema.String, secret: Schema.NullOr(Schema.String) });

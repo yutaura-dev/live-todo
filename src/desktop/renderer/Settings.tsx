@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { ScreenHead } from "../../design/AppShell.js";
 import { Button, Icon, Pill, Problem } from "../../design/components.js";
-import type { AccountView, AiCommand, AiSettingsView, InboxCommand } from "../shared/api.js";
+import type { AccountView, AiCommand, AiSettingsView, AutonomyView, InboxCommand } from "../shared/api.js";
 import { Accounts } from "./Accounts.js";
+import { Autonomy } from "./Autonomy.js";
 
 const ROLES = [
   { use: "decisions", name: "Decisions", description: "分類・確率付きの判定" },
@@ -15,6 +16,7 @@ export function Settings(props: {
   settings: AiSettingsView;
   onConfigure: (command: AiCommand) => Promise<string | null>;
   accounts: ReadonlyArray<AccountView>;
+  autonomy?: ReadonlyArray<AutonomyView>;
   onInbox: (command: InboxCommand) => Promise<string | null>;
 }) {
   const { settings } = props;
@@ -42,6 +44,7 @@ export function Settings(props: {
           ))}
         </ul>
       </section>
+      {settings.status === "使える" && props.autonomy && props.autonomy.length > 0 && <Autonomy rows={props.autonomy} onInbox={props.onInbox} />}
       {settings.status === "使える" && <Accounts accounts={props.accounts} onCommand={props.onInbox} />}
     </>
   );

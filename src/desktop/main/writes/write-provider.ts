@@ -11,7 +11,7 @@ export type Inspection = { ready: "書き込める" | "書き込めない"; vers
 export type WriteOutcome = { ok: true } | { ok: false; kind: "権限が足りない" | "書き込み先のエラー"; message: string };
 
 /** 書き込める操作（Generation の計画の catalog に渡す。ここにないものは計画に書かせない） */
-export const WRITE_OPERATIONS = [{ name: "github.merge", description: 'PR を merge する。subjectUri は PR の uri、paramsJson は {"method":"squash"|"merge"|"rebase"}' }] as const;
+export const WRITE_OPERATIONS = [{ name: "github.merge", label: "PR を merge する", level: "外への書き込み（本番）", description: 'PR を merge する。subjectUri は PR の uri、paramsJson は {"method":"squash"|"merge"|"rebase"}' }] as const;
 
 /** 外へ書き込む口（Source ごとの provider）。承認されたものだけを渡す（呼ぶのは WriteService だけ） */
 export class WriteProvider extends Context.Service<

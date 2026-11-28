@@ -56,15 +56,18 @@ const inboxView = Effect.gen(function* () {
   const proposals = yield* ProposalService;
   const accounts = yield* AccountService;
   const writes = yield* WriteService;
-  return { proposals: yield* proposals.list(), undecided: yield* proposals.undecided(), accounts: yield* accounts.list(), writes: yield* writes.list() } as InboxView;
+  return { proposals: yield* proposals.list(), undecided: yield* proposals.undecided(), accounts: yield* accounts.list(), writes: yield* writes.list(), autonomy: yield* writes.autonomy() } as InboxView;
 });
 
 /** 取り込みを 1 回回し、変わった Task を画面に知らせる（起動したとき・決まった間隔で・ユーザーが頼んだとき） */
 export const syncOnce = Effect.gen(function* () {
   const runner = yield* SyncRunner;
   const tasks = yield* TaskService;
+  const writes = yield* WriteService;
   const outcomes = yield* runner.runOnce();
-  for (const id of new Set(outcomes.flatMap((outcome) => outcome.changedTaskIds))) yield* tasks.notify(id);
+  // 取り込みで番が来た「自動でやる」書き込みを、範囲に入るものだけ書き込む
+  const written = yield* writes.autoRun().pipe(Effect.orElseSucceed(() => []));
+  for (const id of new Set([...outcomes.flatMap((outcome) => outcome.changedTaskIds), ...written])) yield* tasks.notify(id);
   return outcomes;
 });
 
@@ -96,6 +99,8 @@ export const handleInbox = (raw: unknown) =>
                       ? yield* writes.approve(command.id)
                       : command._tag === "CancelWrite"
                         ? yield* writes.cancel(command.id)
+                        : command._tag === "SetOperationLimit"
+                          ? yield* writes.setLimit(command.operation, command.limit)
                         : command._tag === "ConfirmCompletion"
                           ? yield* writes.confirmCompletion(command.taskId, command.shown).pipe(Effect.map((reply) => (reply.ok ? { ok: true as const, value: { taskId: command.taskId } } : reply)))
                           : command._tag === "EffectAction"

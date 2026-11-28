@@ -18,7 +18,7 @@ export function App({ api }: { api: LiveTodoApi }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
-  const [inbox, setInbox] = useState<InboxView>({ proposals: [], undecided: [], accounts: [], writes: [] });
+  const [inbox, setInbox] = useState<InboxView>({ proposals: [], undecided: [], accounts: [], writes: [], autonomy: [] });
   const locked = ai !== null && ai.status !== "使える";
 
   useEffect(() => {
@@ -118,7 +118,7 @@ export function App({ api }: { api: LiveTodoApi }) {
             onClose={() => setSelected(null)} />}
     >
       {ai === null ? null : locked || view === "設定" ? (
-        <Settings settings={ai} onConfigure={configureAi} accounts={inbox.accounts} onInbox={sendInbox} />
+        <Settings settings={ai} onConfigure={configureAi} accounts={inbox.accounts} autonomy={inbox.autonomy} onInbox={sendInbox} />
       ) : view === "提案" ? (
         <Proposals inbox={inbox} openTasks={cards.filter((card) => card.status === "やること")} onCommand={(command) => void sendInbox(command)} />
       ) : view === "承認" ? (
