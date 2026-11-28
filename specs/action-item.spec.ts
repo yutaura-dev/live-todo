@@ -280,6 +280,14 @@ export const reviewed = {
 };
 
 export const links = [
+  { from: complete, to: "task", action: "noteProgress", label: "Action Item が済んだことを、Task の出来事に残す" },
+  { from: succeed, to: "task", action: "noteProgress", label: "Claude Code が Action Item を果たしたことを、Task の出来事に残す" },
+  { from: finishByCondition, to: "task", action: "noteProgress", label: "待つ条件で Action Item が果たされたことを、Task の出来事に残す" },
+  { from: completeByWrite, to: "task", action: "noteProgress", label: "書き込みで Action Item が果たされたことを、Task の出来事に残す" },
+  { from: skip, to: "task", action: "noteProgress", label: "Action Item をやらないことにしたのを、Task の出来事に残す" },
+  { from: reopen, to: "task", action: "noteProgress", label: "Action Item をやり直すことにしたのを、Task の出来事に残す" },
+  { from: choose, to: "task", action: "noteProgress", label: "分かれ道を選んだことを、Task の出来事に残す" },
+  { from: rechoose, to: "task", action: "noteProgress", label: "分かれ道を選び直したことを、Task の出来事に残す" },
   { from: rechoose, to: "completion-effect", action: "withdraw", label: "選び直したら、前の枝に置いていた完了したときにすることを取りやめる" },
   { from: complete, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },
   { from: finishByCondition, to: "task", action: "satisfyCompletion", label: "完了条件の Action Item で、ほかの完了条件もすべて満たしていれば、Task の完了条件を満たす" },

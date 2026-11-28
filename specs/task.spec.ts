@@ -29,9 +29,9 @@ export type Task = {
   plan: Plan | null;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
-  /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す */
+  /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す。ユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（反応は links で書く） */
   history: TaskActivity[];
-  /** ユーザーが最後に Task を見た時刻（まだ一度も見ていなければ null で、新着の印を出す）。これより後に、ユーザー以外が起こした出来事があれば、更新マークが付く */
+  /** ユーザーが最後に Task を見た時刻（まだ一度も見ていなければ null で、新着の印を出す）。更新マーク・新着・最近片付いたものは、保存せず、履歴とこの時刻から導いて見せる（判断表「更新マークと新着」）。見ても、最後に変えた日時は変えない */
   lastSeenAt: string | null;
   /** 作った日時・最後に変えた日時 */
   createdAt: string;
@@ -124,6 +124,14 @@ type Open = "needs_review" | "todo";
 
 const isOpen = (task: Task) => task.status === "needs_review" || task.status === "todo";
 
+
+const BY: Record<Actor["kind"], TaskActivity["by"]> = { user: "ユーザー", agent: "AI", sync: "同期", app: "アプリ" };
+
+/** 出来事を 1 つ足す（Task の項目を変える操作は、どれもこれを通す） */
+function noted(task: Task, actor: Actor, kind: TaskActivity["kind"], changes: TaskActivity["changes"], detail: string | null = null): Task {
+  return { ...task, history: [...task.history, { kind, by: BY[actor.kind], occurredAt: "2026-11-28T00:00:00Z", changes, detail }] };
+}
+
 export const initial: Task = {
   status: "triaging",
   closure: null,
@@ -134,7 +142,7 @@ export const initial: Task = {
   brief: null,
   plan: null,
   sourceItemIds: [],
-  history: [],
+  history: [{ kind: "できた", by: "同期", occurredAt: "2026-11-28T00:00:00Z", changes: [], detail: null }],
   lastSeenAt: null,
   createdAt: "2026-11-28T00:00:00Z",
   updatedAt: "2026-11-28T00:00:00Z",
@@ -163,7 +171,7 @@ export const actors: Record<string, Actor> = {
 export function triage(task: Task, actor: Actor, to: Open): Task {
   ensure(task.status === "triaging", "仕分け中のときだけ");
   ensure(to === "todo" || actor.kind === "sync", "要確認にするのは同期だけ");
-  return { ...task, status: to };
+  return noted({ ...task, status: to }, actor, "変わった", [{ field: "列", before: task.status, after: to }]);
 }
 
 /** 要確認と todo のあいだで移す */
@@ -171,7 +179,7 @@ export function move(task: Task, actor: Actor, to: Open): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
   ensure(task.work === "なし", "AI が作業中でないときだけ");
-  return { ...task, status: to };
+  return noted({ ...task, status: to }, actor, "変わった", [{ field: "列", before: task.status, after: to }]);
 }
 
 /**
@@ -184,14 +192,34 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
   ensure(isOpen(task), "要確認か todo のときだけ");
   ensure(task.work === "なし", "AI が作業中でないときだけ");
   ensure(reason !== "完了条件を満たした" || (task.status === "todo" && task.completion === "満たした"), "完了条件で終えるのは、todo で完了条件をすべて満たしたときだけ");
-  if (effects === "完了したときにすることがある") return { ...task, status: "完了待ち" };
-  return { ...task, status: "closed", closure: { outcome: "done", reason } };
+  if (effects === "完了したときにすることがある") return noted({ ...task, status: "完了待ち" }, actor, "変わった", [{ field: "列", before: task.status, after: "完了待ち" }]);
+  return noted({ ...task, status: "closed", closure: { outcome: "done", reason } }, actor, "変わった", [
+    { field: "列", before: task.status, after: "closed" },
+    { field: "どう終わったか", before: null, after: reason },
+  ]);
+}
+
+/** AI が作業をやめた（追う項目が片付いたので Claude Code がやめた など。ADR-0016）。やめた理由を出来事に残す */
+export function noteWorkStopped(task: Task, actor: Actor): Task {
+  ensure(actor.kind === "agent", "AI だけ");
+  return noted(task, actor, "AI が作業をやめた", [], "PR が merge されたので、直す作業をやめた");
+}
+
+/** 外への書き込みができなかった（Action Item の書き込み・完了したときにすることの書き込み）。理由を出来事に残す */
+export function noteWriteFailed(task: Task, actor: Actor): Task {
+  ensure(actor.kind === "app", "アプリだけ");
+  return noted(task, actor, "書き込めなかった", [], "権限が足りないので merge できなかった");
+}
+
+/** 計画の中の Action Item・完了したときにすることが進んだ（済んだ・やらない・やり直す・書き込んだ など）。だれが進めたかと一緒に出来事に残す */
+export function noteProgress(task: Task, actor: Actor, field: "Action Item の進み" | "完了したときにすること"): Task {
+  return noted(task, actor, "変わった", [{ field, before: "まだ", after: "済んだ" }]);
 }
 
 /**
  * Task を見る（開く）
  *
- * 最後に見た時刻を進める。新着の印と、それまでの更新マークが消える。
+ * 最後に見た時刻を進める。新着の印と、それまでの更新マークが消える。最後に変えた日時は変えない（Task の中身は変わらないので）。
  */
 export function view(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
@@ -215,7 +243,10 @@ export function finishCompletion(task: Task, actor: Actor, effects: "すべて�
   ensure(actor.kind === "app", "アプリだけ");
   ensure(task.status === "完了待ち", "完了待ちのときだけ");
   ensure(effects === "すべて済んだ", "完了したときにすることが、すべて書き込めた・外されたときだけ");
-  return { ...task, status: "closed", closure: { outcome: "done", reason } };
+  return noted({ ...task, status: "closed", closure: { outcome: "done", reason } }, actor, "変わった", [
+    { field: "列", before: "完了待ち", after: "closed" },
+    { field: "どう終わったか", before: null, after: reason },
+  ]);
 }
 
 /** やらないことにする（完了待ちからもできる。まだ頼んでいない・書き込めなかった完了したときにすることは取りやめる） */
@@ -224,7 +255,10 @@ export function dismiss(task: Task, actor: Actor, reason: DismissReason, inFligh
   ensure(isOpen(task) || task.status === "完了待ち", "要確認・todo・完了待ちのときだけ");
   ensure(inFlight === "頼んだものはない", "書き込みを頼んで結果を待っている完了したときにすることがないときだけ（宙に浮かないように）");
   ensure(task.work === "なし", "AI が作業中でないときだけ");
-  return { ...task, status: "closed", closure: { outcome: "dismissed", reason } };
+  return noted({ ...task, status: "closed", closure: { outcome: "dismissed", reason } }, actor, "変わった", [
+    { field: "列", before: task.status, after: "closed" },
+    { field: "どう終わったか", before: null, after: reason },
+  ]);
 }
 
 /**
@@ -237,7 +271,9 @@ export function reopen(task: Task, actor: Actor, inFlight: "頼んだものは�
   ensure(task.status === "closed" || task.status === "完了待ち", "終わった・完了待ちのときだけ");
   ensure(inFlight === "頼んだものはない", "書き込みを頼んで結果を待っている完了したときにすることがないときだけ（宙に浮かないように）");
   ensure(actor.kind !== "agent" || task.closure?.reason !== "自分で片付けた", "自分で片付けた Task は、AI では戻らない");
-  return { ...task, status: "todo", closure: null, completion: task.completion === "満たした" ? "まだ" : task.completion };
+  return noted({ ...task, status: "todo", closure: null, completion: task.completion === "満たした" ? "まだ" : task.completion }, actor, "変わった", [
+    { field: "列", before: task.status, after: "todo" },
+  ]);
 }
 
 /**
@@ -279,7 +315,7 @@ export function stopWork(task: Task, actor: Actor): Task {
 export function revisePlan(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(task.work === "作業中", "AI が作業中のときだけ");
-  return { ...task, completion: "まだ" };
+  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "計画", before: null, after: "新しい計画" }]);
 }
 
 /**
@@ -291,7 +327,7 @@ export function defineCompletionByHand(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
   ensure(task.completion === "未定", "完了条件が決まっていないときだけ");
-  return { ...task, completion: "まだ" };
+  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "完了条件", before: "未定", after: "まだ" }]);
 }
 
 /**
@@ -302,7 +338,7 @@ export function defineCompletionByHand(task: Task, actor: Actor): Task {
 export function makeUndetermined(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
-  return { ...task, completion: "未定" };
+  return noted({ ...task, completion: "未定" }, actor, "変わった", [{ field: "完了条件", before: task.completion, after: "未定" }]);
 }
 
 /**
@@ -313,13 +349,13 @@ export function makeUndetermined(task: Task, actor: Actor): Task {
 export function addPendingCriteria(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.completion !== "未定", "完了条件が決まっているときだけ");
-  return { ...task, completion: "まだ" };
+  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "完了条件", before: task.completion, after: "まだ" }]);
 }
 
 /** 完了条件をすべて満たす（最後の完了条件の Action Item が果たされた） */
 export function satisfyCompletion(task: Task, _actor: Actor): Task {
   ensure(task.completion === "まだ", "完了条件が決まっていて、まだのときだけ");
-  return { ...task, completion: "満たした" };
+  return noted({ ...task, completion: "満たした" }, _actor, "変わった", [{ field: "完了条件", before: "まだ", after: "満たした" }]);
 }
 
 /**
@@ -331,7 +367,7 @@ export function satisfyCompletion(task: Task, _actor: Actor): Task {
 export function receiveFact(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(task.status !== "triaging", "仕分けたあとだけ");
-  return { ...task };
+  return noted({ ...task }, actor, "変わった", [{ field: "今の状況と次の一手", before: "レビュー待ち", after: "PR が merge された。確かめて閉じる" }]);
 }
 
 /**
@@ -359,6 +395,7 @@ export const inputs = {
     完了したときにすることがある: ["完了条件を満たした", "完了したときにすることがある"],
     自分で完了にした・完了したときにすることがある: ["自分で完了にした", "完了したときにすることがある"],
   },
+  noteProgress: { "Action Item": ["Action Item の進み"], 完了したときにすること: ["完了したときにすること"] },
   finishCompletion: { 済んだ: ["すべて済んだ", "完了条件を満たした"], 自分で完了にして済んだ: ["すべて済んだ", "自分で完了にした"], まだ: ["まだ・書き込めなかったものがある", "完了条件を満たした"] },
   reopen: { 頼んだものはない: ["頼んだものはない"], 頼んだものがある: ["頼んだものがある"] },
   confirmCompletion: { 見せたとおり: ["見せたとおり"], 変わった: ["変わった"] },
@@ -377,7 +414,40 @@ export const invariants = {
   "AI の作業を始めても終えても、列は変わらない": (before: Task, after: Task) => before.work === after.work || before.status === after.status,
 };
 
+/** 更新マークと新着（保存せず、履歴と最後に見た時刻から導いて見せる） */
+function mark(input: {
+  最後に見た時刻: "ある" | "ない";
+  "最後に見たあとの、項目ごとの最後の変化": "ユーザー以外が変えた項目がある" | "どの項目もユーザーが最後に変えた" | "変化がない";
+  "最後に見たあとの、項目を持たない出来事（AI が作業をやめた・書き込めなかった）": "ある" | "ない";
+}): "新着" | "更新マーク" | "なし" {
+  if (input.最後に見た時刻 === "ない") return "新着";
+  if (input["最後に見たあとの、項目を持たない出来事（AI が作業をやめた・書き込めなかった）"] === "ある") return "更新マーク";
+  return input["最後に見たあとの、項目ごとの最後の変化"] === "ユーザー以外が変えた項目がある" ? "更新マーク" : "なし";
+}
+
+export const decisions = {
+  "更新マークと新着": {
+    decide: mark,
+    cases: [
+      { input: { 最後に見た時刻: "ない", "最後に見たあとの、項目ごとの最後の変化": "ユーザー以外が変えた項目がある", "最後に見たあとの、項目を持たない出来事（AI が作業をやめた・書き込めなかった）": "ある" }, expect: "新着" },
+      { input: { 最後に見た時刻: "ある", "最後に見たあとの、項目ごとの最後の変化": "ユーザー以外が変えた項目がある", "最後に見たあとの、項目を持たない出来事（AI が作業をやめた・書き込めなかった）": "ない" }, expect: "更新マーク" },
+      { input: { 最後に見た時刻: "ある", "最後に見たあとの、項目ごとの最後の変化": "どの項目もユーザーが最後に変えた", "最後に見たあとの、項目を持たない出来事（AI が作業をやめた・書き込めなかった）": "ない" }, expect: "なし" },
+      { input: { 最後に見た時刻: "ある", "最後に見たあとの、項目ごとの最後の変化": "変化がない", "最後に見たあとの、項目を持たない出来事（AI が作業をやめた・書き込めなかった）": "ある" }, expect: "更新マーク" },
+      { input: { 最後に見た時刻: "ある", "最後に見たあとの、項目ごとの最後の変化": "変化がない", "最後に見たあとの、項目を持たない出来事（AI が作業をやめた・書き込めなかった）": "ない" }, expect: "なし" },
+    ],
+  },
+};
+
 export const scenarios = {
+  "AI が作業をやめた・書き込めなかったことを、出来事に残す（残すのは決まった人だけ）": [
+    { do: triage, by: "同期", input: "todo" },
+    { do: noteWorkStopped, by: "アプリ", denied: "AI だけ" },
+    { do: noteWorkStopped, by: "AI" },
+    { do: noteWriteFailed, by: "ユーザー", denied: "アプリだけ" },
+    { do: noteWriteFailed, by: "AI", denied: "アプリだけ" },
+    { do: noteWriteFailed, by: "アプリ" },
+    { do: noteProgress, by: "同期", input: "Action Item" },
+  ],
   "Task を見たら、新着と更新マークが消える（見るのはユーザーだけ）": [
     { do: triage, by: "同期", input: "todo", expect: { lastSeenAt: null } },
     { do: view, by: "AI", denied: "ユーザーだけ" },
@@ -515,6 +585,12 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "anyone-can:noteProgress": "計画の中の Action Item・完了したときにすることが進んだことは、だれが進めても（ユーザー・AI・同期・アプリ）出来事として残す。だれが進めたかは出来事の by に残り、ユーザーが進めたものは更新マークにしない",
+  "anytime:noteProgress": "計画の中の Action Item・完了したときにすることが進んだことは、だれが進めても（ユーザー・AI・同期・アプリ）出来事として残す。だれが進めたかは出来事の by に残り、ユーザーが進めたものは更新マークにしない",
+  "ignores-input:noteProgress": "Action Item の進みか、完了したときにすることかは、出来事のどの項目かが違うだけで、Task の振る舞いは変えない",
+  "same-for-similar-actors:noteProgress": "計画の中の Action Item・完了したときにすることが進んだことは、だれが進めても（ユーザー・AI・同期・アプリ）出来事として残す。だれが進めたかは出来事の by に残り、ユーザーが進めたものは更新マークにしない",
+  "anytime:noteWorkStopped": "AI が作業をやめたことは、Task のどの列のときでも起きうる出来事として残す（列は変えない）",
+  "anytime:noteWriteFailed": "書き込めなかったことは、Task のどの列のときでも起きうる出来事として残す（列は変えない）",
   "anytime:view": "Task は、どの列でもユーザーが見られる（終わった Task も、最近片付いたものから見る）",
   "anyone-can:attachFact": "事実を持たせるのは、振り分けた人（同期・AI・ユーザー）の決定の結果。誰が決めても、Task は同じように持つ",
   "same-for-similar-actors:attachFact": "事実を持たせるのは、誰が振り分けたかによらない",
