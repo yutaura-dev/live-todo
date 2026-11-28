@@ -24,6 +24,9 @@ export type CompletionEffect = {
   operation: string;
   /** 操作ごとの中身（形は provider が決める） */
   params: unknown;
+  /** 最後に頼んだ書き込み（書き込めなかった理由を見せる。まだ頼んでいなければ null） */
+  /** @ref write */
+  writeId: string | null;
 };
 
 export const Status = {
@@ -62,6 +65,7 @@ export function initial(actor: Actor): CompletionEffect {
     subject: { accountId: "gmail-work", uri: "gmail:thread/18c2f" },
     operation: "gmail.archive",
     params: { scope: "受け取り済み" },
+    writeId: null,
   };
 }
 
@@ -82,13 +86,12 @@ export function uncheck(effect: CompletionEffect, actor: Actor): CompletionEffec
 /**
  * 完了のボタンが押されたので、書き込みを頼む
  *
- * ☑ が付いているものだけ（取りやめた枝にあるものは、取りやめたになっているので頼まない）。完了待ちでボタンが押されたときだけで、やらないことにしたときは頼まない。
+ * ☑ が付いているものだけ（取りやめた枝にあるもの・やらないことにした Task のものは、取りやめたになっているので頼まない）。頼めなかった（書き込める状態でない など）なら、書き込めなかったにする。
  */
-export function fire(effect: CompletionEffect, actor: Actor, task: "完了のボタンが押された" | "やらないことにした"): CompletionEffect {
+export function fire(effect: CompletionEffect, actor: Actor): CompletionEffect {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(effect.status === "する", "する（☑）のときだけ");
-  ensure(task === "完了のボタンが押された", "完了のボタンが押されたときだけ（やらないことにしたときは書き込まない）");
-  return { ...effect, status: "頼んだ" };
+  return { ...effect, status: "頼んだ", writeId: "w1" };
 }
 
 /** 書き込めた（書き込みの結果を受け取る） */
@@ -105,14 +108,14 @@ export function failed(effect: CompletionEffect, actor: Actor): CompletionEffect
   return { ...effect, status: "書き込めなかった" };
 }
 
-/** 書き込めなかったものを、もう一度頼む（完了待ちのレーンから） */
+/** 書き込めなかったものを、もう一度頼む（完了待ちのレーンから。もう一度頼むボタンを押したことが承認） */
 export function retry(effect: CompletionEffect, actor: Actor): CompletionEffect {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(effect.status === "書き込めなかった", "書き込めなかったときだけ");
-  return { ...effect, status: "頼んだ" };
+  return { ...effect, status: "頼んだ", writeId: "w2" };
 }
 
-/** 置いていた枝を、分かれ道で選び直して取りやめた */
+/** 取りやめる（置いていた枝を選び直した・Task をやらないことにした・書き込む事実を Task から外した） */
 export function withdraw(effect: CompletionEffect, actor: Actor): CompletionEffect {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(effect.status === "する" || effect.status === "しない", "まだ頼んでいないときだけ");
@@ -120,7 +123,6 @@ export function withdraw(effect: CompletionEffect, actor: Actor): CompletionEffe
 }
 
 export const inputs = {
-  fire: { 完了のボタン: ["完了のボタンが押された"], やらないことにした: ["やらないことにした"] },
 };
 
 const FINISHED: Status[] = ["書き込んだ", "取りやめた"];
@@ -131,11 +133,12 @@ export const invariants = {
   "頼むのは ☑（する）が付いているものと、書き込めなかったものをもう一度頼むときだけ": (before: CompletionEffect, after: CompletionEffect) =>
     after.status !== "頼んだ" || before.status === "する" || before.status === "書き込めなかった" || before.status === "頼んだ",
   "何に・どの操作で・どの中身を書き込むかは、足したあと変わらない（☑ が承認なので）": (before: CompletionEffect, after: CompletionEffect) =>
+    before.subject.accountId === after.subject.accountId &&
     before.subject.uri === after.subject.uri && before.operation === after.operation && JSON.stringify(before.params) === JSON.stringify(after.params),
 };
 
 export const links = [
-  { from: fire, to: "write", label: "完了したときにすることから、書き込みを頼む（ユーザーがチェックリストを確かめて完了のボタンを押したので、確かめずにすぐ書き込む）。結果（書き込めた・書き込めなかった）は、Task を通して受け取る" },
+  { from: fire, to: "write", label: "完了したときにすることから、書き込みを頼む（ユーザーがチェックリストを確かめて完了のボタンを押したので、確かめずにすぐ書き込む）。頼めなかったら、書き込めなかったにする" },
   { from: retry, to: "write", label: "もう一度、書き込みを頼む" },
   { from: written, to: "task", action: "finishCompletion", label: "完了したときにすることが、すべて書き込めた・外されたら、Task が終わる" },
   { from: uncheck, to: "task", action: "finishCompletion", label: "書き込めなかったものを外して、すべて済んだら、Task が終わる" },
@@ -144,33 +147,29 @@ export const links = [
 export const scenarios = {
   "完了のボタンを押したら、☑ が付いているものを書き込む": [
     { do: initial, by: "AI", expect: { status: "する", addedBy: { type: "AI" } } },
-    { do: fire, by: "アプリ", input: "完了のボタン", expect: { status: "頼んだ" } },
+    { do: fire, by: "アプリ", expect: { status: "頼んだ" } },
     { do: uncheck, by: "ユーザー", denied: "する・書き込めなかったときだけ" },
-    { do: fire, by: "アプリ", input: "完了のボタン", denied: "する（☑）のときだけ" },
+    { do: fire, by: "アプリ", denied: "する（☑）のときだけ" },
     { do: written, by: "アプリ", expect: { status: "書き込んだ" } },
   ],
   "チェックリストで ☑ を外したものは書き込まない": [
     { do: initial, by: "ユーザー", expect: { addedBy: { type: "ユーザー" } } },
     { do: check, by: "ユーザー", denied: "しないのときだけ" },
     { do: uncheck, by: "ユーザー", expect: { status: "しない" } },
-    { do: fire, by: "アプリ", input: "完了のボタン", denied: "する（☑）のときだけ" },
+    { do: fire, by: "アプリ", denied: "する（☑）のときだけ" },
     { do: check, by: "ユーザー", expect: { status: "する" } },
-  ],
-  "やらないことにしたときは書き込まない": [
-    { do: initial, by: "AI" },
-    { do: fire, by: "アプリ", input: "やらないことにした", denied: "完了のボタンが押されたときだけ（やらないことにしたときは書き込まない）" },
   ],
   "分かれ道を選び直したら、前の枝のものは取りやめる": [
     { do: initial, by: "AI" },
     { do: withdraw, by: "アプリ", expect: { status: "取りやめた" } },
-    { do: fire, by: "アプリ", input: "完了のボタン", denied: "する（☑）のときだけ" },
+    { do: fire, by: "アプリ", denied: "する（☑）のときだけ" },
     { do: check, by: "ユーザー", denied: "しないのときだけ" },
   ],
   "書き込めなかったら完了待ちに残り、もう一度頼める": [
     { do: initial, by: "AI" },
     { do: written, by: "アプリ", denied: "頼んだときだけ" },
     { do: retry, by: "ユーザー", denied: "書き込めなかったときだけ" },
-    { do: fire, by: "アプリ", input: "完了のボタン" },
+    { do: fire, by: "アプリ" },
     { do: withdraw, by: "アプリ", denied: "まだ頼んでいないときだけ" },
     { do: failed, by: "アプリ", expect: { status: "書き込めなかった" } },
     { do: failed, by: "アプリ", denied: "頼んだときだけ" },
@@ -180,7 +179,7 @@ export const scenarios = {
   ],
   "書き込めなかったものを手で済ませたら、☑ を外す": [
     { do: initial, by: "AI" },
-    { do: fire, by: "アプリ", input: "完了のボタン" },
+    { do: fire, by: "アプリ" },
     { do: failed, by: "アプリ" },
     { do: uncheck, by: "ユーザー", expect: { status: "しない" } },
   ],
@@ -191,9 +190,9 @@ export const scenarios = {
     { do: uncheck, by: "ユーザー" },
     { do: check, by: "AI", denied: "ユーザーだけ" },
     { do: check, by: "ユーザー" },
-    { do: fire, by: "ユーザー", input: "完了のボタン", denied: "アプリだけ" },
+    { do: fire, by: "ユーザー", denied: "アプリだけ" },
     { do: withdraw, by: "ユーザー", denied: "アプリだけ" },
-    { do: fire, by: "アプリ", input: "完了のボタン" },
+    { do: fire, by: "アプリ" },
     { do: written, by: "ユーザー", denied: "アプリだけ" },
     { do: failed, by: "ユーザー", denied: "アプリだけ" },
   ],

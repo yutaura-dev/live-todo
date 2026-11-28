@@ -13,6 +13,10 @@ export const entities = ["action-item", "completion-effect"];
 const isRunning = (item: ActionItem) => item.progress.type === "claude" && item.progress.run === "やっている";
 
 export const invariants = {
+  "書き込みを頼んで結果を待っている完了したときにすることは、完了待ちの Task にだけある": (task: Task, _items: ReadonlyArray<ActionItem>, effects: ReadonlyArray<CompletionEffect>) =>
+    task.status === "完了待ち" || effects.every((effect) => effect.status !== "頼んだ"),
+  "やらないことにした Task には、する・頼んだ完了したときにすることがない": (task: Task, _items: ReadonlyArray<ActionItem>, effects: ReadonlyArray<CompletionEffect>) =>
+    task.closure?.outcome !== "dismissed" || effects.every((effect) => effect.status !== "する" && effect.status !== "頼んだ"),
   "やり終えた（done）Task には、まだの・頼んだ・書き込めなかった完了したときにすることがない（すべて書き込めた・外されてから終わる）": (task: Task, _items: ReadonlyArray<ActionItem>, effects: ReadonlyArray<CompletionEffect>) =>
     task.closure?.outcome !== "done" || effects.every((effect) => effect.status !== "する" && effect.status !== "頼んだ" && effect.status !== "書き込めなかった"),
   "Claude Code がやっている Action Item があれば、Task は AI が作業中": (task: Task, items: ReadonlyArray<ActionItem>) => !items.some(isRunning) || task.work === "作業中",
