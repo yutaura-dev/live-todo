@@ -10,6 +10,7 @@ import { AiSettingsService } from "./ai/ai-settings-service.js";
 import type { AiConnector } from "./ai/connector.js";
 import { Ingestor } from "./ingest/ingestor.js";
 import { Router } from "./ingest/router.js";
+import { Receiver } from "./ingest/receiver.js";
 import { Prioritizer, type Calendar } from "./prioritizer.js";
 import { ProposalService } from "./proposals/proposal-service.js";
 import { Planner } from "./plan/planner.js";
@@ -34,7 +35,8 @@ export const desktopLayer = (options: {
   const base = Layer.mergeAll(core, Planner.layer.pipe(Layer.provide(core)));
   const router = Router.layer.pipe(Layer.provide(base));
   const ingestor = Ingestor.layer.pipe(Layer.provide(base));
-  const sync = SyncRunner.layer.pipe(Layer.provide(Layer.mergeAll(base, router, ingestor)));
+  const receiver = Receiver.layer.pipe(Layer.provide(base));
+  const sync = SyncRunner.layer.pipe(Layer.provide(Layer.mergeAll(base, router, ingestor, receiver)));
   return Layer.mergeAll(
     TaskService.layer.pipe(Layer.provide(base)),
     settings,

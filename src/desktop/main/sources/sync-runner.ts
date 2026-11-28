@@ -4,6 +4,7 @@ import { DocumentStore, documentsOf } from "../../../store/document-store.js";
 import type { StoreCorrupted } from "../../../store/task-store.js";
 import { Ingestor } from "../ingest/ingestor.js";
 import { Router } from "../ingest/router.js";
+import { Receiver } from "../ingest/receiver.js";
 import { Planner } from "../plan/planner.js";
 import { TaskStore } from "../../../store/task-store.js";
 import { accounts } from "./account-service.js";
@@ -38,6 +39,7 @@ export class SyncRunner extends Context.Service<SyncRunner, { runOnce(): Effect.
       const router = yield* Router;
       const docs = yield* DocumentStore;
       const planner = yield* Planner;
+      const receiver = yield* Receiver;
       const tasks = yield* TaskStore;
 
       const runAccount = (account: Account) =>
@@ -55,7 +57,13 @@ export class SyncRunner extends Context.Service<SyncRunner, { runOnce(): Effect.
           const ingested = yield* ingestor.ingest(account.id, fetched.success.changes);
           const changed: string[] = [];
           for (const entry of ingested) {
-            if (entry.event !== "appeared" && entry.event !== "restored") continue;
+            if (entry.event === "unchanged") continue;
+            // 変わった・消えた事実は、持ち主の Task が受け取る。振り分けをやり直すことになったら、振り分けに回す
+            if (entry.event === "changed" || entry.event === "removed") {
+              const received = yield* receiver.receive(entry.item);
+              changed.push(...received.changedTaskIds);
+              if (!received.reroute || entry.item.presence !== "あり") continue;
+            }
             const routed = yield* router.route(entry.item);
             changed.push(...routed.changedTaskIds);
             // AI が作った Task は、計画を立てる（立てられなくても、Task は残る。計画は未定のまま）

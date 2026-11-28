@@ -9,6 +9,7 @@ import { TaskStore } from "../../../store/task-store.js";
 import { AiServices } from "../ai/ai-services.js";
 import { Ingestor, type ObservedChange } from "../ingest/ingestor.js";
 import { Router, routings } from "../ingest/router.js";
+import { Receiver } from "../ingest/receiver.js";
 import { Calendar, Prioritizer } from "../prioritizer.js";
 import { sequentialIds } from "../task-service.js";
 import { Planner } from "../plan/planner.js";
@@ -36,7 +37,8 @@ function layerWith(fetch: () => Effect.Effect<{ changes: ReadonlyArray<ObservedC
   const deps = Layer.mergeAll(core, Planner.layer.pipe(Layer.provide(core)));
   const router = Router.layer.pipe(Layer.provideMerge(deps));
   const ingestor = Ingestor.layer.pipe(Layer.provide(deps));
-  return Layer.mergeAll(SyncRunner.layer.pipe(Layer.provide(Layer.mergeAll(router, ingestor))), AccountService.layer.pipe(Layer.provide(deps))).pipe(Layer.provideMerge(router));
+  const receiver = Receiver.layer.pipe(Layer.provide(deps));
+  return Layer.mergeAll(SyncRunner.layer.pipe(Layer.provide(Layer.mergeAll(router, ingestor, receiver))), AccountService.layer.pipe(Layer.provide(deps))).pipe(Layer.provideMerge(router));
 }
 
 const start = Effect.gen(function* () {
