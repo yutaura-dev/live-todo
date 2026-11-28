@@ -252,7 +252,7 @@ export const links = [
   { from: settle, to: "task", label: "完了したときにすることから頼まれたなら、書けていたら書き込んだ、書けていなかったら書き込めなかったにする" },
   { from: succeed, to: "task", label: "Action Item から頼まれたなら、その Action Item を果たす（書き込みで果たされる）" },
   { from: settle, to: "task", label: "書けていたなら、Action Item から頼まれたものは、その Action Item を果たす" },
-  { from: fail, to: "task", action: "noteWriteFailed", label: "Action Item から頼まれたなら、書き込めなかったことと理由を、その Task の出来事に残す" },
+  { from: fail, to: "task", action: "receive", label: "Action Item から頼まれたなら、その Task に、書き込めなかったこと（理由つき）が届く" },
 ];
 
 export const scenarios = {
