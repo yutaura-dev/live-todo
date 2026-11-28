@@ -190,14 +190,14 @@ export function move(task: Task, actor: Actor, to: Open): Task {
  * やり終えた
  *
  * 自分で完了にする（いつでもできる）か、完了条件をすべて満たした。完了条件を満たして終えるのは todo の Task だけ。要確認の Task は、自分で確かめるまで終えない。
+ * AI が作業中でも終えられる。画面では「作業を止めますか」と確かめ、終えたらアプリが作業をやめる（理由はやらなくなった）。
  */
 export function complete(task: Task, actor: Actor, reason: CompleteReason, effects: "完了したときにすることがない" | "完了したときにすることがある"): Task {
   ensure(reason !== "自分で完了にした" || actor.kind === "user", "自分で完了にするのはユーザーだけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
-  ensure(task.work === "なし", "AI が作業中でないときだけ");
   ensure(reason !== "完了条件を満たした" || (task.status === "todo" && task.completion === "満たした"), "完了条件で終えるのは、todo で完了条件をすべて満たしたときだけ");
-  if (effects === "完了したときにすることがある") return noted({ ...task, status: "完了待ち" }, actor, "変わった", [{ field: "列", before: task.status, after: "完了待ち", target: null }]);
-  return noted({ ...task, status: "closed", closure: { outcome: "done", reason } }, actor, "変わった", [
+  if (effects === "完了したときにすることがある") return noted({ ...task, status: "完了待ち", work: "なし" }, actor, "変わった", [{ field: "列", before: task.status, after: "完了待ち", target: null }]);
+  return noted({ ...task, status: "closed", work: "なし", closure: { outcome: "done", reason } }, actor, "変わった", [
     { field: "列", before: task.status, after: "closed", target: null },
     { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
@@ -241,13 +241,16 @@ export function finishCompletion(task: Task, actor: Actor, effects: "すべて�
   ]);
 }
 
-/** やらないことにする（完了待ちからもできる。まだ頼んでいない・書き込めなかった完了したときにすることは取りやめる） */
+/**
+ * やらないことにする（完了待ちからもできる。まだ頼んでいない・書き込めなかった完了したときにすることは取りやめる）
+ *
+ * AI が作業中でもできる。ユーザーが押すときは画面で「作業を止めますか」と確かめ、終えたらアプリが作業をやめる（理由はやらなくなった）。
+ */
 export function dismiss(task: Task, actor: Actor, reason: DismissReason, inFlight: "頼んだものはない" | "頼んだものがある"): Task {
   ensure(reason === "自分で片付けた" ? actor.kind === "user" : reason === "絞り込みの外になった" ? actor.kind === "sync" : actor.kind === "agent", "自分で片付けるのはユーザー、絞り込みの外は同期、もう要らないと判定するのは AI だけ");
   ensure(isOpen(task) || task.status === "完了待ち", "要確認・todo・完了待ちのときだけ");
   ensure(inFlight === "頼んだものはない", "書き込みを頼んで結果を待っている完了したときにすることがないときだけ（宙に浮かないように）");
-  ensure(task.work === "なし", "AI が作業中でないときだけ");
-  return noted({ ...task, status: "closed", closure: { outcome: "dismissed", reason } }, actor, "変わった", [
+  return noted({ ...task, status: "closed", work: "なし", closure: { outcome: "dismissed", reason } }, actor, "変わった", [
     { field: "列", before: task.status, after: "closed", target: null },
     { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
@@ -417,7 +420,8 @@ export const invariants = {
   "終わり方を持つのは、終わった Task だけ": (task: Task) => (task.status === "closed") === (task.closure !== null),
   "終わった Task では、AI は作業していない": (task: Task) => task.status !== "closed" || task.work === "なし",
   "仕分けたあとは、仕分け中に戻らない": (before: Task, after: Task) => before.status === "triaging" || after.status !== "triaging",
-  "AI の作業を始めても終えても、列は変わらない": (before: Task, after: Task) => before.work === after.work || before.status === after.status,
+  "AI の作業を始めても終えても、列は変わらない（Task を終えたときに、作業中が外れるのは除く）": (before: Task, after: Task) =>
+    before.work === after.work || before.status === after.status || (after.work === "なし" && (after.status === "closed" || after.status === "完了待ち")),
 };
 
 /** 更新マークと新着（保存せず、履歴と最後に見た時刻から導いて見せる） */
@@ -551,15 +555,13 @@ export const scenarios = {
     { do: dismiss, by: "AI", input: "もう要らない", expect: { status: "closed" } },
     { do: reopen, by: "AI", input: "頼んだものはない", expect: { status: "todo" } },
   ],
-  "AI が作業中は、列を動かさず、終えもしない": [
+  "AI が作業中は列を動かさないが、終えることはできる（作業はアプリがやめる）": [
     { do: triage, by: "同期", input: "要確認" },
     { do: receive, by: "AI", input: "事実で項目が変わる" },
     { do: startWork, by: "アプリ", expect: { work: "作業中", status: "needs_review" } },
     { do: move, by: "ユーザー", input: "todoへ", denied: "AI が作業中でないときだけ" },
-    { do: dismiss, by: "同期", input: "絞り込みの外", denied: "AI が作業中でないときだけ" },
     { do: stopWork, by: "同期", denied: "アプリだけ（Agent Run の段階を受ける）" },
-    { do: stopWork, by: "アプリ", expect: { work: "なし" } },
-    { do: dismiss, by: "同期", input: "絞り込みの外", expect: { status: "closed" } },
+    { do: dismiss, by: "同期", input: "絞り込みの外", expect: { status: "closed", work: "なし" } },
   ],
   "誰が終えられるかは、終わり方の理由で決まる": [
     { do: triage, by: "同期", input: "要確認" },

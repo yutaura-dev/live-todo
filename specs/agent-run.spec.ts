@@ -204,7 +204,7 @@ export const links = [
   { from: succeed, to: "task", action: "receive", label: "成果が「AI の作業の成果」として届き、Generation が Task の言葉にする（外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足す。push の版はこの作業の元の項目）" },
   { from: fail, to: "task", action: "stopWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
   { from: stop, to: "task", action: "stopWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
-  { from: withdraw, to: "task", action: "stopWork", label: "やっている・判断中だったなら、AI の作業が終わったことにする（Action Item は果たさない）。待ち行列で取り消したなら、cancel と同じく Task は変えない" },
+  { from: withdraw, to: "task", action: "stopWork", label: "やっている・判断中だったなら、AI の作業が終わったことにする（Task を終えたときは、もう作業中が外れている。Action Item は果たさない）。待ち行列で取り消したなら、cancel と同じく Task は変えない" },
   { from: decide, to: "task", action: "stopWork", label: "やめたなら、片付いた追う項目を事実の変化として受け取り、やめた理由を変化として残す。答えが返らないなら、AI の作業が終わったことにする" },
   { from: cancel, to: "task", label: "AI の作業を始めないまま終わる。追う項目が片付いたので取り消したなら、事実の変化として受け取る" },
   { from: fail, to: "agent-thread", action: "lose", label: "作業場所が消えたなら、会話を続けられなくする" },

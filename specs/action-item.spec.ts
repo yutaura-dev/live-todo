@@ -42,9 +42,6 @@ export type Progress =
 type Actor = { kind: "user" } | { kind: "sync" } | { kind: "agent" } | { kind: "scheduler" } | { kind: "app" };
 /** 番が来ているか（Task の計画の中の位置で決まる） */
 type Turn = "番が来ている" | "番待ち";
-/** 選んだ枝で、AI が作業中か */
-type BranchWork = "作業なし" | "作業中";
-
 export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
   同期: { kind: "sync" },
@@ -99,9 +96,8 @@ export const inputs = {
   completeByWrite: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   autoStart: { 番が来ている: ["番が来ている", "範囲に入る", "開いている"], 番待ち: ["番待ち", "範囲に入る", "開いている"], 範囲に入らない: ["番が来ている", "範囲に入らない", "開いている"], 完了待ち: ["番が来ている", "範囲に入る", "開いていない"] },
   request: { 終わっている: ["終わっていない作業はない", "開いている"], 終わっていない: ["終わっていない作業がある", "開いている"], 完了待ち: ["終わっていない作業はない", "開いていない"] },
-  succeed: { 番が来ている: ["番が来ている", "やり遂げた"], 番待ち: ["番待ち", "やり遂げた"], まだやり遂げていない: ["番が来ている", "まだやり遂げていない"] },
+  succeed: { 番が来ている: ["番が来ている", "やり遂げた", "頼んだときのまま"], 番待ち: ["番待ち", "やり遂げた", "頼んだときのまま"], まだやり遂げていない: ["番が来ている", "まだやり遂げていない", "頼んだときのまま"], 元の項目が変わった: ["番が来ている", "やり遂げた", "変わった"] },
   choose: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
-  rechoose: { 作業なし: ["作業なし"], 作業中: ["作業中"] },
 };
 
 /** ユーザーが「済んだ」を押す（Claude Code が果たす Action Item も、自分で済ませてよい） */
@@ -187,12 +183,13 @@ export function autoStart(item: ActionItem, actor: Actor, turn: Turn, policy: "�
  *
  * ボタンでは、番が来る前でも頼める（ユーザーが先に進めたいときのため）。ただし、果たすのは番が来てから（やり遂げた成果は Agent Run に残り、番が来たら果たす）。
  */
-export function succeed(item: ActionItem, actor: Actor, turn: Turn, run: "やり遂げた" | "まだやり遂げていない"): ActionItem {
+export function succeed(item: ActionItem, actor: Actor, turn: Turn, run: "やり遂げた" | "まだやり遂げていない", subject: "頼んだときのまま" | "変わった"): ActionItem {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(turn === "番が来ている", "番が来ているときだけ（番が来る前にやり遂げたら、番が来るまで待つ）");
   ensure(item.progress.type === "claude" && item.progress.agentRunId !== null, "Claude Code に頼んだ Action Item だけ");
   ensure(run === "やり遂げた", "頼んだ作業がやり遂げたときだけ");
+  ensure(subject === "頼んだときのまま", "頼んだときから元の項目（PR の commit など）が変わっていないときだけ（変わっていたら果たさず、もう一度頼むよう見せる）");
   return { ...item, status: "done" };
 }
 
@@ -226,12 +223,11 @@ export function choose(item: ActionItem, actor: Actor, turn: Turn): ActionItem {
  * 分かれ道で選び直す
  *
  * 前に選んだ枝は取りやめる。枝の中の済んだ Action Item は残し、まだのものはやらなくなる。新しく選んだ選択肢の先を差し込む。
- * 前に選んだ枝で AI が作業中なら、先に作業を止める（画面では、止めてよいかを確かめてから止める）。
+ * 前に選んだ枝で AI が作業中でも選び直せる。画面では「作業を止めますか」と確かめ、選び直したらアプリが作業をやめる（理由はやらなくなった）。
  */
-export function rechoose(item: ActionItem, actor: Actor, branchWork: BranchWork): ActionItem {
+export function rechoose(item: ActionItem, actor: Actor): ActionItem {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(item.progress.type === "decision" && item.progress.chosen === "選んだ", "選んだあとだけ");
-  ensure(branchWork === "作業なし", "選んだ枝で AI が作業中でないときだけ");
   return { ...item, progress: { ...item.progress } };
 }
 
@@ -320,6 +316,7 @@ export const scenarios = {
     { do: request, by: "ユーザー", input: "終わっている" },
     { do: succeed, by: "アプリ", input: "まだやり遂げていない", denied: "頼んだ作業がやり遂げたときだけ" },
     { do: succeed, by: "アプリ", input: "番待ち", denied: "番が来ているときだけ（番が来る前にやり遂げたら、番が来るまで待つ）" },
+    { do: succeed, by: "アプリ", input: "元の項目が変わった", denied: "頼んだときから元の項目（PR の commit など）が変わっていないときだけ（変わっていたら果たさず、もう一度頼むよう見せる）" },
     { do: succeed, by: "アプリ", input: "番が来ている", expect: { status: "done" } },
   ],
   "Action Item を作るのは、AI か定期の処理か、分かれ道を選んだユーザー": [{ do: initial, by: "同期", input: "人がやる", denied: "AI か定期の処理か、分かれ道を選んだユーザーだけ" }],
@@ -336,12 +333,11 @@ export const scenarios = {
   "分かれ道は、番が来たら選び、あとで選び直せる": [
     { do: initial, by: "AI", input: "分かれ道" },
     { do: complete, by: "ユーザー", input: "番が来ている", denied: "人か Claude Code が果たす Action Item だけ" },
-    { do: rechoose, by: "ユーザー", input: "作業なし", denied: "選んだあとだけ" },
+    { do: rechoose, by: "ユーザー", denied: "選んだあとだけ" },
     { do: choose, by: "ユーザー", input: "番待ち", denied: "番が来ているときだけ" },
     { do: choose, by: "ユーザー", input: "番が来ている", expect: { status: "done" } },
     { do: reopen, by: "ユーザー", denied: "人か Claude Code が果たす Action Item だけ" },
-    { do: rechoose, by: "ユーザー", input: "作業中", denied: "選んだ枝で AI が作業中でないときだけ" },
-    { do: rechoose, by: "ユーザー", input: "作業なし", expect: { status: "done" } },
+    { do: rechoose, by: "ユーザー", expect: { status: "done" } },
   ],
   "待つ条件で果たされる Action Item は、番待ちの間に成り立っても、番が来たら果たされる": [
     { do: initial, by: "定期の処理", input: "条件で果たす" },
@@ -409,7 +405,7 @@ export const scenarios = {
     { do: reopen, by: "ユーザー", denied: "済んだときだけ" },
     { do: complete, by: "AI", input: "番が来ている", denied: "ユーザーだけ" },
     { do: choose, by: "AI", input: "番が来ている", denied: "ユーザーだけ" },
-    { do: rechoose, by: "AI", input: "作業なし", denied: "ユーザーだけ" },
+    { do: rechoose, by: "AI", denied: "ユーザーだけ" },
     { do: finishByCondition, by: "AI", input: "番が来ている", denied: "同期だけ" },
     { do: request, by: "AI", input: "終わっている", denied: "ユーザーだけ" },
     { do: autoStart, by: "ユーザー", input: "番が来ている", denied: "アプリだけ" },
