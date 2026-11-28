@@ -19,6 +19,7 @@ const view = (card: BoardCard): TaskView => ({
   priority: card.priority,
   facts: [],
   plan: card.id === "t1" ? planRows : null,
+  effects: card.status === "完了待ち" ? [{ id: "ce1", title: "PR を merge する", checked: true, delivery: "まだ" }, { id: "ce2", title: "README を直す PR を merge する", checked: true, delivery: "書き込めなかった" }] : [],
   history: [{ kind: "できた", by: "ユーザー", occurredAt: "2026-11-28T09:00:00.000Z", changes: [], cause: "手で足した" }],
   createdAt: "2026-11-28T09:00:00.000Z",
 });
@@ -341,5 +342,36 @@ describe("承認", () => {
     render(<App api={fakeApi(cards, undefined, {}, writesInbox).api} />);
     fireEvent.click(await screen.findByRole("button", { name: /承認/ }));
     assert.isNotNull(await screen.findByText("merge する権限がありません"));
+  });
+});
+
+describe("完了待ち", () => {
+  const waitingCards: BoardCard[] = [{ id: "t3", title: "PR を仕上げる", status: "完了待ち", mark: "なし", due: null, blocksOthers: false, priority: { status: "決めるのをやめた", level: null, reason: null }, sources: [] }];
+  const openWaiting = async (api: LiveTodoApi) => {
+    render(<App api={api} />);
+    await openKanban();
+    fireEvent.click(await screen.findByRole("button", { name: /PR を仕上げる/ }));
+    return screen.findByRole("region", { name: "完了したときにすること" });
+  };
+
+  it("チェックリストの ☑ を外すと、外す操作を送る", async () => {
+    const { api, inboxSent } = fakeApi(waitingCards);
+    const list = await openWaiting(api);
+    fireEvent.click(within(list).getByRole("checkbox", { name: "PR を merge する" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "EffectAction", taskId: "t3", effectId: "ce1", action: "uncheck" }]));
+  });
+
+  it("完了のボタンを押すと、☑ が付いているものの書き込みを頼む（押したことが承認）", async () => {
+    const { api, inboxSent } = fakeApi(waitingCards);
+    const list = await openWaiting(api);
+    fireEvent.click(within(list).getByRole("button", { name: "確かめて完了にする" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "ConfirmCompletion", taskId: "t3" }]));
+  });
+
+  it("書き込めなかったものは、もう一度頼める", async () => {
+    const { api, inboxSent } = fakeApi(waitingCards);
+    const list = await openWaiting(api);
+    fireEvent.click(within(list).getByRole("button", { name: "もう一度頼む" }));
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "EffectAction", taskId: "t3", effectId: "ce2", action: "retry" }]));
   });
 });

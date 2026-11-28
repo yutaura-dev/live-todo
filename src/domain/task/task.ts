@@ -137,6 +137,38 @@ export const complete = Effect.fn("Task.complete")(function* (
   );
 });
 
+/** 完了待ちのチェックリストを確かめて、完了のボタンを押す（☑ の付いたものの書き込みを頼むのは、押したことを承認として呼び手がする） */
+export const confirmCompletion = Effect.fn("Task.confirmCompletion")(function* (task: Task, actor: Actor, list: "見せたとおり" | "変わった") {
+  const ensure = guard("confirmCompletion");
+  yield* ensure(actor.kind === "user", "ユーザーだけ");
+  yield* ensure(task.status === "完了待ち", "完了待ちのときだけ");
+  yield* ensure(list === "見せたとおり", "見せたチェックリストが今も同じときだけ（見せたあとに足された・取りやめたものがあれば、見せ直す）");
+  return task;
+});
+
+/** 完了したときにすることが、すべて書き込めた・外されたので、完了待ちに入ったときの理由のまま終える */
+export const finishCompletion = Effect.fn("Task.finishCompletion")(function* (task: Task, actor: Actor, effects: "すべて済んだ" | "まだ・書き込めなかったものがある") {
+  const ensure = guard("finishCompletion");
+  yield* ensure(actor.kind === "app", "アプリだけ");
+  yield* ensure(task.status === "完了待ち", "完了待ちのときだけ");
+  yield* ensure(effects === "すべて済んだ", "完了したときにすることが、すべて書き込めた・外されたときだけ");
+  const reason = task.pendingReason ?? "自分で完了にした";
+  return yield* noted(
+    task,
+    actor,
+    [
+      { field: "列", before: "完了待ち", after: "終わった", target: null },
+      { field: "どう終わったか", before: null, after: reason, target: null },
+    ],
+    { status: "終わった", pendingReason: null, closure: { outcome: "done", reason } },
+  );
+});
+
+/** 完了したときにすることが進んだ（☑・書き込めた・書き込めなかった・取りやめた）のを残す。完了待ち・終わったあとでも残す（spec の noteProgress） */
+export const noteEffects = Effect.fn("Task.noteEffects")(function* (task: Task, actor: Actor, plan: PlanGroup, target: string) {
+  return yield* noted(task, actor, [{ field: "完了したときにすること", before: null, after: null, target }], { plan });
+});
+
 export const dismiss = Effect.fn("Task.dismiss")(function* (task: Task, actor: Actor, reason: DismissReason, inFlight: "頼んだものはない" | "頼んだものがある") {
   const ensure = guard("dismiss");
   const allowed = reason === "自分で片付けた" ? "user" : reason === "絞り込みの外になった" ? "sync" : "agent";

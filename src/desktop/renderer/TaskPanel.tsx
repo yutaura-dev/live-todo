@@ -2,6 +2,7 @@ import { Button, Icon, Pill, SourceMarks } from "../../design/components.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
 import type { DueDate } from "../../domain/values.js";
 import type { Command, TaskView } from "../shared/api.js";
+import { CompletionChecklist } from "./CompletionChecklist.js";
 import { PlanView } from "./PlanView.js";
 import { LEVELS } from "./horizon-groups.js";
 
@@ -29,7 +30,15 @@ const CLOSURE_LABELS = { done: "やり終えた", dismissed: "やらないこと
 const timeOf = (iso: string) => new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
 /** Task の詳細。手で足した Task は計画を持たないので、完了条件と操作・履歴だけを見せる */
-export function TaskPanel(props: { task: TaskView; problem: string | null; onCommand: (command: PanelCommand) => void; onRequestWrite?: (itemId: string) => void; onClose: () => void }) {
+export function TaskPanel(props: {
+  task: TaskView;
+  problem: string | null;
+  onCommand: (command: PanelCommand) => void;
+  onRequestWrite?: (itemId: string) => void;
+  onEffect?: (effectId: string, action: "check" | "uncheck" | "retry") => void;
+  onConfirmCompletion?: () => void;
+  onClose: () => void;
+}) {
   const { task } = props;
   const open = task.status === "やること";
   return (
@@ -105,6 +114,10 @@ export function TaskPanel(props: { task: TaskView; problem: string | null; onCom
           </h3>
           <p>{task.brief}</p>
         </section>
+      )}
+
+      {task.status === "完了待ち" && task.effects.length > 0 && (
+        <CompletionChecklist effects={task.effects} onAction={(id, action) => props.onEffect?.(id, action)} onConfirm={() => props.onConfirmCompletion?.()} />
       )}
 
       <PlanView rows={task.plan} open={open} onCommand={props.onCommand} {...(props.onRequestWrite ? { onRequestWrite: props.onRequestWrite } : {})} />

@@ -1,6 +1,16 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { completeByWrite, itemsOf, turnOf } from "../../../domain/plan/plan.js";
-import { receive } from "../../../domain/task/task.js";
+import {
+  allSettled,
+  check as checkEffect,
+  type CompletionEffect,
+  failed as failedEffect,
+  fire as fireEffect,
+  retry as retryEffect,
+  uncheck as uncheckEffect,
+  written as writtenEffect,
+} from "../../../domain/completion-effect/completion-effect.js";
+import { completeByWrite, effectsOf, itemsOf, type PlanGroup, replaceEffect, turnOf } from "../../../domain/plan/plan.js";
+import { confirmCompletion, finishCompletion, noteEffects, receive, type Task } from "../../../domain/task/task.js";
 import { approve, cancel, fail, interrupt, requestWrite, settle, succeed, Write } from "../../../domain/write/write.js";
 import { DocumentStore, documentsOf } from "../../../store/document-store.js";
 import { type StoreCorrupted, TaskStore } from "../../../store/task-store.js";
@@ -22,6 +32,10 @@ export class WriteService extends Context.Service<
     list(): Effect.Effect<ReadonlyArray<WriteView>, StoreCorrupted>;
     approve(writeId: string): Effect.Effect<Reply<WriteView>, StoreCorrupted>;
     cancel(writeId: string): Effect.Effect<Reply<WriteView>, StoreCorrupted>;
+    /** 完了待ちのチェックリストを確かめて完了のボタンを押した。☑ が付いているものを書き込む（押したことが承認） */
+    confirmCompletion(taskId: string): Effect.Effect<Reply<null>, StoreCorrupted>;
+    /** チェックリストの ☑ を付ける・外す、書き込めなかったものをもう一度頼む（押したことが承認） */
+    effectAction(taskId: string, effectId: string, action: "check" | "uncheck" | "retry"): Effect.Effect<Reply<null>, StoreCorrupted>;
     /** 起動したとき、書き込み中のまま残っていた書き込みを、やり直さずに「書けたか分からない」から確かめる */
     recover(): Effect.Effect<void, StoreCorrupted>;
   }
@@ -108,6 +122,19 @@ export class WriteService extends Context.Service<
           }
         });
 
+      /** 起動したときに書けたか分からなかった、完了したときにすることの書き込みは、書き込めなかったにして完了待ちに残す */
+      const afterEffectWrite = (write: Write) =>
+        Effect.gen(function* () {
+          if (write.requestedBy.type !== "completionEffect" || write.stage !== "失敗") return;
+          const { effectId } = write.requestedBy;
+          const task = yield* tasks.find(write.requestedBy.taskId);
+          if (Option.isNone(task) || task.value.plan === null) return;
+          const effect = effectsOf(task.value.plan).find((e) => e.id === effectId);
+          if (effect === undefined) return;
+          const next = yield* failedEffect(effect, app).pipe(Effect.option);
+          if (Option.isSome(next)) yield* settleEffects(task.value, replaceEffect(task.value.plan, next.value), effectId, ["書けたか確かめられませんでした。書き込み先で確かめてください"]);
+        });
+
       const approveOne = (writeId: string) =>
         Effect.gen(function* () {
           const found = yield* writes.find(writeId);
@@ -134,6 +161,82 @@ export class WriteService extends Context.Service<
           return { ok: true, value: yield* viewOf(cancelled.success) } as const;
         });
 
+      const deliver = (task: Task, effect: CompletionEffect) =>
+        Effect.gen(function* () {
+          const inspection = yield* provider.inspect(effect.subject.uri, effect.operation, effect.params);
+          const open = (yield* writes.all()).some((w) => w.requestedBy.type === "completionEffect" && w.requestedBy.effectId === effect.id && OPEN_STAGES.has(w.stage));
+          const asked = yield* requestWrite(
+            {
+              id: effect.writeId ?? (yield* ids.next),
+              subject: effect.subject,
+              place: null,
+              operation: effect.operation,
+              params: effect.params,
+              version: inspection.version,
+              summary: inspection.summary,
+              requestedBy: { type: "completionEffect", taskId: task.id, effectId: effect.id },
+            },
+            app,
+            { way: "完了したときにすること", confirmed: true, openWrite: open, version: effect.version === null ? "版を持たない" : effect.version === inspection.version ? "見せた版のまま" : "変わった" },
+            inspection.ready,
+          ).pipe(Effect.result);
+          if (asked._tag === "Failure") return { effect: yield* Effect.orDie(failedEffect(effect, app)), problem: inspection.reason ?? asked.failure.reason };
+          // 書き込む前に「書き込み中」を保存する（途中で止まっても、やり直さずに確かめられるように）
+          yield* writes.save(asked.success);
+          const outcome = yield* provider.execute(asked.success.subject.uri, asked.success.operation, asked.success.params, asked.success.version);
+          const done = outcome.ok ? yield* Effect.orDie(succeed(asked.success, { kind: "target" })) : yield* Effect.orDie(fail(asked.success, { kind: "target" }, outcome.kind, outcome.message));
+          yield* writes.save(done);
+          return outcome.ok ? { effect: yield* Effect.orDie(writtenEffect(effect, app)), problem: null } : { effect: yield* Effect.orDie(failedEffect(effect, app)), problem: outcome.message };
+        });
+
+      const settleEffects = (task: Task, plan: PlanGroup, target: string, problems: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          let next = yield* noteEffects(task, app, plan, target);
+          if (problems.length > 0) {
+            const brief = `完了したときにすることを書き込めなかった（${problems.join("・")}）。直してもう一度頼むか、☑ を外す`;
+            next = yield* receive(next, app, "書き込めなかった", { brief }, `effects:${target}:${next.history.length}`).pipe(Effect.orElseSucceed(() => next));
+          }
+          if (next.status === "完了待ち" && allSettled(effectsOf(plan))) next = yield* Effect.orDie(finishCompletion(next, app, "すべて済んだ"));
+          yield* tasks.save(next);
+        });
+
+      const confirmCompletionOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const found = yield* tasks.find(taskId);
+          if (Option.isNone(found)) return { ok: false, reason: "Task が見つかりません" } as const;
+          const confirmed = yield* confirmCompletion(found.value, user, "見せたとおり").pipe(Effect.result);
+          if (confirmed._tag === "Failure") return { ok: false, reason: confirmed.failure.reason } as const;
+          let plan = found.value.plan!;
+          const problems: string[] = [];
+          for (const effect of effectsOf(plan).filter((e) => e.checked && e.delivery === "まだ")) {
+            const requested = yield* Effect.orDie(fireEffect(effect, app, yield* ids.next));
+            const result = yield* deliver(found.value, requested);
+            plan = replaceEffect(plan, result.effect);
+            if (result.problem !== null) problems.push(result.problem);
+          }
+          yield* settleEffects(found.value, plan, "完了のボタン", problems);
+          return { ok: true, value: null } as const;
+        });
+
+      const effectActionOf = (taskId: string, effectId: string, action: "check" | "uncheck" | "retry") =>
+        Effect.gen(function* () {
+          const found = yield* tasks.find(taskId);
+          if (Option.isNone(found) || found.value.plan === null) return { ok: false, reason: "Task が見つかりません" } as const;
+          const effect = effectsOf(found.value.plan).find((e) => e.id === effectId);
+          if (effect === undefined) return { ok: false, reason: "完了したときにすることが見つかりません" } as const;
+          const changed = yield* (action === "check" ? checkEffect(effect, user) : action === "uncheck" ? uncheckEffect(effect, user) : retryEffect(effect, user, yield* ids.next)).pipe(Effect.result);
+          if (changed._tag === "Failure") return { ok: false, reason: changed.failure.reason } as const;
+          const problems: string[] = [];
+          let next = changed.success;
+          if (action === "retry") {
+            const result = yield* deliver(found.value, next);
+            next = result.effect;
+            if (result.problem !== null) problems.push(result.problem);
+          }
+          yield* settleEffects(found.value, replaceEffect(found.value.plan, next), effectId, problems);
+          return { ok: true, value: null } as const;
+        });
+
       const recover = () =>
         Effect.gen(function* () {
           for (const write of (yield* writes.all()).filter((w) => w.stage === "書き込み中")) {
@@ -142,6 +245,7 @@ export class WriteService extends Context.Service<
             const settled = yield* Effect.orDie(settle(unknown, { kind: "sync" }, "確かめられない"));
             yield* writes.save(settled);
             yield* afterWrite(settled);
+            yield* afterEffectWrite(settled);
           }
         });
 
@@ -157,6 +261,8 @@ export class WriteService extends Context.Service<
         approve: (id) => withDocs(approveOne(id)),
         cancel: (id) => withDocs(cancelOne(id)),
         recover: () => withDocs(recover()),
+        confirmCompletion: (taskId) => withDocs(confirmCompletionOf(taskId)),
+        effectAction: (taskId, effectId, action) => withDocs(effectActionOf(taskId, effectId, action)),
       });
     }),
   );

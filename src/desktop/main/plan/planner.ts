@@ -3,7 +3,6 @@ import {
   type ActionItem,
   chooseOption,
   completeItem,
-  type Definition,
   type DraftTree,
   fillBranch,
   fromDrafts,
@@ -23,7 +22,7 @@ import type { Reply } from "../../shared/api.js";
 import { AiServices } from "../ai/ai-services.js";
 import { factMaterialOf, taskMaterialOf } from "../materials.js";
 import { Prioritizer } from "../prioritizer.js";
-import { TaskIds } from "../task-service.js";
+import { effectsFact, TaskIds } from "../task-service.js";
 import { WRITE_OPERATIONS } from "../writes/write-provider.js";
 
 export type PlanAction =
@@ -65,13 +64,12 @@ const howOf = (how: HowDraft, effortOf: (title: string) => Effort): How => {
 const isItem = (entry: PlanDraft["items"][number]): entry is ItemDraft => entry.type === "item";
 const isGroup = (entry: PlanDraft["items"][number]): entry is PlanDraft => entry.type === "serial" || entry.type === "parallel";
 
-/** 完了したときにすること（completionEffect）は、書き込みの縦の一本で足すので、今は落とす */
 function treeOf(draft: PlanDraft, effortOf: (title: string) => Effort): DraftTree {
   return {
     type: draft.type,
-    items: draft.items.flatMap((entry): Array<Definition | DraftTree> => {
+    items: draft.items.flatMap((entry): DraftTree["items"][number][] => {
       if (isGroup(entry)) return [treeOf(entry, effortOf)];
-      if (!isItem(entry)) return [];
+      if (!isItem(entry)) return [{ kind: "completionEffect", title: entry.title, subjectUri: entry.subjectUri, operation: entry.operation, paramsJson: entry.paramsJson }];
       return [{ title: entry.title, effort: effortOf(entry.title), due: entry.due, completes: entry.completes, how: howOf(entry.how, effortOf) }];
     }),
   };
@@ -161,7 +159,7 @@ export class Planner extends Context.Service<
         Effect.gen(function* () {
           if (task.completion !== "満たした" || task.status !== "やること" || task.plan === null) return task;
           const addedRemains = itemsOf(task.plan, { activeOnly: true }).some((item: ActionItem) => item.addedFrom !== null && item.status === "まだ");
-          const closed = yield* complete(task, app, "完了条件を満たした", { effects: "完了したときにすることがない", added: addedRemains ? "足した項目にまだのものがある" : "足した項目はすべて済んだ" }).pipe(Effect.option);
+          const closed = yield* complete(task, app, "完了条件を満たした", { effects: effectsFact(task), added: addedRemains ? "足した項目にまだのものがある" : "足した項目はすべて済んだ" }).pipe(Effect.option);
           return Option.getOrElse(closed, () => task);
         });
 

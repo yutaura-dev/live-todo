@@ -1,5 +1,6 @@
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { Effort } from "../../llm/shared/vocabulary.js";
+import { CompletionEffect } from "../completion-effect/completion-effect.js";
 import { guard } from "../denied.js";
 import { DueDate } from "../values.js";
 
@@ -7,8 +8,10 @@ import { DueDate } from "../values.js";
 
 export interface DraftTree {
   readonly type: "serial" | "parallel";
-  readonly items: ReadonlyArray<Definition | DraftTree>;
+  readonly items: ReadonlyArray<Definition | DraftTree | EffectDraft>;
 }
+/** 完了したときにすることの中身（番に入らず、完了条件にもならない） */
+export type EffectDraft = { readonly kind: "completionEffect"; readonly title: string; readonly subjectUri: string; readonly operation: string; readonly paramsJson: string };
 export type Option = {
   readonly label: string;
   readonly then: { readonly type: "planned"; readonly plan: DraftTree } | { readonly type: "planLater"; readonly direction: string };
@@ -31,6 +34,7 @@ export type ActionItem = { readonly id: string; readonly status: ItemStatus; rea
 export type PlanNode =
   | { readonly type: "item"; readonly item: ActionItem }
   | { readonly type: "group"; readonly group: PlanGroup }
+  | { readonly type: "effect"; readonly effect: CompletionEffect }
   | { readonly type: "branch"; readonly decisionId: string; readonly option: string; readonly state: "進めている" | "取りやめた"; readonly plan: PlanGroup | null };
 export interface PlanGroup {
   readonly arrangement: "serial" | "parallel";
@@ -59,7 +63,8 @@ const HowSchema = Schema.Union([
   }),
 ]);
 export const DefinitionSchema = Schema.Struct({ title: Schema.String, effort: Effort, due: Schema.NullOr(DueDate), completes: Schema.Boolean, how: HowSchema });
-const DraftTreeSchema: Schema.Codec<DraftTree> = Schema.Struct({ type: Schema.Literals(["serial", "parallel"]), items: Schema.Array(Schema.Union([DefinitionSchema, suspendedDraft])) });
+const EffectDraftSchema = Schema.Struct({ kind: Schema.Literal("completionEffect"), title: Schema.String, subjectUri: Schema.String, operation: Schema.String, paramsJson: Schema.String });
+const DraftTreeSchema: Schema.Codec<DraftTree> = Schema.Struct({ type: Schema.Literals(["serial", "parallel"]), items: Schema.Array(Schema.Union([DefinitionSchema, suspendedDraft, EffectDraftSchema])) });
 const ActionItemSchema = Schema.Struct({
   id: Schema.String,
   status: Schema.Literals(["まだ", "済んだ", "やらなくなった"]),
@@ -70,6 +75,7 @@ const ActionItemSchema = Schema.Struct({
 const PlanNodeSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("item"), item: ActionItemSchema }),
   Schema.Struct({ type: Schema.Literal("group"), group: suspendedGroup }),
+  Schema.Struct({ type: Schema.Literal("effect"), effect: CompletionEffect }),
   Schema.Struct({ type: Schema.Literal("branch"), decisionId: Schema.String, option: Schema.String, state: Schema.Literals(["進めている", "取りやめた"]), plan: Schema.NullOr(suspendedGroup) }),
 ]);
 export const PlanGroupSchema: Schema.Codec<PlanGroup> = Schema.Struct({ arrangement: Schema.Literals(["serial", "parallel"]), nodes: Schema.Array(PlanNodeSchema) });
@@ -77,13 +83,23 @@ export const PlanGroupSchema: Schema.Codec<PlanGroup> = Schema.Struct({ arrangem
 export type PlanActor = { readonly kind: "user" } | { readonly kind: "sync" } | { readonly kind: "agent" } | { readonly kind: "scheduler" } | { readonly kind: "app" };
 export type Turn = "番が来ている" | "番待ち" | "済んだ" | "やらない";
 
-const isTree = (entry: Definition | DraftTree): entry is DraftTree => "items" in entry;
+const isTree = (entry: Definition | DraftTree | EffectDraft): entry is DraftTree => "items" in entry;
+const isEffectDraft = (entry: Definition | DraftTree | EffectDraft): entry is EffectDraft => "kind" in entry && entry.kind === "completionEffect";
+
+/** 下書きの完了したときにすることは、AI が足したものとして ☑ で置く（中身は JSON が読めなければ空にする） */
+const decodeParams = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+const effectOf = (draft: EffectDraft, id: string): CompletionEffect => {
+  const params = Option.getOrElse(decodeParams(draft.paramsJson), () => ({}));
+  return { id, checked: true, delivery: "まだ", addedBy: { type: "AI" }, title: draft.title, subject: { uri: draft.subjectUri }, operation: draft.operation, params, version: null, writeId: null };
+};
 
 /** 計画の中身（Generation の下書き・選んだ選択肢の先）から、Action Item の並びを作る */
 export function fromDrafts(draft: DraftTree, nextId: () => string, addedFrom: string | null = null): { plan: PlanGroup } {
   const build = (tree: DraftTree): PlanGroup => ({
     arrangement: tree.type,
-    nodes: tree.items.map((entry) => (isTree(entry) ? { type: "group", group: build(entry) } : { type: "item", item: { id: nextId(), status: "まだ", definition: entry, addedFrom, chosen: null } })),
+    nodes: tree.items.map((entry): PlanNode =>
+      isTree(entry) ? { type: "group", group: build(entry) } : isEffectDraft(entry) ? { type: "effect", effect: effectOf(entry, nextId()) } : { type: "item", item: { id: nextId(), status: "まだ", definition: entry, addedFrom, chosen: null } },
+    ),
   });
   return { plan: build(draft) };
 }
@@ -91,6 +107,7 @@ export function fromDrafts(draft: DraftTree, nextId: () => string, addedFrom: st
 const finished = (node: PlanNode): boolean => {
   if (node.type === "item") return node.item.status !== "まだ";
   if (node.type === "group") return node.group.nodes.every(finished);
+  if (node.type === "effect") return true;
   if (node.state === "取りやめた") return true;
   return node.plan !== null && node.plan.nodes.every(finished);
 };
@@ -118,6 +135,7 @@ export function itemsOf(plan: PlanGroup, options: { activeOnly: boolean } = { ac
   return plan.nodes.flatMap((node) => {
     if (node.type === "item") return [node.item];
     if (node.type === "group") return itemsOf(node.group, options);
+    if (node.type === "effect") return [];
     if (options.activeOnly && node.state === "取りやめた") return [];
     return node.plan === null ? [] : itemsOf(node.plan, options);
   });
@@ -130,6 +148,7 @@ const mapItems = (plan: PlanGroup, change: (item: ActionItem) => ActionItem): Pl
   nodes: plan.nodes.map((node) => {
     if (node.type === "item") return { ...node, item: change(node.item) };
     if (node.type === "group") return { ...node, group: mapItems(node.group, change) };
+    if (node.type === "effect") return node;
     return node.plan === null ? node : { ...node, plan: mapItems(node.plan, change) };
   }),
 });
@@ -173,7 +192,7 @@ export function completionOf(plan: PlanGroup | null): "未定" | "まだ" | "満
   return pending ? "まだ" : "満たした";
 }
 
-const draftHasCriteria = (tree: DraftTree): boolean => tree.items.some((entry) => (isTree(entry) ? draftHasCriteria(entry) : entry.completes));
+const draftHasCriteria = (tree: DraftTree): boolean => tree.items.some((entry) => (isTree(entry) ? draftHasCriteria(entry) : !isEffectDraft(entry) && entry.completes));
 
 const fulfilledByHand = (item: ActionItem) => item.definition.how.type === "human" || item.definition.how.type === "claude";
 
@@ -237,6 +256,7 @@ export const chooseOption = Effect.fn("Plan.chooseOption")(function* (plan: Plan
     nodes: group.nodes.flatMap((node): PlanNode[] => {
       if (node.type === "item") return node.item.id === id ? [{ ...node, item: { ...node.item, status: "済んだ", chosen: optionIndex } }, branch] : [node];
       if (node.type === "group") return [{ ...node, group: insert(node.group) }];
+      if (node.type === "effect") return [node];
       return [node.plan === null ? node : { ...node, plan: insert(node.plan) }];
     }),
   });
@@ -258,3 +278,24 @@ export const appendItem = (plan: PlanGroup, item: ActionItem): PlanGroup => ({ .
 
 /** 計画を立て直すときに、前の計画のまだの Action Item をやらなくする（済んだものは消さない） */
 export const retire = (plan: PlanGroup): PlanGroup => mapItems(plan, (item) => (item.status === "まだ" ? { ...item, status: "やらなくなった" } : item));
+
+/** 完了したときにすること。activeOnly なら、取りやめた枝の下にあるものは除く（置いた枝を選んだときだけ効くため） */
+export function effectsOf(plan: PlanGroup, options: { activeOnly: boolean } = { activeOnly: true }): CompletionEffect[] {
+  return plan.nodes.flatMap((node) => {
+    if (node.type === "effect") return [node.effect];
+    if (node.type === "group") return effectsOf(node.group, options);
+    if (node.type === "item") return [];
+    if (options.activeOnly && node.state === "取りやめた") return [];
+    return node.plan === null ? [] : effectsOf(node.plan, options);
+  });
+}
+
+export const replaceEffect = (plan: PlanGroup, next: CompletionEffect): PlanGroup => ({
+  ...plan,
+  nodes: plan.nodes.map((node) => {
+    if (node.type === "effect") return node.effect.id === next.id ? { ...node, effect: next } : node;
+    if (node.type === "group") return { ...node, group: replaceEffect(node.group, next) };
+    if (node.type === "item") return node;
+    return node.plan === null ? node : { ...node, plan: replaceEffect(node.plan, next) };
+  }),
+});

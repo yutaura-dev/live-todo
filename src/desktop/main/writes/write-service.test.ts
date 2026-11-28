@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { fromDrafts } from "../../../domain/plan/plan.js";
-import { create, revisePlan } from "../../../domain/task/task.js";
+import { complete, create, revisePlan } from "../../../domain/task/task.js";
+import { effectsFact } from "../task-service.js";
 import { StoreDatabase } from "../../../store/database.js";
 import { DocumentStore } from "../../../store/document-store.js";
 import { PrioritizationStore } from "../../../store/prioritization-store.js";
@@ -15,7 +16,7 @@ import { sequentialIds } from "../task-service.js";
 import { type Inspection, WriteProvider, type WriteOutcome } from "./write-provider.js";
 import { WriteService, writes } from "./write-service.js";
 
-function layerWith(opts: { inspect?: () => Inspection; outcome?: WriteOutcome } = {}) {
+function layerWith(opts: { inspect?: () => Inspection; outcome?: WriteOutcome; outcomeOf?: () => WriteOutcome } = {}) {
   const executed: string[] = [];
   const provider = Layer.succeed(
     WriteProvider,
@@ -24,7 +25,7 @@ function layerWith(opts: { inspect?: () => Inspection; outcome?: WriteOutcome } 
       execute: (uri) =>
         Effect.sync(() => {
           executed.push(uri);
-          return opts.outcome ?? { ok: true };
+          return opts.outcomeOf?.() ?? opts.outcome ?? { ok: true };
         }),
     }),
   );
@@ -119,5 +120,64 @@ describe("WriteService（承認がなければ書き込まない）", () => {
       assert.deepStrictEqual(Option.map(yield* writes.find(asked.id), (w): ReadonlyArray<string | undefined> => [w.stage, w.failure?.kind]), Option.some<ReadonlyArray<string | undefined>>(["失敗", "書けたか確かめられない"]));
       assert.deepStrictEqual(executed, []);
     }).pipe(Effect.provide(layer));
+  });
+
+  describe("完了したときにすること", () => {
+    const seedWaiting = Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.makeUnsafe("2026-11-28T00:00:00Z").epochMilliseconds);
+      let n = 0;
+      const { plan } = fromDrafts(
+        {
+          type: "serial",
+          items: [
+            { title: "直す", effort: "easy", due: null, completes: true, how: { type: "human" } },
+            { kind: "completionEffect", title: "PR を merge する", subjectUri: "github://me@github.com/acme/app/pull/42", operation: "github.merge", paramsJson: "{}" },
+            { kind: "completionEffect", title: "別の PR を merge する", subjectUri: "github://me@github.com/acme/app/pull/43", operation: "github.merge", paramsJson: "{}" },
+          ],
+        },
+        () => `n${++n}`,
+      );
+      const planned = yield* revisePlan(yield* create({ id: "t1", title: "直して merge する", actor: { kind: "user" }, origin: "手で足した" }), { kind: "agent" }, plan);
+      const waiting = yield* complete(planned, { kind: "user" }, "自分で完了にした", { effects: effectsFact(planned), added: "足した項目はすべて済んだ" });
+      yield* (yield* TaskStore).save(waiting);
+      return waiting;
+    });
+
+    it.effect("完了したときにすることがあれば、完了にすると完了待ちになり、まだ書き込まない", () => {
+      const { executed, layer } = layerWith();
+      return Effect.gen(function* () {
+        assert.strictEqual((yield* seedWaiting).status, "完了待ち");
+        assert.deepStrictEqual(executed, []);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("完了のボタンを押すと ☑ が付いているものだけ書き込み、すべて済んだら Task が終わる", () => {
+      const { executed, layer } = layerWith();
+      return Effect.gen(function* () {
+        yield* seedWaiting;
+        const service = yield* WriteService;
+        yield* service.effectAction("t1", "n3", "uncheck");
+        assert.deepStrictEqual(yield* service.confirmCompletion("t1"), { ok: true, value: null });
+        assert.deepStrictEqual(executed, ["github://me@github.com/acme/app/pull/42"]);
+        const task = yield* taskOf;
+        assert.deepStrictEqual({ status: task.status, closure: task.closure }, { status: "終わった", closure: { outcome: "done", reason: "自分で完了にした" } });
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("書き込めなかったものは完了待ちに残り、もう一度頼んで書けたら終わる", () => {
+      let ok = false;
+      const { executed, layer } = layerWith({ outcomeOf: () => (ok ? { ok: true } : { ok: false, kind: "書き込み先のエラー", message: "GitHub が断った" }) });
+      return Effect.gen(function* () {
+        yield* seedWaiting;
+        const service = yield* WriteService;
+        yield* service.effectAction("t1", "n3", "uncheck");
+        yield* service.confirmCompletion("t1");
+        assert.strictEqual((yield* taskOf).status, "完了待ち");
+        ok = true;
+        yield* service.effectAction("t1", "n2", "retry");
+        assert.strictEqual((yield* taskOf).status, "終わった");
+        assert.strictEqual(executed.length, 2);
+      }).pipe(Effect.provide(layer));
+    });
   });
 });

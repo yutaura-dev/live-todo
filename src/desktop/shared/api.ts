@@ -51,6 +51,14 @@ export const BoardCard = Schema.Struct({
 });
 export type BoardCard = typeof BoardCard.Type;
 
+export const EffectView = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  checked: Schema.Boolean,
+  delivery: Schema.Literals(["まだ", "頼んだ", "書き込んだ", "書き込めなかった", "取りやめた"]),
+});
+export type EffectView = typeof EffectView.Type;
+
 export const TaskView = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
@@ -63,6 +71,7 @@ export const TaskView = Schema.Struct({
   priority: PriorityView,
   facts: Schema.Array(FactView),
   plan: Schema.NullOr(Schema.Array(PlanRow)),
+  effects: Schema.Array(EffectView),
   history: Schema.Array(TaskActivity),
   createdAt: Schema.String,
 });
@@ -147,6 +156,8 @@ export const InboxCommand = Schema.Union([
   Schema.TaggedStruct("RequestWrite", { taskId: Id, itemId: Id }),
   Schema.TaggedStruct("ApproveWrite", { id: Id }),
   Schema.TaggedStruct("CancelWrite", { id: Id }),
+  Schema.TaggedStruct("ConfirmCompletion", { taskId: Id }),
+  Schema.TaggedStruct("EffectAction", { taskId: Id, effectId: Id, action: Schema.Literals(["check", "uncheck", "retry"]) }),
 ]);
 export type InboxCommand = typeof InboxCommand.Type;
 

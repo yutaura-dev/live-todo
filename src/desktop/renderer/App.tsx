@@ -77,6 +77,14 @@ export function App({ api }: { api: LiveTodoApi }) {
     await reload();
   };
 
+  // 完了待ちの操作は Task の今の姿を変えるので、送ったあとに開き直す
+  const sendForTask = async (command: InboxCommand) => {
+    if (!selected) return;
+    const problemText = await sendInbox(command);
+    if (problemText) setProblem(problemText);
+    await open(selected.id);
+  };
+
   const setPriority = async (id: string, level: PriorityLevel) => {
     const reply = await api.command({ _tag: "SetPriority", id, level });
     if (!reply.ok) setProblem(reply.reason);
@@ -98,7 +106,10 @@ export function App({ api }: { api: LiveTodoApi }) {
       counts={{ 提案: inbox.proposals.filter((p) => p.status === "提案中").length + inbox.undecided.length, 承認: inbox.writes.length }}
       sync={{ state: "ok", text: "まだ取り込みはありません" }}
       onNavigate={setView}
-      inspector={selected && <TaskPanel task={selected} problem={problem} onCommand={(command) => void run(command)} onRequestWrite={(itemId) => void requestWrite(itemId)} onClose={() => setSelected(null)} />}
+      inspector={selected && <TaskPanel task={selected} problem={problem} onCommand={(command) => void run(command)} onRequestWrite={(itemId) => void requestWrite(itemId)}
+            onEffect={(effectId, action) => void sendForTask({ _tag: "EffectAction", taskId: selected.id, effectId, action })}
+            onConfirmCompletion={() => void sendForTask({ _tag: "ConfirmCompletion", taskId: selected.id })}
+            onClose={() => setSelected(null)} />}
     >
       {ai === null ? null : locked || view === "設定" ? (
         <Settings settings={ai} onConfigure={configureAi} accounts={inbox.accounts} onInbox={sendInbox} />
