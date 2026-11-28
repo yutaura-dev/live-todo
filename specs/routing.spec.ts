@@ -96,14 +96,17 @@ export function removeTask(routing: Routing, actor: Actor, remaining: "ほかの
  * 事実が変わったことを受ける
  *
  * 振り分けた事実なら、持ち主の Task に変化を伝える。対象外にした事実なら、行動を求めるようになったかもしれないので、振り分けをやり直す（たとえば、あとから自分へのレビュー依頼が付いた）。
+ * 持ち主の Task がすべて終わっていたら、振り分けをやり直す（自分で片付けた Task に事実が残ったままだと、同じ PR に新しいレビュー依頼が来ても、どの Task にも届かないため）。
  * ユーザー待ち・未振り分けの事実は、そのまま待つ（振り分けるときに今の姿を見る）。
  */
-export function factChanged(routing: Routing, actor: Actor): Routing {
+export function factChanged(routing: Routing, actor: Actor, owners: "開いている Task がある" | "持ち主の Task がすべて終わった"): Routing {
   ensure(actor.kind === "sync", "同期だけ");
+  if (routing.status === "振り分けた" && owners === "持ち主の Task がすべて終わった") return { ...routing, status: "未振り分け" };
   return { ...routing, status: routing.status === "対象外" ? "未振り分け" : routing.status };
 }
 
 export const inputs = {
+  factChanged: { 開いている: ["開いている Task がある"], すべて終わった: ["持ち主の Task がすべて終わった"] },
   route: {
     "既存の Task へ": ["既存の Task の事実にする"],
     "新しい Task": ["新しい Task を生む"],
@@ -118,9 +121,7 @@ export const inputs = {
   removeTask: { ほかに残る: ["ほかの Task に残る"], どこにも残らない: ["どの Task にも残らない"] },
 };
 
-export const invariants = {
-  "Task に持たせたら、未振り分けには戻らない": (before: Routing, after: Routing) => before.status !== "振り分けた" || after.status !== "未振り分け",
-};
+export const invariants = {};
 
 export const links = [
   { from: route, to: "task", action: "triage", label: "新しい Task を生むなら、Task を作って仕分ける" },
@@ -133,6 +134,11 @@ export const links = [
 ];
 
 export const scenarios = {
+  "持ち主の Task がすべて終わった事実が変わったら、振り分け直す": [
+    { do: initial, by: "同期" },
+    { do: route, by: "同期", input: "既存の Task へ" },
+    { do: factChanged, by: "同期", input: "すべて終わった", expect: { status: "未振り分け" } },
+  ],
   "届いた PR から新しい Task を生む": [
     { do: initial, by: "同期", expect: { status: "未振り分け" } },
     { do: route, by: "AI", input: "新しい Task", expect: { status: "振り分けた" } },
@@ -141,10 +147,10 @@ export const scenarios = {
   "対象外にした事実が変わったら、振り分けをやり直す": [
     { do: initial, by: "同期" },
     { do: route, by: "AI", input: "対象外", expect: { status: "対象外" } },
-    { do: factChanged, by: "AI", denied: "同期だけ" },
-    { do: factChanged, by: "同期", expect: { status: "未振り分け" } },
+    { do: factChanged, by: "AI", input: "開いている", denied: "同期だけ" },
+    { do: factChanged, by: "同期", input: "開いている", expect: { status: "未振り分け" } },
     { do: route, by: "AI", input: "既存の Task へ", expect: { status: "振り分けた" } },
-    { do: factChanged, by: "同期", expect: { status: "振り分けた" } },
+    { do: factChanged, by: "同期", input: "開いている", expect: { status: "振り分けた" } },
   ],
   "迷った事実は、ユーザーが決めるまでどこにも入れない": [
     { do: initial, by: "同期" },

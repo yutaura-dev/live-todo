@@ -25,7 +25,7 @@ export const invariants = {
   "やらないことにした Task には、まだの Action Item がない": (task: Task, items: ReadonlyArray<ActionItem>) =>
     task.closure?.outcome !== "dismissed" || items.every((item) => item.status !== "todo"),
   "開いていない Task の優先度は、アプリが決めない（決めるのをやめたか、ユーザーが決めたものだけ）": (task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) =>
-    task.status === "needs_review" || task.status === "todo" || prioritizations.every((p) => p.status === "Task が開いていない" || p.status === "ユーザーが決めた"),
+    task.status === "needs_review" || task.status === "todo" || prioritizations.every((p) => p.status === "決めるのをやめた" || p.status === "ユーザーが決めた"),
   "仕分け中の Task には、優先度がない": (task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) =>
     task.status !== "triaging" || prioritizations.length === 0,
   "Task の優先度の決まり方は 1 つまで": (_task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) => prioritizations.length <= 1,

@@ -58,7 +58,11 @@ export const actors: Record<string, Actor> = {
   アプリ: { kind: "app" },
 };
 
-/** 完了したときにすることを足す（計画を立てたとき・事実が増えたとき）。初めは ☑ */
+/**
+ * 完了したときにすることを足す（計画を立てたとき・事実が増えたとき）。初めは ☑
+ *
+ * チェックリストに見せる題名と、書き込む中身（対象・操作）が合っていることは、ハーネスで確かめる（AI が足したものは初めから ☑ なので、題名と違う書き込みを承認しないように）。
+ */
 export function initial(actor: Actor): CompletionEffect {
   ensure(actor.kind === "agent" || actor.kind === "user", "AI かユーザーだけ");
   return {

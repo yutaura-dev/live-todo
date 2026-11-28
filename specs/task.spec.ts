@@ -2,7 +2,7 @@ import { ensure } from "@yutaura/live-spec";
 import type { ActionItem } from "./action-item.spec.ts";
 import type { CompletionEffect } from "./completion-effect.spec.ts";
 import type { TaskActivity } from "./task-activity.value.ts";
-import type { Arrangement } from "./action-definition.value.ts";
+import type { ActionDefinition, Arrangement } from "./action-definition.value.ts";
 import type { DueDate } from "./due-date.value.ts";
 import type { Rule } from "./recurring-task.spec.ts";
 
@@ -38,8 +38,8 @@ export type Task = {
   /** 定期の Task から作ったなら、どの決まりのどの回か（回は予定日 "YYYY-MM-DD"。作っていなければ null）。同じ決まりの同じ回は、Task が 1 つまで */
   /** @ref recurring-task */
   recurrence: { recurringTaskId: string; occurrence: string } | null;
-  /** AI が「定期の Task にしませんか」と置いた下書き（なければ null）。決まりを作るのは、ユーザーが承認してから */
-  recurringDraft: { title: string; rule: Rule } | null;
+  /** AI が「定期の Task にしませんか」と置いた下書き（なければ null）。決まりを作るのは、ユーザーが承認してから。承認の画面では、ひな形の Action Item（自動でやるものも）まで見せる */
+  recurringDraft: { title: string; rule: Rule; template: ActionDefinition[] } | null;
   /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す。ユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（反応は links で書く） */
   history: TaskActivity[];
   /** ユーザーが最後に Task を見た時刻（まだ一度も見ていなければ null で、新着の印を出す）。更新マーク・新着・最近片付いたものは、保存せず、履歴とこの時刻から導いて見せる（判断表「更新マークと新着」）。見ても、最後に変えた日時は変えない */
@@ -232,20 +232,20 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
 export function proposeRecurring(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(isOpen(task) || task.status === "closed", "仕分けたあとの Task だけ");
-  return { ...task, recurringDraft: { title: "請求書を送る", rule: { type: "毎月", day: 1 } } };
+  return { ...task, recurringDraft: { title: "請求書を送る", rule: { type: "毎月", day: 1 }, template: [{ title: "請求書を作って送る", effort: "normal", due: null, completes: true, how: { type: "human", place: null } }] } };
 }
 
 /** ユーザーが下書きを承認する（定期の Task の決まりを作り、下書きを消す） */
-export function approveRecurring(task: Task, actor: Actor, draft: "ある" | "ない"): Task {
+export function approveRecurring(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
-  ensure(draft === "ある", "下書きがあるときだけ");
+  ensure(task.recurringDraft !== null, "下書きがあるときだけ");
   return { ...task, recurringDraft: null };
 }
 
 /** ユーザーが下書きを見送る（決まりは作らず、下書きを消す） */
-export function dismissRecurring(task: Task, actor: Actor, draft: "ある" | "ない"): Task {
+export function dismissRecurring(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
-  ensure(draft === "ある", "下書きがあるときだけ");
+  ensure(task.recurringDraft !== null, "下書きがあるときだけ");
   return { ...task, recurringDraft: null };
 }
 
@@ -430,8 +430,6 @@ export function detachFact(task: Task, actor: Actor): Task {
 }
 
 export const inputs = {
-  approveRecurring: { ある: ["ある"], ない: ["ない"] },
-  dismissRecurring: { ある: ["ある"], ない: ["ない"] },
   triage: { todo: ["todo"], 要確認: ["needs_review"] },
   move: { 要確認へ: ["needs_review", "作業していない"], todoへ: ["todo", "作業していない"], 作業中に: ["todo", "作業中"] },
   noteWork: { 始まった: ["始まった"], 終わった: ["終わった"], やめた: ["やめた"] },
@@ -470,11 +468,14 @@ export const invariants = {
 function translateBy(input: {
   届いたもの: "事実" | "書き込めなかった" | "AI の作業の成果";
   "Decisions の答え": "使わない" | "関係ない" | "列・終わり方が変わる" | "文章・計画が変わる" | "迷った（閾値の間・refusal・形に合わない）";
+  "Generation の答え": "書けた" | "返らない・形に合わない";
 }): "規則で今の状況を書く" | "Generation が書く" | "列を変え、今の状況は Generation が書く" | "何も変えない" | "要確認に倒す" {
   if (input.届いたもの === "書き込めなかった") return "規則で今の状況を書く";
-  if (input.届いたもの === "AI の作業の成果") return "Generation が書く";
+  const generated = input["Generation の答え"] === "書けた";
+  if (input.届いたもの === "AI の作業の成果") return generated ? "Generation が書く" : "要確認に倒す";
   const answer = input["Decisions の答え"];
   if (answer === "関係ない") return "何も変えない";
+  if (!generated) return "要確認に倒す";
   if (answer === "列・終わり方が変わる") return "列を変え、今の状況は Generation が書く";
   if (answer === "文章・計画が変わる") return "Generation が書く";
   return "要確認に倒す";
@@ -489,12 +490,14 @@ export const decisions = {
   "届いたものを、どの使い道で Task の言葉にするか": {
     decide: translateBy,
     cases: [
-      { input: { 届いたもの: "書き込めなかった", "Decisions の答え": "使わない" }, expect: "規則で今の状況を書く" },
-      { input: { 届いたもの: "AI の作業の成果", "Decisions の答え": "使わない" }, expect: "Generation が書く" },
-      { input: { 届いたもの: "事実", "Decisions の答え": "関係ない" }, expect: "何も変えない" },
-      { input: { 届いたもの: "事実", "Decisions の答え": "列・終わり方が変わる" }, expect: "列を変え、今の状況は Generation が書く" },
-      { input: { 届いたもの: "事実", "Decisions の答え": "文章・計画が変わる" }, expect: "Generation が書く" },
-      { input: { 届いたもの: "事実", "Decisions の答え": "迷った（閾値の間・refusal・形に合わない）" }, expect: "要確認に倒す" },
+      { input: { 届いたもの: "書き込めなかった", "Decisions の答え": "使わない", "Generation の答え": "書けた" }, expect: "規則で今の状況を書く" },
+      { input: { 届いたもの: "AI の作業の成果", "Decisions の答え": "使わない", "Generation の答え": "書けた" }, expect: "Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "関係ない", "Generation の答え": "書けた" }, expect: "何も変えない" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "列・終わり方が変わる", "Generation の答え": "書けた" }, expect: "列を変え、今の状況は Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "文章・計画が変わる", "Generation の答え": "書けた" }, expect: "Generation が書く" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "迷った（閾値の間・refusal・形に合わない）", "Generation の答え": "書けた" }, expect: "要確認に倒す" },
+      { input: { 届いたもの: "AI の作業の成果", "Decisions の答え": "使わない", "Generation の答え": "返らない・形に合わない" }, expect: "要確認に倒す" },
+      { input: { 届いたもの: "事実", "Decisions の答え": "文章・計画が変わる", "Generation の答え": "返らない・形に合わない" }, expect: "要確認に倒す" },
     ],
   },
   "更新マークと新着": {
@@ -512,13 +515,13 @@ export const scenarios = {
   "定期の Task にする下書きを置くのは AI だけ": [
     { do: proposeRecurring, by: "AI", denied: "仕分けたあとの Task だけ" },
     { do: triage, by: "同期", input: "todo" },
+    { do: approveRecurring, by: "ユーザー", denied: "下書きがあるときだけ" },
+    { do: dismissRecurring, by: "ユーザー", denied: "下書きがあるときだけ" },
     { do: proposeRecurring, by: "ユーザー", denied: "AI だけ" },
     { do: proposeRecurring, by: "AI" },
-    { do: approveRecurring, by: "AI", input: "ある", denied: "ユーザーだけ" },
-    { do: approveRecurring, by: "ユーザー", input: "ない", denied: "下書きがあるときだけ" },
-    { do: approveRecurring, by: "ユーザー", input: "ある", expect: { recurringDraft: null } },
-    { do: dismissRecurring, by: "AI", input: "ある", denied: "ユーザーだけ" },
-    { do: dismissRecurring, by: "ユーザー", input: "ない", denied: "下書きがあるときだけ" },
+    { do: approveRecurring, by: "AI", denied: "ユーザーだけ" },
+    { do: approveRecurring, by: "ユーザー", expect: { recurringDraft: null } },
+    { do: dismissRecurring, by: "AI", denied: "ユーザーだけ" },
   ],
   "期日を直せるのは、開いている Task でユーザーだけ": [
     { do: setDue, by: "ユーザー", denied: "要確認か todo のときだけ" },
@@ -674,15 +677,18 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "equivalent-states:closed · { reason: 自分で完了にした } · pendingReason=なし · 未定 · recurringDraft=なし/closed · { reason: 絞り込みの外になった } · pendingReason=なし · 未定 · recurringDraft=なし/closed · { reason: もう要らなくなった } · pendingReason=なし · 未定 · recurringDraft=なし/closed · { reason: 自分で完了にした } · pendingReason=なし · 満たした · recurringDraft=なし/closed · { reason: 絞り込みの外になった } · pendingReason=なし · 満たした · recurringDraft=なし/closed · { reason: もう要らなくなった } · pendingReason=なし · 満たした · recurringDraft=なし/closed · { reason: 完了条件を満たした } · pendingReason=なし · 満たした · recurringDraft=なし": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
+  "equivalent-states:完了待ち · closure=なし · 自分で完了にした · 未定 · recurringDraft=なし/完了待ち · closure=なし · 自分で完了にした · 満たした · recurringDraft=なし/完了待ち · closure=なし · 完了条件を満たした · 満たした · recurringDraft=なし": "完了待ちの Task は、完了待ちに入った理由と完了条件の記録が違っても、できること（完了のボタン・やり直す・やらないことにする）は同じ。理由は、すべて書き込めたときにその理由のまま終えるために持つ",
+  "equivalent-states:closed · { reason: 自分で片付けた } · pendingReason=なし · 未定 · recurringDraft=なし/closed · { reason: 自分で片付けた } · pendingReason=なし · 満たした · recurringDraft=なし": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
+  "equivalent-states:closed · { reason: 自分で完了にした } · pendingReason=なし · 未定 · {…}/closed · { reason: 絞り込みの外になった } · pendingReason=なし · 未定 · {…}/closed · { reason: もう要らなくなった } · pendingReason=なし · 未定 · {…}/closed · { reason: 自分で完了にした } · pendingReason=なし · 満たした · {…}/closed · { reason: 絞り込みの外になった } · pendingReason=なし · 満たした · {…}/closed · { reason: もう要らなくなった } · pendingReason=なし · 満たした · {…}/closed · { reason: 完了条件を満たした } · pendingReason=なし · 満たした · {…}": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
+  "equivalent-states:closed · { reason: 自分で完了にした } · pendingReason=なし · まだ · recurringDraft=なし/closed · { reason: 絞り込みの外になった } · pendingReason=なし · まだ · recurringDraft=なし/closed · { reason: もう要らなくなった } · pendingReason=なし · まだ · recurringDraft=なし/closed · { reason: 完了条件を満たした } · pendingReason=なし · まだ · recurringDraft=なし": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
+  "equivalent-states:完了待ち · closure=なし · 自分で完了にした · まだ · recurringDraft=なし/完了待ち · closure=なし · 完了条件を満たした · まだ · recurringDraft=なし": "完了待ちの Task は、完了待ちに入った理由と完了条件の記録が違っても、できること（完了のボタン・やり直す・やらないことにする）は同じ。理由は、すべて書き込めたときにその理由のまま終えるために持つ",
+  "equivalent-states:完了待ち · closure=なし · 自分で完了にした · 未定 · {…}/完了待ち · closure=なし · 自分で完了にした · 満たした · {…}/完了待ち · closure=なし · 完了条件を満たした · 満たした · {…}": "完了待ちの Task は、完了待ちに入った理由と完了条件の記録が違っても、できること（完了のボタン・やり直す・やらないことにする）は同じ。理由は、すべて書き込めたときにその理由のまま終えるために持つ",
+  "equivalent-states:closed · { reason: 自分で片付けた } · pendingReason=なし · 未定 · {…}/closed · { reason: 自分で片付けた } · pendingReason=なし · 満たした · {…}": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
+  "equivalent-states:closed · { reason: 自分で完了にした } · pendingReason=なし · まだ · {…}/closed · { reason: 絞り込みの外になった } · pendingReason=なし · まだ · {…}/closed · { reason: もう要らなくなった } · pendingReason=なし · まだ · {…}/closed · { reason: 完了条件を満たした } · pendingReason=なし · まだ · {…}": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
+  "equivalent-states:完了待ち · closure=なし · 自分で完了にした · まだ · {…}/完了待ち · closure=なし · 完了条件を満たした · まだ · {…}": "完了待ちの Task は、完了待ちに入った理由と完了条件の記録が違っても、できること（完了のボタン・やり直す・やらないことにする）は同じ。理由は、すべて書き込めたときにその理由のまま終えるために持つ",
   "indistinguishable-example:noteWork:終わった,やめた": "作業が終わったか、やめたかは、出来事に残す言葉が違うだけで、Task の項目は変えない",
-  "equivalent-states:closed · { reason: 自分で完了にした } · pendingReason=なし · 未定/closed · { reason: 絞り込みの外になった } · pendingReason=なし · 未定/closed · { reason: もう要らなくなった } · pendingReason=なし · 未定/closed · { reason: 自分で完了にした } · pendingReason=なし · 満たした/closed · { reason: 絞り込みの外になった } · pendingReason=なし · 満たした/closed · { reason: もう要らなくなった } · pendingReason=なし · 満たした/closed · { reason: 完了条件を満たした } · pendingReason=なし · 満たした": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
-  "equivalent-states:完了待ち · closure=なし · 自分で完了にした · 未定/完了待ち · closure=なし · 自分で完了にした · 満たした/完了待ち · closure=なし · 完了条件を満たした · 満たした": "完了待ちの Task は、完了待ちに入った理由と完了条件の記録が違っても、できること（完了のボタン・やり直す・やらないことにする）は同じ。理由は、すべて書き込めたときにその理由のまま終えるために持つ",
-  "equivalent-states:closed · { reason: 自分で片付けた } · pendingReason=なし · 未定/closed · { reason: 自分で片付けた } · pendingReason=なし · 満たした": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
-  "equivalent-states:closed · { reason: 自分で完了にした } · pendingReason=なし · まだ/closed · { reason: 絞り込みの外になった } · pendingReason=なし · まだ/closed · { reason: もう要らなくなった } · pendingReason=なし · まだ/closed · { reason: 完了条件を満たした } · pendingReason=なし · まだ": "終わった Task は、どう終わったか・完了条件の記録を見せるだけで、できること（やり直す）は同じ（自分で片付けた Task は AI では戻らない、だけが違う）",
-  "equivalent-states:完了待ち · closure=なし · 自分で完了にした · まだ/完了待ち · closure=なし · 完了条件を満たした · まだ": "完了待ちの Task は、完了待ちに入った理由と完了条件の記録が違っても、できること（完了のボタン・やり直す・やらないことにする）は同じ。理由は、すべて書き込めたときにその理由のまま終えるために持つ",
   "anytime:addPendingCriteria": "まだの完了条件ができるのは、分かれ道で決まっている枝を選んだ・完了条件の Action Item を戻したとき。完了条件が未定でも決まっていても、その時点でまだの完了条件があることになる",
-  "anytime:approveRecurring": "下書きがあれば、どの列の Task からでも承認できる（終わった Task から、毎月の決まりにすることもある）。下書きがあるかは入力で確かめる",
-  "anytime:dismissRecurring": "下書きがあれば、どの列の Task からでも見送れる。下書きがあるかは入力で確かめる",
   "anyone-can:notePriority": "優先度を決めた人（同期の規則・AI の判定・ユーザー）が、そのまま出来事に残る。だれが決めてよいかは Priority の側で確かめる",
   "same-for-similar-actors:notePriority": "優先度を決めた人を出来事に残すだけで、だれが決めてよいかは Priority の側で確かめる",
   "indistinguishable-example:receive:事実で項目が変わる,事実で何も変わらない,AI の作業の成果": "項目が変わるかどうかは、Task の出来事が残るかどうか（更新マークが付くかどうか）に出る。列などの状態は変わらないので、状態としては同じに見える",

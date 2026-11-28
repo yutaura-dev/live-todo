@@ -93,7 +93,7 @@ export const inputs = {
     分かれ道: [decision],
   },
   complete: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
-  finishByCondition: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
+  finishByCondition: { 番が来ている: ["番が来ている", "今も成り立つ"], 番待ち: ["番待ち", "今も成り立つ"] , 崩れた: ["番が来ている", "崩れた"] },
   observeCondition: { 成り立った: ["成り立った"], 達成できない: ["達成できない"] },
   completeByWrite: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   autoStart: { 番が来ている: ["番が来ている", "範囲に入る", "todo"], 番待ち: ["番待ち", "範囲に入る", "todo"], 範囲に入らない: ["番が来ている", "範囲に入らない", "todo"], 完了待ち: ["番が来ている", "範囲に入る", "todo でない"] },
@@ -127,13 +127,14 @@ export function observeCondition(item: ActionItem, actor: Actor, verdict: "成�
 /**
  * 待つ条件で果たされる
  *
- * 番が来ていて、待つ条件が成り立っていれば果たす（成り立ったときに番が来ていれば、すぐ。番待ちの間に成り立ったなら、番が来たとき）。
+ * 番が来ていて、待つ条件が成り立っていれば果たす（成り立ったときに番が来ていれば、すぐ。番待ちの間に成り立ったなら、番が来たときに、今も成り立つかを確かめ直してから。崩れていたら resetCondition で待ち直す）。
  */
-export function finishByCondition(item: ActionItem, actor: Actor, turn: Turn): ActionItem {
+export function finishByCondition(item: ActionItem, actor: Actor, turn: Turn, still: "今も成り立つ" | "崩れた"): ActionItem {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(turn === "番が来ている", "番が来ているときだけ");
   ensure(item.progress.type === "condition" && item.progress.observed === "成り立った", "待つ条件が成り立ったときだけ");
+  ensure(still === "今も成り立つ", "今も成り立っているときだけ（番待ちの間に崩れたら、待ち直す）");
   return { ...item, status: "done" };
 }
 
@@ -325,6 +326,12 @@ export const links = [
 ];
 
 export const scenarios = {
+  "番待ちの間に成り立った待つ条件は、番が来たときに確かめ直してから果たす": [
+    { do: initial, by: "AI", input: "条件で果たす" },
+    { do: observeCondition, by: "同期", input: "成り立った" },
+    { do: finishByCondition, by: "同期", input: "崩れた", denied: "今も成り立っているときだけ（番待ちの間に崩れたら、待ち直す）" },
+    { do: finishByCondition, by: "同期", input: "番が来ている", expect: { status: "done" } },
+  ],
   "自動でやる書き込みの Action Item は、番が来たら書き込みを頼む": [
     { do: initial, by: "AI", input: "自動で書き込む" },
     { do: autoRequestWrite, by: "アプリ", input: "番待ち", denied: "番が来ているときだけ" },
