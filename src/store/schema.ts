@@ -48,3 +48,10 @@ export const prioritizations = sqliteTable("prioritizations", {
   basisFingerprint: text("basis_fingerprint").notNull(),
   drivenByItemId: text("driven_by_item_id"),
 });
+
+/** AI 設定（PC に 1 つなので、id は 1 だけ）。API キーは持たない（.env.local に置く） */
+export const aiSettings = sqliteTable("ai_settings", {
+  id: integer("id").primaryKey(),
+  /** AiSettings（JSON） */
+  settings: text("settings").notNull(),
+});

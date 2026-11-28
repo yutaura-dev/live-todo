@@ -2,7 +2,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
-import type { BoardCard, Command, LiveTodoApi, Reply, TaskView } from "../shared/api.js";
+import type { AiCommand, AiSettingsView, BoardCard, Command, LiveTodoApi, Reply, TaskView } from "../shared/api.js";
 import { App } from "./App.js";
 
 afterEach(cleanup);
@@ -21,8 +21,24 @@ const view = (card: BoardCard): TaskView => ({
   createdAt: "2026-11-28T09:00:00.000Z",
 });
 
-function fakeApi(cards: BoardCard[], reply?: (command: Command) => Reply<TaskView> | undefined) {
+const options = {
+  decisions: [{ id: "openai-decisions", label: "OpenAI Decisions（gpt-6-luna）", secret: "LIVE_TODO_SECRET_LLM_OPENAI_API_KEY" }],
+  generation: [{ id: "claude-sonnet", label: "Claude Sonnet 5.5", secret: "LIVE_TODO_SECRET_LLM_ANTHROPIC_API_KEY" }],
+  agent: [{ id: "claude-code", label: "Claude Code", secret: null }],
+};
+const settingsWith = (status: AiSettingsView["status"], problem: AiSettingsView["problem"] = null): AiSettingsView => ({
+  status,
+  problem,
+  uses: {
+    decisions: { selected: status === "初期設定中" ? null : "openai-decisions", options: options.decisions },
+    generation: { selected: status === "初期設定中" ? null : "claude-sonnet", options: options.generation },
+    agent: { selected: status === "初期設定中" ? null : "claude-code", options: options.agent },
+  },
+});
+
+function fakeApi(cards: BoardCard[], reply?: (command: Command) => Reply<TaskView> | undefined, ai: { settings?: AiSettingsView; configure?: (command: AiCommand) => Reply<AiSettingsView> } = {}) {
   const sent: Command[] = [];
+  const aiSent: AiCommand[] = [];
   const api: LiveTodoApi = {
     command: async (command) => {
       sent.push(command);
@@ -34,8 +50,13 @@ function fakeApi(cards: BoardCard[], reply?: (command: Command) => Reply<TaskVie
     board: async () => ({ ok: true, value: cards }),
     task: async (id) => ({ ok: true, value: view(cards.find((card) => card.id === id)!) }),
     onChanged: () => () => {},
+    aiSettings: async () => ({ ok: true, value: ai.settings ?? settingsWith("使える") }),
+    configureAi: async (command) => {
+      aiSent.push(command);
+      return ai.configure?.(command) ?? { ok: true, value: ai.settings ?? settingsWith("使える") };
+    },
   };
-  return { api, sent };
+  return { api, sent, aiSent };
 }
 
 const cards: BoardCard[] = [
@@ -142,5 +163,43 @@ describe("Task の詳細", () => {
     await waitFor(() => assert.strictEqual(sent.at(-1)?._tag, "SetDue"));
     const due = (sent.at(-1) as Extract<Command, { _tag: "SetDue" }>).due;
     assert.deepStrictEqual({ text: due?.text, precision: due?.precision }, { text: "12 月 4 日まで", precision: "日" });
+  });
+});
+describe("AI 設定", () => {
+  it("3 つとも設定するまでは、設定の画面だけを出し、ほかの画面には移れない", async () => {
+    render(<App api={fakeApi(cards, undefined, { settings: settingsWith("初期設定中") }).api} />);
+    assert.isNotNull(await screen.findByText("AI の 3 つの使い道をすべて設定して確かめるまで、アプリは使えません"));
+    assert.isTrue((screen.getByRole("button", { name: "見通し" }) as HTMLButtonElement).disabled);
+  });
+
+  it("選んで「確かめて使う」を押すと、その使い道を確かめるよう送る", async () => {
+    const { api, aiSent } = fakeApi(cards, undefined, { settings: settingsWith("初期設定中") });
+    render(<App api={api} />);
+    fireEvent.change(await screen.findByLabelText("Decisions に使う AI"), { target: { value: "openai-decisions" } });
+    fireEvent.click(within(screen.getByRole("listitem", { name: "Decisions" })).getByRole("button", { name: "確かめて使う" }));
+    await waitFor(() => assert.deepStrictEqual(aiSent, [{ _tag: "ConfigureAi", use: "decisions", option: "openai-decisions" }]));
+  });
+
+  it("選んだ AI に API キーが要るときは、.env.local に書く名前を見せる", async () => {
+    render(<App api={fakeApi(cards, undefined, { settings: settingsWith("初期設定中") }).api} />);
+    fireEvent.change(await screen.findByLabelText("Decisions に使う AI"), { target: { value: "openai-decisions" } });
+    assert.isNotNull(screen.getByText(/LIVE_TODO_SECRET_LLM_OPENAI_API_KEY/));
+  });
+
+  it("確かめて通らなければ、何をすればよいかを見せる", async () => {
+    const { api } = fakeApi(cards, undefined, {
+      settings: settingsWith("初期設定中"),
+      configure: () => ({ ok: false, reason: "LIVE_TODO_SECRET_LLM_OPENAI_API_KEY を .env.local に書いてください" }),
+    });
+    render(<App api={api} />);
+    fireEvent.change(await screen.findByLabelText("Decisions に使う AI"), { target: { value: "openai-decisions" } });
+    fireEvent.click(within(screen.getByRole("listitem", { name: "Decisions" })).getByRole("button", { name: "確かめて使う" }));
+    assert.isNotNull(await screen.findByText("LIVE_TODO_SECRET_LLM_OPENAI_API_KEY を .env.local に書いてください"));
+  });
+
+  it("認証が通らなくなったら、どの使い道かを見せて、直すまでほかの画面には移れない", async () => {
+    render(<App api={fakeApi(cards, undefined, { settings: settingsWith("使えない", { use: "Decisions", reason: "API キーが切れた" }) }).api} />);
+    assert.isNotNull(await screen.findByText("Decisions の認証が通りません（API キーが切れた）"));
+    assert.isTrue((screen.getByRole("button", { name: "カンバン" }) as HTMLButtonElement).disabled);
   });
 });

@@ -55,8 +55,22 @@ export const Command = Schema.Union([
 ]);
 export type Command = typeof Command.Type;
 
-export const Query = Schema.Union([Schema.TaggedStruct("Board", {}), Schema.TaggedStruct("Task", { id: Id })]);
+export const Query = Schema.Union([Schema.TaggedStruct("Board", {}), Schema.TaggedStruct("Task", { id: Id }), Schema.TaggedStruct("AiSettings", {})]);
 export type Query = typeof Query.Type;
+
+const AiOptionView = Schema.Struct({ id: Schema.String, label: Schema.String, secret: Schema.NullOr(Schema.String) });
+const AiUseView = Schema.Struct({ selected: Schema.NullOr(Schema.String), options: Schema.Array(AiOptionView) });
+
+/** AI 設定（API キーは含めない。どの名前で .env.local に書くかだけを見せる） */
+export const AiSettingsView = Schema.Struct({
+  status: Schema.Literals(["初期設定中", "使える", "使えない"]),
+  problem: Schema.NullOr(Schema.Struct({ use: Schema.Literals(["Decisions", "Generation", "Agent"]), reason: Schema.String })),
+  uses: Schema.Struct({ decisions: AiUseView, generation: AiUseView, agent: AiUseView }),
+});
+export type AiSettingsView = typeof AiSettingsView.Type;
+
+export const AiCommand = Schema.TaggedStruct("ConfigureAi", { use: Schema.Literals(["decisions", "generation", "agent"]), option: Schema.String });
+export type AiCommand = typeof AiCommand.Type;
 
 /** 断られた・見つからないは値で返す（画面は reason をそのまま見せる） */
 export type Reply<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly reason: string };
@@ -67,6 +81,8 @@ export interface LiveTodoApi {
   command(command: Command): Promise<Reply<TaskView>>;
   board(): Promise<Reply<ReadonlyArray<BoardCard>>>;
   task(id: string): Promise<Reply<TaskView>>;
+  aiSettings(): Promise<Reply<AiSettingsView>>;
+  configureAi(command: AiCommand): Promise<Reply<AiSettingsView>>;
   /** main 側で Task が変わったら呼ばれる。戻り値で購読をやめる */
   onChanged(listener: () => void): () => void;
 }

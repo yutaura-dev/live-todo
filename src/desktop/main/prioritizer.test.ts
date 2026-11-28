@@ -9,15 +9,16 @@ import { complete, create, setDue, type Task } from "../../domain/task/task.js";
 import { StoreDatabase } from "../../store/database.js";
 import { PrioritizationStore } from "../../store/prioritization-store.js";
 import { TaskStore } from "../../store/task-store.js";
+import { AiServices } from "./ai/ai-services.js";
 import { Calendar, Prioritizer } from "./prioritizer.js";
 
 const user = { kind: "user" } as const;
 const base = Layer.mergeAll(PrioritizationStore.layer, TaskStore.layer).pipe(Layer.provideMerge(StoreDatabase.layer({ filename: ":memory:" })));
 const calendar = (today: string) => Calendar.fixed({ today, timeZone: "Asia/Tokyo" });
-const withoutAi = (today = "2026-11-28") => Prioritizer.layer.pipe(Layer.provideMerge(base), Layer.provide(calendar(today)));
+const withoutAi = (today = "2026-11-28") => Prioritizer.layer.pipe(Layer.provideMerge(base), Layer.provide(calendar(today)), Layer.provide(AiServices.fromContext));
 const withAi = (script: Parameters<typeof decisionsTest>[0]) => {
   const fake = decisionsTest(script);
-  return { fake, layer: Prioritizer.layer.pipe(Layer.provideMerge(base), Layer.provide(calendar("2026-11-28")), Layer.provide(fake.layer)) };
+  return { fake, layer: Prioritizer.layer.pipe(Layer.provideMerge(base), Layer.provide(calendar("2026-11-28")), Layer.provide(AiServices.fromContext.pipe(Layer.provide(fake.layer)))) };
 };
 
 const saved = (task: Task) =>
@@ -128,7 +129,7 @@ describe("Prioritizer（Task の優先度を、規則か Decisions で決める�
       assert.strictEqual((yield* prioritizationOf).priority?.level, "30 日以内");
       yield* Effect.gen(function* () {
         yield* (yield* Prioritizer).refresh(task);
-      }).pipe(Effect.provide(Layer.fresh(Prioritizer.layer).pipe(Layer.provide(calendar("2026-12-08")))));
+      }).pipe(Effect.provide(Layer.fresh(Prioritizer.layer).pipe(Layer.provide(calendar("2026-12-08")), Layer.provide(AiServices.fromContext))));
       assert.deepStrictEqual((yield* prioritizationOf).priority, { level: "3 日以内", reason: "期日まで 2 日" });
     }).pipe(Effect.provide(withoutAi())));
 });
