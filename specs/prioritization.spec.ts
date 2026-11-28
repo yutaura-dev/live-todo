@@ -29,8 +29,8 @@ export const Status = {
   undecided: "ラベル未定",
   /** ユーザーが決めた（アプリは変えない） */
   byUser: "ユーザーが決めた",
-  /** Task が終わった・完了待ち・やらないことにした。アプリは決めない（やり直したら決め直す） */
-  closed: "Task が開いていない",
+  /** Task が終わった・完了待ち・やらないことにしたので、アプリは決めるのをやめた（やり直したら決め直す） */
+  closed: "決めるのをやめた",
 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
 
@@ -51,7 +51,11 @@ export function initial(actor: Actor): Prioritization {
 
 const canDecide = (p: Prioritization) => p.status === "未判定" || p.status === "ラベル未定";
 
-/** 規則で決まる（判断表「規則で決まる優先度」でラベルが出た。LLM は呼ばない） */
+/**
+ * 規則で決まる
+ *
+ * 判断表「規則で決まる優先度」でラベルが出た。LLM は呼ばない
+ */
 export function decideByRule(p: Prioritization, actor: Actor, rule: RuleResult): Prioritization {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(canDecide(p), "未判定・ラベル未定のときだけ");
@@ -86,11 +90,15 @@ export function judge(
 /** ユーザーがラベルを決める（ラベル未定に答える・アプリが決めたものを変える） */
 export function setByUser(p: Prioritization, actor: Actor): Prioritization {
   ensure(actor.kind === "user", "ユーザーだけ");
-  ensure(p.status !== "Task が開いていない", "Task が開いているときだけ");
+  ensure(p.status !== "決めるのをやめた", "Task が開いているときだけ");
   return { ...p, status: "ユーザーが決めた", priority: { level: "今日中", reason: "ユーザーが決めた" } };
 }
 
-/** ユーザーが決めたラベルを外す（アプリに決め直させる。決め直すまで、ユーザーが決めたラベルのまま並べる） */
+/**
+ * ユーザーが決めたラベルを外す
+ *
+ * アプリに決め直させる。決め直すまで、ユーザーが決めたラベルのまま並べる
+ */
 export function clearByUser(p: Prioritization, actor: Actor): Prioritization {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(p.status === "ユーザーが決めた", "ユーザーが決めたときだけ");
@@ -105,22 +113,22 @@ export function clearByUser(p: Prioritization, actor: Actor): Prioritization {
 export function basisChanged(p: Prioritization, actor: Actor, _why: "材料が変わった" | "日が変わった"): Prioritization {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(p.status !== "ユーザーが決めた", "ユーザーが決めたラベルは変えない");
-  ensure(p.status !== "Task が開いていない", "Task が開いているときだけ");
+  ensure(p.status !== "決めるのをやめた", "Task が開いているときだけ");
   return { ...p, status: p.status === "ラベル未定" ? "ラベル未定" : "未判定", basisFingerprint: "b2" };
 }
 
 /** Task が開いていなくなったので、決めるのをやめる（ユーザーが決めたラベルは、もともとアプリが決めないので、そのまま残す） */
 export function stop(p: Prioritization, actor: Actor): Prioritization {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(p.status !== "Task が開いていない", "Task が開いているときだけ");
+  ensure(p.status !== "決めるのをやめた", "Task が開いているときだけ");
   ensure(p.status !== "ユーザーが決めた", "アプリが決めるときだけ");
-  return { ...p, status: "Task が開いていない" };
+  return { ...p, status: "決めるのをやめた" };
 }
 
 /** Task をやり直したので、決め直す */
 export function resume(p: Prioritization, actor: Actor): Prioritization {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(p.status === "Task が開いていない", "Task が開いていないときだけ");
+  ensure(p.status === "決めるのをやめた", "決めるのをやめたときだけ");
   return { ...p, status: "未判定", basisFingerprint: "b2" };
 }
 
@@ -222,9 +230,9 @@ export const scenarios = {
   "開いていない Task では決めず、やり直したら決め直す": [
     { do: initial, by: "同期" },
     { do: judge, by: "Decisions", input: "10 日以内" },
-    { do: resume, by: "同期", denied: "Task が開いていないときだけ" },
+    { do: resume, by: "同期", denied: "決めるのをやめたときだけ" },
     { do: stop, by: "Decisions", denied: "同期だけ" },
-    { do: stop, by: "同期", expect: { status: "Task が開いていない" } },
+    { do: stop, by: "同期", expect: { status: "決めるのをやめた" } },
     { do: stop, by: "同期", denied: "Task が開いているときだけ" },
     { do: basisChanged, by: "同期", input: "日", denied: "Task が開いているときだけ" },
     { do: setByUser, by: "ユーザー", denied: "Task が開いているときだけ" },
@@ -246,7 +254,7 @@ export const scenarios = {
 export const reviewed = {
   "equivalent-states:未判定 · priority=なし/ラベル未定 · priority=なし/未判定 · { level: 今日中 }/未判定 · { level: 3 日以内 }/未判定 · { level: 今すぐ }/未判定 · { level: 10 日以内 }/未判定 · { level: それより先でよい }": "決め直す間・ラベル未定は、できること（決める・材料や日が変わったら決め直す・ユーザーが決める）は同じだが、見せ方が違う（前のラベルのまま並べる・ラベル未定の印を付ける・はじめて決める前は並べない）",
   "equivalent-states:アプリが決めた · { level: 今日中 }/アプリが決めた · { level: 3 日以内 }/アプリが決めた · { level: 今すぐ }/アプリが決めた · { level: 10 日以内 }/アプリが決めた · { level: それより先でよい }": "アプリが決めたラベルごとに、できることは同じだが、ボードの並びと見せる理由が違う",
-  "equivalent-states:Task が開いていない · priority=なし/Task が開いていない · { level: 今日中 }/Task が開いていない · { level: 3 日以内 }/Task が開いていない · { level: 今すぐ }/Task が開いていない · { level: 10 日以内 }/Task が開いていない · { level: それより先でよい }": "Task が開いていない間はラベルを見せないが、やり直したときに前のラベルのまま並べるために残す",
+  "equivalent-states:決めるのをやめた · priority=なし/決めるのをやめた · { level: 今日中 }/決めるのをやめた · { level: 3 日以内 }/決めるのをやめた · { level: 今すぐ }/決めるのをやめた · { level: 10 日以内 }/決めるのをやめた · { level: それより先でよい }": "決めるのをやめた間はラベルを見せないが、やり直したときに前のラベルのまま並べるために残す",
   "indistinguishable-example:judge:今すぐ,止めている・今すぐ": "今すぐと判定されたら、他の人を止めているかにかかわらず今すぐにする。同じ結果になるのが意図どおり",
   "indistinguishable-example:judge:止めている・急がない,止めている・迷った": "他の人を止めているものは、急がないと判定されても迷っても今日中にする（ラベル未定にして後回しにしない）。同じ結果になるのが意図どおり",
   "indistinguishable-example:judge:閾値の間,答えが返らない": "どちらも、低い優先度ではなくラベル未定に倒す（fail closed）。返らなかったのか、閾値の間・断られた・形に合わないのかは記録では分けるが、できることは同じ",

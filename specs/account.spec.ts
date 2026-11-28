@@ -1,7 +1,9 @@
 import { ensure } from "@yutaura/live-spec";
 
 /**
- * Account（Source のアカウント 1 つ。会社の GitHub・私用の Gmail・会社の Slack のワークスペース など）。
+ * Account
+ *
+ * Source のアカウント 1 つ。会社の GitHub・私用の Gmail・会社の Slack のワークスペース など）。
  * Source Item・見張る対象・書き込みは、どのアカウントのものかを accountId で指す。
  * つながっているかだけを持つ。どの AI に送るかは AI Settings（PC に 1 つ）が決め、アカウントごとには持たない（ADR-0022）。
  * 外しても、取り込んだ Source Item は消さない（そのまま残り、もう新しくは取り込まない）。それを持つ Task もそのまま。
@@ -61,14 +63,22 @@ export const actors: Record<string, Actor> = {
   アプリ: { kind: "app" },
 };
 
-/** アカウントを足す（会社の Slack は、管理者に確かめてから使うよう、足す画面で注意を出す。ADR-0010。確かめたかは条件にしない） */
+/**
+ * アカウントを足す
+ *
+ * 会社の Slack は、管理者に確かめてから使うよう、足す画面で注意を出す。ADR-0010。確かめたかは条件にしない
+ */
 export function initial(actor: Actor, sameOrigin: "同じ origin のアカウントはない" | "外したアカウントと同じ origin" | "足しているアカウントと同じ origin"): Account {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(sameOrigin === "同じ origin のアカウントはない", "同じ origin のアカウントがないときだけ（外したアカウントと同じなら戻す。足しているアカウントと同じなら足せない）");
   return { status: "つないでいない", id: "github-work", origin: "github://yutaura@github.com", label: "会社の GitHub", scope: null, problem: null };
 }
 
-/** 外したアカウントと同じ origin で足そうとしたので、前のアカウントに戻す（前の ID のまま。つなぎ直すと、同期は続きから取り込む） */
+/**
+ * 外したアカウントと同じ origin で足そうとしたので、前のアカウントに戻す
+ *
+ * 前の ID のまま。つなぎ直すと、同期は続きから取り込む
+ */
 export function restore(account: Account, actor: Actor): Account {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(account.status === "外した", "外したときだけ");
@@ -102,7 +112,11 @@ export function changeScope(account: Account, actor: Actor, permission: "権限�
   return permission === "権限が増える" && account.status === "つないでいる" ? { ...scoped, status: "つなぎ直しが要る", problem: "権限を増やした" } : scoped;
 }
 
-/** 外す（同期・見張りをやめ、確認中の書き込みを取りやめ、このアカウントのトークン・セッションを消す。取り込んだ Source Item は消さない） */
+/**
+ * 外す
+ *
+ * 同期・見張りをやめ、承認待ちの書き込みを取りやめ、このアカウントのトークン・セッションを消す。取り込んだ Source Item は消さない
+ */
 export function remove(account: Account, actor: Actor): Account {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(account.status !== "外した", "外していないときだけ");
@@ -126,13 +140,13 @@ export const links = [
   { from: connect, to: "sync", label: "つないだら、取り込む種類ごとに取り込みを始める（初めて）・止めていた取り込みを再開する（resume）・外していた取り込みを続きから始める（restart）" },
   { from: remove, to: "sync", action: "end", label: "このアカウントの取り込みを止める（カーソルは残す）" },
   { from: changeScope, to: "sync", action: "rescope", label: "取り込む範囲を広げたら、初めの取り込みからやり直す（新しい範囲の、前から開いているものを取り込む）" },
-  { from: remove, to: "watch-target", label: "このアカウントの見張りをやめる" },
-  { from: restore, to: "watch-target", label: "つなぎ直したら、このアカウントの見張りを続きから始める" },
-  { from: reject, to: "watch-target", label: "つなぎ直すまで、このアカウントの見張りを止める" },
+  { from: remove, to: "watch-target", action: "drop", label: "このアカウントの見張りをやめる（待っている Action Item は達成できない）" },
+  { from: connect, to: "watch-target", action: "resume", label: "つないだら、止めていたこのアカウントの見張りを続きから始める" },
+  { from: reject, to: "watch-target", action: "pause", label: "つなぎ直すまで、このアカウントの見張りを止める" },
   { from: changeScope, to: "source-item", action: "remove", label: "範囲から外れた Source Item は、範囲の外になったとして消す" },
-  { from: remove, to: "write", action: "withdraw", label: "このアカウントへの、確認中の書き込みを取りやめる" },
-  { from: remove, to: "write", label: "このアカウントへの、書き込み中・書けたか分からない書き込みは、外を確かめられないので失敗にする（理由: アカウントを外した）" },
-  { from: reject, to: "write", label: "このアカウントへの、確認中の書き込みは残す。つなぎ直すまで承認だけできない（書き込める状態でないので）。つなぎ直したら、見せた版のままなら承認できる" },
+  { from: remove, to: "write", action: "withdraw", label: "このアカウントへの、承認待ちの書き込みを取りやめる" },
+  { from: remove, to: "write", action: "abandon", label: "このアカウントへの、書き込み中・書けたか分からない書き込みは、外を確かめられないので失敗にする（理由: アカウントを外した）" },
+  { from: reject, to: "write", label: "このアカウントへの、承認待ちの書き込みは残す。つなぎ直すまで承認だけできない（書き込める状態でないので）。つなぎ直したら、見せた版のままなら承認できる" },
 ];
 
 export const scenarios = {

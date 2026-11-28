@@ -1,7 +1,9 @@
 import { ensure } from "@yutaura/live-spec";
 
 /**
- * AI Settings（アプリが使う AI の設定。PC に 1 つ）。使い道ごとに 3 つを、独立して選ぶ（Decisions は OpenAI、Generation は Gemini、Agent は Claude Code、など）。
+ * AI Settings
+ *
+ * アプリが使う AI の設定。PC に 1 つ）。使い道ごとに 3 つを、独立して選ぶ（Decisions は OpenAI、Generation は Gemini、Agent は Claude Code、など）。
  * 3 つの違いは役割で、確かさの段ではない（Decisions で分からないことが、Generation に聞けば分かるわけではない）。どれを使うかは、Task が届いたものを受け取るところなど、使う側の判断表で決める（ADR-0022）。
  * - Decisions: 分類・確率付きの判定（安い）
  * - Generation: 文章を伴う Structured Output（Task の説明・計画を作る。Agent の成果物も入力にする）
@@ -51,13 +53,20 @@ export function initial(actor: Actor): AiSettings {
  *
  * 3 つとも設定して確かめたら、アプリを使えるようにする。認証が通らなかった使い道を直したときも、使えるようにする。
  */
-export function configure(settings: AiSettings, actor: Actor, check: "通った" | "通らない", rest: "3 つそろう" | "まだ足りない"): AiSettings {
+export function configure(settings: AiSettings, actor: Actor, use: "decisions" | "generation" | "agent", check: "通った" | "通らない"): AiSettings {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(check === "通った", "認証を確かめて通ったときだけ");
-  const uses = { ...settings.uses, decisions: { provider: "openai", model: "gpt-6-luna" } };
-  if (settings.status === "初期設定中" && rest === "まだ足りない") return { ...settings, uses };
+  const uses = { ...settings.uses, [use]: CHOICES[use] };
+  const complete = uses.decisions !== null && uses.generation !== null && uses.agent !== null;
+  if (!complete) return { ...settings, uses };
   return { status: "使える", uses, problem: null };
 }
+
+const CHOICES: Record<"decisions" | "generation" | "agent", Choice> = {
+  decisions: { provider: "openai", model: "gpt-6-luna" },
+  generation: { provider: "gemini", model: "gemini-3-pro" },
+  agent: { provider: "claude-code", model: null },
+};
 
 /** 認証が通らなかった（呼んだら断られた）。直すまで、アプリ全体を使えない */
 export function reject(settings: AiSettings, actor: Actor): AiSettings {
@@ -67,17 +76,18 @@ export function reject(settings: AiSettings, actor: Actor): AiSettings {
 }
 
 export const inputs = {
-  configure: { "最後の 1 つ": ["通った", "3 つそろう"], まだ足りない: ["通った", "まだ足りない"], 通らない: ["通らない", "3 つそろう"] },
+  configure: { Decisions: ["decisions", "通った"], Generation: ["generation", "通った"], Agent: ["agent", "通った"], 通らない: ["decisions", "通らない"] },
 };
 
 export const invariants = {
   "使えるようになったら、初期設定中には戻らない": (before: AiSettings, after: AiSettings) => before.status === "初期設定中" || after.status !== "初期設定中",
+  "使えるのは、3 つとも設定してあるときだけ": (settings: AiSettings) => settings.status === "初期設定中" || (settings.uses.decisions !== null && settings.uses.generation !== null && settings.uses.agent !== null),
   "使えないときだけ、どの使い道でなぜかがある": (settings: AiSettings) => (settings.status === "使えない") === (settings.problem !== null),
 };
 
 export const reviewed = {
+  "unused-field:uses": "どれを使うかは呼び出し先を決めるもので、操作の可否は変えない。3 つとも設定してあるときだけ使えることを、不変条件で確かめるために読んでいる",
   "anytime:configure": "どれを使うかは、いつでも選び直せる（初期設定中・使える・使えない のどれでも）。使えないときに直すのも、これで行う",
-  "unused-field:uses": "どれを使うかは呼び出し先を決めるもので、可否は変えない（可否は段階で決まる）",
   "unused-field:problem": "どの使い道で・なぜ通らないかは、ユーザーに見せるもので、可否は変えない。使えないときだけあることを、不変条件で確かめるために読んでいる",
 };
 
@@ -85,18 +95,21 @@ export const scenarios = {
   "3 つとも設定したら、アプリを使えるようになる": [
     { do: initial, by: "アプリ", expect: { status: "初期設定中" } },
     { do: configure, by: "ユーザー", input: "通らない", denied: "認証を確かめて通ったときだけ" },
-    { do: configure, by: "アプリ", input: "まだ足りない", denied: "ユーザーだけ" },
-    { do: configure, by: "ユーザー", input: "まだ足りない", expect: { status: "初期設定中" } },
+    { do: configure, by: "アプリ", input: "Decisions", denied: "ユーザーだけ" },
+    { do: configure, by: "ユーザー", input: "Decisions", expect: { status: "初期設定中" } },
     { do: reject, by: "アプリ", denied: "使えるときだけ" },
-    { do: configure, by: "ユーザー", input: "最後の 1 つ", expect: { status: "使える" } },
+    { do: configure, by: "ユーザー", input: "Generation", expect: { status: "初期設定中" } },
+    { do: configure, by: "ユーザー", input: "Agent", expect: { status: "使える" } },
   ],
   "どれかの認証が通らなくなったら、直すまでアプリ全体を使えない": [
     { do: initial, by: "アプリ" },
-    { do: configure, by: "ユーザー", input: "最後の 1 つ" },
+    { do: configure, by: "ユーザー", input: "Decisions" },
+    { do: configure, by: "ユーザー", input: "Generation" },
+    { do: configure, by: "ユーザー", input: "Agent" },
     { do: reject, by: "ユーザー", denied: "アプリだけ" },
     { do: reject, by: "アプリ", expect: { status: "使えない", problem: { use: "Decisions" } } },
     { do: reject, by: "アプリ", denied: "使えるときだけ" },
-    { do: configure, by: "ユーザー", input: "最後の 1 つ", expect: { status: "使える", problem: null } },
+    { do: configure, by: "ユーザー", input: "Decisions", expect: { status: "使える", problem: null } },
   ],
   "設定を始めるのはアプリだけ": [{ do: initial, by: "ユーザー", denied: "アプリだけ" }],
 };

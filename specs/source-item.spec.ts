@@ -3,7 +3,9 @@ import type { Activity, Removal } from "./activity.value.ts";
 import type { Snapshot } from "./snapshot.value.ts";
 
 /**
- * Source Item（Source から届いた 1 件。PR・Issue・メールのスレッド・Slack の会話・予定など）。外の世界の写し（事実）で、Task のことは知らない。
+ * Source Item
+ *
+ * Source から届いた 1 件。PR・Issue・メールのスレッド・Slack の会話・予定など）。外の世界の写し（事実）で、Task のことは知らない。
  * 届いた事実が、どの Task についての事実かは、振り分け（routing）が決める。1 つの Source Item を、いくつの Task が持ってもよい。
  * Source Item は、Source での状態（開いている・マージ済み など）を正規化して持たない。状態は Source の言葉で事実の行に書き、持っている Task が変化を受け取って、Task の言葉（Action Item が果たされた・もう要らない・やり直す）に置き換える。
  */

@@ -8,6 +8,7 @@ import { ensure } from "@yutaura/live-spec";
  * Agent は外に書き込まない（ADR-0012・0013）。書き込みは、許可しないコマンド・渡さない認証情報・sandbox の 3 つを重ねて止める。
  * merge を承認して走る処理は、merge 自体が目的なので Agent Run ではない（追う項目が片付いても知らせない。ADR-0016）。
  */
+/** 止まった・取り消した理由（StopReason）は状態に持たず、作業の記録に残す（ユーザーが止めたのか、やらなくなって止まったのかは記録で分かる。理由ごとに状態を分けると、状態遷移図が読めなくなるため） */
 export type AgentRun = {
   /** 作業の段階 */
   status: Status;
@@ -19,8 +20,8 @@ export type AgentRun = {
   tools: Tools;
   /** 作業を見分ける ID */
   id: string;
-  /** 何の作業か */
-  kind: Kind;
+  /** 何の作業か（頼んだ言葉。見せるための値で、できることは渡す道具・どう始まったか・追う項目があるかで決まるので、作業の種類そのものは状態に持たない） */
+  request: string;
   /** やる Action Item（Action Item をやる作業のとき。Task は会話が持つ） */
   actionItemId: string | null;
   /** どの会話で動いたか（新しい会話を始めても、前の作業がどの会話だったかを追えるように） */
@@ -33,8 +34,6 @@ export type AgentRun = {
   notified: boolean;
   /** 結果（回答・報告・差分）。終わったときだけ */
   result: string | null;
-  /** 終わらなかった理由 */
-  stopReason: StopReason | null;
 };
 
 export type Kind = "質問に答える" | "Action Item をやる（読むだけ）" | "Action Item をやる（直す）" | "依存の更新を調べる" | "PR を直す" | "コンフリクトを直す";
@@ -92,27 +91,31 @@ export function initial(actor: Actor, kind: Kind, task: "開いている" | "開
     status: "待ち行列",
     tools: FIXES.includes(kind) ? "直す" : "読むだけ",
     id: "ar1",
-    kind,
+    request: "PR #42 を直す",
     actionItemId: FROM_ITEM.includes(kind) ? "a2" : null,
     sessionId: "s1",
     trigger: FROM_ITEM.includes(kind) ? "Action Item から" : "ユーザーが頼んだ",
     subjectFingerprint: kind === "質問に答える" ? null : "abc1234",
     notified: false,
     result: null,
-    stopReason: null,
   };
 }
 
 /** 順番が来たので、Claude Code を起動する */
-export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "続けられない", task: "開いている" | "開いていない"): AgentRun {
+export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "続けられない", task: "開いている" | "開いていない", others: "ほかに動いている作業はない" | "ほかに動いている作業がある"): AgentRun {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(run.status === "待ち行列", "待ち行列のときだけ");
+  ensure(others === "ほかに動いている作業はない", "この Task で、ほかに動いている作業がないときだけ（同時に動くのは 1 つまで）");
   ensure(thread === "続けられる", "会話を続けられるときだけ（続けられないなら、先に新しい会話を始める）");
   ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ち・終わった Task では始めない）");
   return { ...run, status: "やっている" };
 }
 
-/** やり遂げた（回答・報告・差分を残す。外への書き込みが要るなら、Write を頼む） */
+/**
+ * やり遂げた
+ *
+ * 回答・報告・差分を残す。外への書き込みが要るなら、Write を頼む
+ */
 export function succeed(run: AgentRun, actor: Actor): AgentRun {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(run.status === "やっている", "やっているときだけ");
@@ -120,17 +123,17 @@ export function succeed(run: AgentRun, actor: Actor): AgentRun {
 }
 
 /** うまくいかなかった・アプリを閉じて止まった（判断中に閉じたときも） */
-export function fail(run: AgentRun, actor: Actor, reason: "うまくいかなかった" | "アプリを閉じた" | "作業場所が消えた"): AgentRun {
+export function fail(run: AgentRun, actor: Actor, _reason: "うまくいかなかった" | "アプリを閉じた" | "作業場所が消えた"): AgentRun {
   ensure(actor.kind === "agent" || actor.kind === "app", "AI かアプリだけ");
   ensure(run.status === "やっている" || run.status === "判断中", "やっている・判断中のときだけ");
-  return { ...run, status: "止まった", stopReason: reason };
+  return { ...run, status: "止まった" };
 }
 
 /** ユーザーが止める（画面では、注意のダイアログで確かめてから止める） */
 export function stop(run: AgentRun, actor: Actor): AgentRun {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(run.status === "やっている" || run.status === "判断中", "やっている・判断中のときだけ");
-  return { ...run, status: "止まった", stopReason: "ユーザーが止めた" };
+  return { ...run, status: "止まった" };
 }
 
 /**
@@ -151,7 +154,7 @@ export function decide(run: AgentRun, actor: Actor, answer: "やめる" | "続�
   ensure(actor.kind === "agent", "AI だけ");
   ensure(run.status === "判断中", "判断中のときだけ");
   if (answer === "続ける") return { ...run, status: "やっている" };
-  return { ...run, status: "止まった", stopReason: answer === "やめる" ? "追う項目が片付いたのでやめた" : "決まった形の答えが返らない" };
+  return { ...run, status: "止まった" };
 }
 
 /**
@@ -159,17 +162,21 @@ export function decide(run: AgentRun, actor: Actor, answer: "やめる" | "続�
  *
  * アプリがやめる。ユーザーが止めたのか、やらなくなって止まったのかを、理由で分ける。待ち行列なら取り消す。やっていた作業は、途中までの報告を残す（ユーザーが頼んだ作業が、知らないうちに跡形もなく消えないように）。
  */
-export function withdraw(run: AgentRun, actor: Actor, reason: "やらなくなった" | "ユーザーが済ませた"): AgentRun {
+export function withdraw(run: AgentRun, actor: Actor, _reason: "やらなくなった" | "ユーザーが済ませた"): AgentRun {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(run.status === "待ち行列" || run.status === "やっている" || run.status === "判断中", "終わっていないときだけ");
-  return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった", stopReason: reason };
+  return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった" };
 }
 
-/** 待ち行列のうちに取り消す（追う項目が片付いた・ユーザーが取り消した。判断させずに取り消す。ADR-0016） */
-export function cancel(run: AgentRun, actor: Actor, reason: "ユーザーが取り消した" | "追う項目が片付いたので取り消した"): AgentRun {
+/**
+ * 待ち行列のうちに取り消す
+ *
+ * 追う項目が片付いた・ユーザーが取り消した。判断させずに取り消す。ADR-0016
+ */
+export function cancel(run: AgentRun, actor: Actor, _reason: "ユーザーが取り消した" | "追う項目が片付いたので取り消した"): AgentRun {
   ensure(actor.kind === "app" || actor.kind === "user", "アプリかユーザーだけ");
   ensure(run.status === "待ち行列", "待ち行列のときだけ");
-  return { ...run, status: "取り消した", stopReason: reason };
+  return { ...run, status: "取り消した" };
 }
 
 export const inputs = {
@@ -183,7 +190,7 @@ export const inputs = {
     "Task が閉じた": ["質問に答える", "開いていない"],
   },
   fail: { うまくいかなかった: ["うまくいかなかった"], アプリを閉じた: ["アプリを閉じた"], 作業場所が消えた: ["作業場所が消えた"] },
-  start: { 続けられる: ["続けられる", "開いている"], 続けられない: ["続けられない", "開いている"], "Task が閉じた": ["続けられる", "開いていない"] },
+  start: { 続けられる: ["続けられる", "開いている", "ほかに動いている作業はない"], 続けられない: ["続けられない", "開いている", "ほかに動いている作業はない"], "Task が閉じた": ["続けられる", "開いていない", "ほかに動いている作業はない"] , ほかが動いている: ["続けられる", "開いている", "ほかに動いている作業がある"] },
   withdraw: { やらなくなった: ["やらなくなった"], 済ませた: ["ユーザーが済ませた"] },
   cancel: { ユーザー: ["ユーザーが取り消した"], 片付いた: ["追う項目が片付いたので取り消した"] },
   decide: { やめる: ["やめる"], 続ける: ["続ける"], 答えが返らない: ["答えが返らない"] },
@@ -193,19 +200,18 @@ const FINISHED: Status[] = ["終わった", "止まった", "取り消した"];
 
 export const invariants = {
   "終わった作業は、もう変わらない": (before: AgentRun, after: AgentRun) => !FINISHED.includes(before.status) || before.status === after.status,
-  "止まった・取り消したときだけ、理由がある": (run: AgentRun) => (run.status === "止まった" || run.status === "取り消した") === (run.stopReason !== null),
   "渡す道具は、作ったあと変わらない": (before: AgentRun, after: AgentRun) => before.tools === after.tools,
   "終わったときだけ、結果がある": (run: AgentRun) => (run.status === "終わった") === (run.result !== null),
 };
 
 export const links = [
-  { from: start, to: "task", action: "startWork", label: "Task を AI が作業中にする（待ち行列のあいだは作業中にしない）" },
-  { from: succeed, to: "task", action: "finishWork", label: "AI の作業が終わる。Action Item をやる作業なら、番が来ていればその Action Item を果たす（番が来る前なら、番が来たときに果たす）" },
+  { from: start, to: "task", action: "noteWork", label: "AI の作業が始まったことを Task の出来事に残す（作業中かは Agent Run から導いて見せる。待ち行列のあいだは作業中にしない）" },
+  { from: succeed, to: "task", action: "noteWork", label: "AI の作業が終わる。Action Item をやる作業なら、番が来ていればその Action Item を果たす（番が来る前なら、番が来たときに果たす）" },
   { from: succeed, to: "task", action: "receive", label: "成果が「AI の作業の成果」として届き、Generation が Task の言葉にする（外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足す。push の版はこの作業の元の項目）" },
-  { from: fail, to: "task", action: "stopWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
-  { from: stop, to: "task", action: "stopWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
-  { from: withdraw, to: "task", action: "stopWork", label: "やっている・判断中だったなら、AI の作業が終わったことにする（Task を終えたときは、もう作業中が外れている。Action Item は果たさない）。待ち行列で取り消したなら、cancel と同じく Task は変えない" },
-  { from: decide, to: "task", action: "stopWork", label: "やめたなら、片付いた追う項目を事実の変化として受け取り、やめた理由を変化として残す。答えが返らないなら、AI の作業が終わったことにする" },
+  { from: fail, to: "task", action: "noteWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
+  { from: stop, to: "task", action: "noteWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
+  { from: withdraw, to: "task", action: "noteWork", label: "やっている・判断中だったなら、AI の作業が終わったことにする（Action Item は果たさない）。待ち行列で取り消したなら、cancel と同じく Task は変えない" },
+  { from: decide, to: "task", action: "noteWork", label: "やめたなら、片付いた追う項目を事実の変化として受け取り、やめた理由を変化として残す。答えが返らないなら、AI の作業が終わったことにする" },
   { from: cancel, to: "task", label: "AI の作業を始めないまま終わる。追う項目が片付いたので取り消したなら、事実の変化として受け取る" },
   { from: fail, to: "agent-thread", action: "lose", label: "作業場所が消えたなら、会話を続けられなくする" },
 ];
@@ -215,12 +221,12 @@ export const scenarios = {
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: withdraw, by: "ユーザー", input: "やらなくなった", denied: "アプリだけ" },
-    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "止まった", stopReason: "やらなくなった" } },
+    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "止まった" } },
     { do: withdraw, by: "アプリ", input: "やらなくなった", denied: "終わっていないときだけ" },
   ],
   "待ち行列のうちにやらなくなったら、取り消す": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
-    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "取り消した", stopReason: "やらなくなった" } },
+    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "取り消した" } },
   ],
   "質問を頼み、Claude Code が調べて答える": [
     { do: initial, by: "ユーザー", input: "質問", expect: { status: "待ち行列", tools: "読むだけ", trigger: "ユーザーが頼んだ" } },
@@ -242,7 +248,11 @@ export const scenarios = {
   "ユーザーが自分で済ませたら、アプリが作業をやめる": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
     { do: start, by: "アプリ", input: "続けられる" },
-    { do: withdraw, by: "アプリ", input: "済ませた", expect: { status: "止まった", stopReason: "ユーザーが済ませた" } },
+    { do: withdraw, by: "アプリ", input: "済ませた", expect: { status: "止まった" } },
+  ],
+  "同じ Task で同時に動く作業は 1 つまで": [
+    { do: initial, by: "ユーザー", input: "質問" },
+    { do: start, by: "アプリ", input: "ほかが動いている", denied: "この Task で、ほかに動いている作業がないときだけ（同時に動くのは 1 つまで）" },
   ],
   "続けられない会話では、作業を始めない": [
     { do: initial, by: "ユーザー", input: "質問" },
@@ -269,7 +279,7 @@ export const scenarios = {
     { do: initial, by: "ユーザー", input: "PR を直す" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: interrupt, by: "アプリ" },
-    { do: decide, by: "AI", input: "やめる", expect: { status: "止まった", stopReason: "追う項目が片付いたのでやめた" } },
+    { do: decide, by: "AI", input: "やめる", expect: { status: "止まった" } },
   ],
   "判断中にアプリを閉じたら、止まったことにする": [
     { do: initial, by: "ユーザー", input: "PR を直す" },
@@ -281,7 +291,7 @@ export const scenarios = {
     { do: initial, by: "ユーザー", input: "PR を直す" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: interrupt, by: "アプリ" },
-    { do: decide, by: "AI", input: "答えが返らない", expect: { status: "止まった", stopReason: "決まった形の答えが返らない" } },
+    { do: decide, by: "AI", input: "答えが返らない", expect: { status: "止まった" } },
   ],
   "待ち行列のうちに追う項目が片付いたら、判断させずに取り消す": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
@@ -293,13 +303,13 @@ export const scenarios = {
     { do: initial, by: "ユーザー", input: "質問" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: stop, by: "AI", denied: "ユーザーだけ" },
-    { do: stop, by: "ユーザー", expect: { status: "止まった", stopReason: "ユーザーが止めた" } },
+    { do: stop, by: "ユーザー", expect: { status: "止まった" } },
     { do: succeed, by: "AI", denied: "やっているときだけ" },
   ],
   "アプリを閉じたら、止まったことにする": [
     { do: initial, by: "ユーザー", input: "質問" },
     { do: start, by: "アプリ", input: "続けられる" },
-    { do: fail, by: "アプリ", input: "アプリを閉じた", expect: { status: "止まった", stopReason: "アプリを閉じた" } },
+    { do: fail, by: "アプリ", input: "アプリを閉じた", expect: { status: "止まった" } },
   ],
   "作業を進めるのは決まった人だけ": [
     { do: initial, by: "AI", input: "Action Item（読むだけ）", denied: "ユーザーか、Action Item から始めるアプリだけ" },
@@ -324,6 +334,10 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "ignores-input:fail": "止まった・取り消した理由は、状態に持たず作業の記録に残す（ユーザーが止めたのか、やらなくなったのかは記録で分かる）。どの理由でも、できることは同じ",
+  "ignores-input:withdraw": "止まった・取り消した理由は、状態に持たず作業の記録に残す（ユーザーが止めたのか、やらなくなったのかは記録で分かる）。どの理由でも、できることは同じ",
+  "ignores-input:cancel": "止まった・取り消した理由は、状態に持たず作業の記録に残す（ユーザーが止めたのか、やらなくなったのかは記録で分かる）。どの理由でも、できることは同じ",
+  "indistinguishable-example:decide:やめる,答えが返らない": "どちらも作業を止める。やめた（追う項目が片付いた）のか、答えが返らなかったのかは、作業の記録に残す。片付いた追う項目は、事実の変化として Task が受け取る",
   "unused-field:result": "結果（回答・報告・差分）はユーザーに見せるもので、操作の可否は変えない。終わったときだけあることを、不変条件で確かめるために読んでいる",
   "same-for-similar-actors:fail": "うまくいかなかったことには Claude Code が、アプリを閉じて止まったことにはアプリが気づく。どちらでも止まったになり、理由で分ける",
   "same-for-similar-actors:cancel": "待ち行列の作業は、追う項目が片付いたらアプリが、要らなくなったらユーザーが取り消す。どちらでも取り消したになる",
