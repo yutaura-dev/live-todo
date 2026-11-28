@@ -157,7 +157,7 @@ export function decide(run: AgentRun, actor: Actor, answer: "やめる" | "続�
 /**
  * もう要らなくなった作業をやめる（Action Item をやらなくなった・ユーザーが自分で済ませた・Task をやらないことにした）
  *
- * アプリがやめる。ユーザーが止めたのか、やらなくなって止まったのかを、理由で分ける。待ち行列なら取り消す。
+ * アプリがやめる。ユーザーが止めたのか、やらなくなって止まったのかを、理由で分ける。待ち行列なら取り消す。やっていた作業は、途中までの報告を残す（ユーザーが頼んだ作業が、知らないうちに跡形もなく消えないように）。
  */
 export function withdraw(run: AgentRun, actor: Actor, reason: "やらなくなった" | "ユーザーが済ませた"): AgentRun {
   ensure(actor.kind === "app", "アプリだけ");
