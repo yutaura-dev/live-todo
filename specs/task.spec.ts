@@ -28,6 +28,8 @@ export type Task = {
   plan: Plan | null;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
+  /** 初めて開いた日時（まだ開いていなければ null で、新着の印を出す） */
+  firstOpenedAt: string | null;
   /** 作った日時・最後に変えた日時 */
   createdAt: string;
   updatedAt: string;
@@ -129,6 +131,7 @@ export const initial: Task = {
   brief: null,
   plan: null,
   sourceItemIds: [],
+  firstOpenedAt: null,
   createdAt: "2026-11-28T00:00:00Z",
   updatedAt: "2026-11-28T00:00:00Z",
 };
@@ -138,7 +141,6 @@ export const links = [
   { from: dismiss, to: "completion-effect", action: "withdraw", label: "やらないことにしたら、まだ頼んでいない完了したときにすることを取りやめる" },
   { from: detachFact, to: "completion-effect", action: "withdraw", label: "外した事実に書き込む完了したときにすることは、Decisions を通さずに取りやめる（完了待ちでは計画を直せないので、先に外す）" },
   { from: detachFact, to: "task", action: "revisePlan", label: "計画を見直す必要があるかを Decisions で軽く判定し、要るなら AI が計画を直す（外れた事実への、完了したときにすることも）" },
-  { from: triage, to: "task-change", label: "列が決まった（要確認・todo）ことを、変化として残す" },
   { from: move, to: "task-change", label: "列が変わったことを、変化として残す" },
   { from: complete, to: "task-change", label: "終わったこと（列・どう終わったか）を、変化として残す" },
   { from: dismiss, to: "task-change", label: "やらないことにした（列・どう終わったか）を、変化として残す" },
