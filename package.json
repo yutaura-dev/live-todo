@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "4.1.5",
+    "@storybook/react-vite": "10.6.9",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
@@ -24,6 +25,7 @@
     "electron-builder": "^26.18.0",
     "electron-vite": "6.0.0",
     "happy-dom": "^21.0.4",
+    "storybook": "10.6.9",
     "tsx": "4.23.15",
     "typescript": "^7.0.2",
     "vite": "8.3.8",
@@ -45,7 +47,9 @@
     "app:build": "electron-vite build",
     "app:start": "electron-vite preview",
     "spec": "live-spec specs/ --serve --tests src",
-    "spec:check": "live-spec check specs/ --tests src"
+    "spec:check": "live-spec check specs/ --tests src",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "storybook:build": "storybook build -o storybook-static"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",
