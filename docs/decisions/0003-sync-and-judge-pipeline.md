@@ -56,3 +56,11 @@ live-todo は 8 つの Source から Task を作り、状況の変化に追従�
 
 - [ADR-0004: Epic とカスタムラベル](0004-epic-and-custom-labels.md)
 - Jev（TypeSafe）、OpenAI Decisions API（`gpt-6-luna`）、Gemini Decisions API（`gemini-decision-1`）。API の詳細は実装時に公式ドキュメントで確認する
+
+## のちの見直し（2026-11-28）
+
+振る舞いの正本は specs/ にある（ADR-0015）。次の点は、のちの ADR と spec で置き換えた。
+
+- LLM Profile と「Decisions がなければ structured output で判定する」は、AI Settings（PC に 1 つ、使い道ごとに Decisions・Generation・Agent）に置き換えた。Decisions が迷ったら要確認にし、別の AI に上げない（ADR-0022）
+- 届いた事実の振り分けは Routing（specs/routing.spec.ts）。迷った事実は、どの Task にも入れず「ユーザー待ち」にする
+- Task の変化は Task Activity（ADR-0021）

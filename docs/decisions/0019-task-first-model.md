@@ -130,3 +130,12 @@ ADR-0007 で Task・Source Item・Link を分け、1 つの Task に複数の So
 - [ADR-0007: Source Item と Task を別の概念として分ける](0007-separate-source-items-from-tasks.md)
 - [ADR-0014: 利用者が決めたルールは、決めたことを承認とみなして自動で当てる](0014-user-defined-gmail-rules.md)
 - [charter](../charter.md) の前提と制約
+
+## のちの見直し（2026-11-28）
+
+次の点は、のちの ADR と spec で置き換えた。
+
+- 迷った事実は、要確認の Task に入れず、どの Task にも入れない「ユーザー待ち」にする（specs/routing.spec.ts）
+- Task の変化は Task Change ではなく Task Activity（ADR-0021）。届いたものは Task Input として receive 1 つで受け取る
+- アカウントと LLM Profile の節は、AI Settings（ADR-0022）に置き換えた
+- ルールは保留中（ADR-0025）

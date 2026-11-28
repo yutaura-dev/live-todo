@@ -18,26 +18,25 @@
 | Account | Source のアカウント単位（例: 会社の Slack ワークスペース、私用の Gmail） |
 | Source Adapter | Source ごとの取得・正規化・差分検知を担う実装。共通インターフェースを持つ |
 | Source Item | Source から取得した 1 件（PR、スレッド、メール、予定など）。外の世界の写しで、Task とは別の概念（[ADR-0007](docs/decisions/0007-separate-source-items-from-tasks.md)） |
-| Activity | Source Item に起きた出来事（appeared / changed / resolved / reopened / removed）。そのままでは更新マークにならない |
+| Activity | Source Item に起きた出来事（appeared / changed / removed / restored）。変わった項目の前と後を持つ。そのままでは更新マークにならず、Task Input として Task に届く |
 | Link | Task と Source Item のつながり（その Item が Task の事実になる）。役割の区別は持たない。1 つの Item は複数の Task の事実になれるが、AI が振り分けるのは 1 つ目だけ（2 つ目以降は識別子で決まるときかユーザーが足したときだけ） |
 | Task | 自分がやること。Source の言葉ではなく自分にとっての意味（title: 何をするか、brief: 今の状況と次の一手）で持つ。手動追加の Task もある |
 | Task Activity | Task に起きた出来事（項目が変わった・AI が作業をやめた・書き込めなかった など）。Task が起きた順に足すだけで持つ。Source Item の Activity（Source の出来事）とは別 |
-| triage | Source Item の仕分け状態（pending: 未判定 / linked: Task に紐づけ済み / ignored: 対象外） |
+| 振り分け（Routing） | 届いた事実をどの Task のものかに決めること（未振り分け / 振り分けた / 対象外 / ユーザー待ち）。迷ったらどの Task にも入れずユーザー待ちにする。Task の「仕分け中」（triaging）とは別 |
 | Label / Priority | Label は AI や規則で Task に付く分類。Priority は「いつまでに手を付けるとよいか」（今すぐ・今日中・3 日以内・10 日以内・30 日以内・それより先でよい）。期日から手間を引いて規則で決め、決まらなければ Decisions が判定する |
 | Sync | ポーリングで Source の状態変化を取得し、Task に反映する処理 |
 | Agent Thread | Task ごとの AI Agent との会話履歴 |
 | Pre-work | AI がユーザーの依頼を待たずに先回りして進める作業 |
-| 定期の Task | 決まった時期（毎月 N 日など）に、決まった手順つきで作られる Task。決まりは `recurring_tasks` に持つ（[ADR-0011](docs/decisions/0011-recurring-tasks.md)） |
+| 定期の Task | 決まった時期（毎日・毎週・毎月・毎年）に、決まった手順つきで作られる Task。回は予定日で見分ける（[ADR-0011](docs/decisions/0011-recurring-tasks.md)・specs/recurring-task.spec.ts） |
 | Approval | 外部への書き込み（返信、コメント、送信など）をユーザーが承認する手続き |
-| AI Settings | アプリが使う AI の設定（PC に 1 つ）。使い道ごとに 3 つ持つ: Decisions（分類・確率付きの判定。安い）・Generation（文章を伴う Structured Output。Task の説明・計画を作る）・Agent（Claude Code・Codex などで複雑な作業・調査をする）。安い順に上げていき、3 つは独立して選べる。3 つとも使えないとアプリは使えない |
-| Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる |
-| 未分類 | どの Epic にも入っていない Task |
+| AI Settings | アプリが使う AI の設定（PC に 1 つ）。使い道ごとに 3 つ持つ: Decisions（分類・確率付きの判定。安い）・Generation（文章を伴う Structured Output。Task の説明・計画を作る）・Agent（Claude Code・Codex などで複雑な作業・調査をする）。役割が違うだけで、確かさで上げていかない（Decisions が迷ったら要確認にする。ADR-0022）。3 つは独立して選べ、3 つとも使えないとアプリは使えない |
+| Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる（保留中。[ADR-0024](docs/decisions/0024-put-epic-on-hold.md)） |
+| 未分類 | どの Epic にも入っていない Task（Epic とともに保留中） |
 | 更新マーク | ユーザーが最後に Task を見たあとに、ユーザー以外が起こした Task Activity がある Task に付く目印。Source 側の変化ではなく、Task の出来事から導く。まだ一度も見ていない Task は「新着」で見せる |
 | Decisions provider | 確率付きの判定 API（OpenAI Decisions / Azure OpenAI Decisions / Microsoft-Decision / Jev / Gemini Decisions） |
-| 要確認 | 判定の確率が閾値の中間、または refusal だった Task の置き場 |
+| 要確認 | Task の列の 1 つ。AI の判定が閾値の中間・refusal・想定外の応答だった Task を置き、ユーザーが確かめる（fail closed） |
 | SnapshotDiffer | 全件取得の結果を前回の fingerprint と比べて SourceChange に変換する共通処理 |
-| Watcher | 見張りの共通部分。WatchProvider（見張る対象の一覧）と Condition（困った状態か）から Condition Item を作る（[ADR-0008](docs/decisions/0008-watchers.md)） |
-| Condition Item | 条件が成り立っている間は open、解消したら resolved になる Source Item。source 名は `<source>:watch` |
+| Watcher | 見張りの共通部分（[ADR-0008](docs/decisions/0008-watchers.md)）。見張る対象（Watch Target）ごとに、待つ条件（Condition）が成り立ったかを確かめ、待っている Action Item に知らせる。困った状態（PR の conflict など）は、事実の行として Source Item に載せる |
 
 ## AI 協働ルール
 

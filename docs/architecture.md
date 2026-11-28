@@ -47,6 +47,11 @@ Source Item ──（Task の事実。つながりに役割の区別はない）
 | 優先度は「いつまでに手を付けるとよいか」の 6 ラベルで、期日・手間・待つ見込みから決める | 優先度はまだない |
 | Epic は保留（ADR-0024） | ADR-0004 の Epic・未分類のまとまりの判定 |
 | 自動でやってよい範囲（ADR-0023）・Completion Effect・定期の Task の回（予定日） | まだない（定期の Task は毎月だけで、最後に作った月で数える） |
+| ルールは保留（ADR-0025） | `task_rule_runs`・`gmail-rule-runner.ts` のルール |
+| 事実は uri（アカウントの origin にパスを続けたもの）だけで見分ける | `(source, external_id)` で一意 |
+| Activity は appeared / changed / removed / restored で、状態は事実の行で持つ | resolved / reopened |
+| 見張りは、待つ条件を見張って Action Item に知らせ、困った状態は事実の行に載せる | Condition Item（`<source>:watch`） |
+| 迷った振り分けは、どの Task にも入れずユーザー待ち | 要確認の Task にする |
 
 同期の流れ（`src/core/sync/sync-source.ts`。今の実装）:
 

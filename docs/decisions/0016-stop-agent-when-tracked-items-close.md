@@ -45,3 +45,11 @@
 - [ADR-0007](0007-separate-source-items-from-tasks.md)
 - [ADR-0013](0013-claude-code-reads-broadly.md)
 - `specs/task-status.spec.ts` の「知らせを受けて AI が作業をやめる」「待ち行列の処理を取り消す」
+
+## のちの見直し（2026-11-28）
+
+specs/agent-run.spec.ts で次のように見直した。
+
+- AI が作業中かは、Task の agent_running ではなく Agent Run（Agent Thread）の段階で決まる
+- 追う項目が片付いて Claude Code が作業をやめても、Task の列は変えない。片付いたことは事実の変化として Task が受け取り（receive）、Task の言葉に置き換える
+- Task を終える・やらないことにするほうを、この判断より先にする（作業はアプリがやめ、途中までの報告を残す）

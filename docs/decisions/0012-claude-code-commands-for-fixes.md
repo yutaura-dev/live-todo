@@ -45,3 +45,7 @@
 ## References
 
 - [ADR-0010](0010-slack-session-and-saved-api.md)（Slack と同じく、外部への書き込みは承認を経る）
+
+## のちの見直し（2026-11-28）
+
+specs/agent-run.spec.ts で、直す道具（Edit・Write・Bash）を渡すのは、PR を直す・コンフリクトを直す・直す Action Item をやるときに広げた。認証情報を渡さないこと、push は承認を経た書き込み（Write）でだけ行うことは変わらない。

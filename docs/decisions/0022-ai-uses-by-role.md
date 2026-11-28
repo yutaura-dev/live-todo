@@ -49,3 +49,7 @@
 - [ADR-0003: 同期と判定のパイプライン](0003-sync-and-judge-pipeline.md)（判定の fallback を置き換える）
 - [ADR-0013](0013-claude-code-reads-broadly.md)
 - specs/ai-settings.spec.ts・specs/task.spec.ts
+
+## のちの見直し（2026-11-28）
+
+「Agent に頼むのは Action Item からだけ」は、アプリが Agent を始めるときの決まり。ユーザーは直接頼める（質問に答える・PR を直す・コンフリクトを直す。specs/agent-run.spec.ts）。
