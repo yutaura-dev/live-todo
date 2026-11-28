@@ -1,5 +1,6 @@
 import { ensure } from "@yutaura/live-spec";
 import type { ActionItem } from "./action-item.spec.ts";
+import type { CompletionEffect } from "./completion-effect.spec.ts";
 import type { Arrangement } from "./action-definition.value.ts";
 
 /**
@@ -39,8 +40,8 @@ export type Task = {
 export type Plan = {
   /** 並べ方 */
   type: Arrangement;
-  /** 並べる Action Item・入れ子の並び・分かれ道で差し込んだ枝 */
-  items: Array<ActionItem | Plan | Branch>;
+  /** 並べる Action Item・入れ子の並び・分かれ道で差し込んだ枝・完了したときにすること */
+  items: Array<ActionItem | Plan | Branch | CompletionEffect>;
 };
 
 /** 分かれ道で選んで差し込んだ枝 */
