@@ -14,12 +14,16 @@ import { confirmCompletion, finishCompletion, noteEffects, receive, type Task } 
 import { approve, cancel, fail, interrupt, requestWrite, settle, succeed, Write } from "../../../domain/write/write.js";
 import { DocumentStore, documentsOf } from "../../../store/document-store.js";
 import { type StoreCorrupted, TaskStore } from "../../../store/task-store.js";
-import type { Reply, WriteView } from "../../shared/api.js";
+import type { AutonomyView, Reply, WriteView } from "../../shared/api.js";
 import { Planner } from "../plan/planner.js";
 import { TaskIds } from "../task-service.js";
-import { WriteProvider } from "./write-provider.js";
+import { WRITE_OPERATIONS, WriteProvider } from "./write-provider.js";
+import { allowed, AutonomyPolicy, clearOperationLimit, type Level, limitOf, setOperationLimit } from "../../../domain/autonomy/autonomy-policy.js";
+import { SourceItemStore } from "../../../store/source-item-store.js";
 
 export const writes = documentsOf("write", Write);
+// PC に 1 つなので、決まった ID で 1 件だけ持つ
+const policies = documentsOf("autonomy-policy", Schema.Struct({ id: Schema.String, policy: AutonomyPolicy }));
 
 export type ShownEffect = { readonly id: string; readonly checked: boolean; readonly target: string; readonly operation: string };
 /** チェックリストに出すもの（まだ頼んでいない・書き込めなかったもの） */
@@ -47,6 +51,11 @@ export class WriteService extends Context.Service<
     confirmCompletion(taskId: string, shown: ReadonlyArray<ShownEffect>): Effect.Effect<Reply<null>, StoreCorrupted>;
     /** チェックリストの ☑ を付ける・外す、書き込めなかったものをもう一度頼む（押したことが承認） */
     effectAction(taskId: string, effectId: string, action: "check" | "uncheck" | "retry"): Effect.Effect<Reply<null>, StoreCorrupted>;
+    /** 自動でやってよい範囲（操作ごとの上限） */
+    autonomy(): Effect.Effect<ReadonlyArray<AutonomyView>, StoreCorrupted>;
+    setLimit(operation: string, limit: Level | null): Effect.Effect<Reply<null>, StoreCorrupted>;
+    /** 番が来た「自動でやる」書き込みの Action Item のうち、範囲に入るものを、ユーザーが範囲を決めたことを承認として書き込む */
+    autoRun(): Effect.Effect<ReadonlyArray<string>, StoreCorrupted>;
     /** 起動したとき、書き込み中のまま残っていた書き込みを、やり直さずに「書けたか分からない」から確かめる */
     recover(): Effect.Effect<void, StoreCorrupted>;
   }
@@ -59,6 +68,7 @@ export class WriteService extends Context.Service<
       const planner = yield* Planner;
       const ids = yield* TaskIds;
       const docs = yield* DocumentStore;
+      const items = yield* SourceItemStore;
 
       const viewOf = (write: Write) =>
         Effect.gen(function* () {
@@ -249,6 +259,79 @@ export class WriteService extends Context.Service<
           return { ok: true, value: null } as const;
         });
 
+      const policyOf = Effect.map(policies.find("current"), (found): AutonomyPolicy => (Option.isSome(found) ? found.value.policy : { limits: [] }));
+
+      const autonomyOf = () =>
+        Effect.gen(function* () {
+          const policy = yield* policyOf;
+          return WRITE_OPERATIONS.map((op) => ({ operation: op.name, label: op.label, level: op.level, limit: limitOf(policy, op.name) === "決めていない" ? null : (limitOf(policy, op.name) as Level) }));
+        });
+
+      const setLimitOf = (operation: string, limit: Level | null) =>
+        Effect.gen(function* () {
+          if (!WRITE_OPERATIONS.some((op) => op.name === operation)) return { ok: false, reason: "その操作はありません" } as const;
+          const policy = yield* policyOf;
+          const next = yield* (limit === null ? clearOperationLimit(policy, user, operation) : setOperationLimit(policy, user, operation, limit)).pipe(Effect.orDie);
+          yield* policies.save({ id: "current", policy: next });
+          return { ok: true, value: null } as const;
+        });
+
+      const autoRunOf = () =>
+        Effect.gen(function* () {
+          const policy = yield* policyOf;
+          const touched: string[] = [];
+          for (const task of (yield* tasks.listForBoard()).filter((t) => t.status === "やること" && t.plan !== null)) {
+            const own = new Set((yield* items.findMany(task.sourceItemIds)).map((fact) => fact.uri));
+            for (const item of itemsOf(task.plan!)) {
+              const how = item.definition.how;
+              if (how.type !== "write" || how.trigger !== "auto" || item.status !== "まだ" || turnOf(task.plan!, item.id) !== "番が来ている") continue;
+              const level = WRITE_OPERATIONS.find((op) => op.name === how.operation)?.level ?? "外への書き込み（本番）";
+              const limit = limitOf(policy, how.operation);
+              const decision = allowed(level, limit, own.has(how.subjectUri) ? "その Task の事実そのもの" : "ほかの対象（同じアカウントでも）");
+              if (decision !== "自動でやる") continue;
+              const earlier = (yield* writes.all()).filter((w) => w.requestedBy.type === "actionItem" && w.requestedBy.taskId === task.id && w.requestedBy.actionItemId === item.id);
+              const params = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(how.paramsJson).pipe(Effect.orElseSucceed(() => ({})));
+              const inspection = yield* provider.inspect(how.subjectUri, how.operation, params);
+              const requested = yield* requestWrite(
+                {
+                  id: yield* ids.next,
+                  subject: { uri: how.subjectUri },
+                  place: null,
+                  operation: how.operation,
+                  params,
+                  version: inspection.version,
+                  summary: inspection.summary,
+                  requestedBy: { type: "actionItem", taskId: task.id, actionItemId: item.id },
+                },
+                app,
+                {
+                  way: "Action Item",
+                  item: "番が来ていて、まだ",
+                  sameAsDefinition: true,
+                  openWrite: earlier.some((w) => OPEN_STAGES.has(w.stage)),
+                  policy: decision,
+                  // 計画を立てたときの版を Action Item がまだ持たないので、版を持つ操作は確かめられないとして自動では書かない（fail closed）
+                  planVersion: inspection.version === null ? "計画の版のまま" : "変わった",
+                  taskColumn: "やること",
+                  trigger: how.trigger,
+                  autoTried: earlier.some((w) => w.approval?.by === "自動でやってよい範囲"),
+                },
+                inspection.ready,
+              ).pipe(Effect.option);
+              if (Option.isNone(requested) || requested.value.approval === null) continue;
+              // あとで範囲を変えても、なぜ書き込んだかを追えるよう、そのときの操作と上限を残す（write.spec）
+              const approved: Write = { ...requested.value, approval: { ...requested.value.approval, policy: { operation: how.operation, limit: limit === "決めていない" ? "ローカルの書き込み" : limit } } };
+              yield* writes.save(approved);
+              const outcome = yield* provider.execute(approved.subject.uri, approved.operation, approved.params, approved.version);
+              const done = outcome.ok ? yield* Effect.orDie(succeed(approved, { kind: "target" })) : yield* Effect.orDie(fail(approved, { kind: "target" }, outcome.kind, outcome.message));
+              yield* writes.save(done);
+              yield* afterWrite(done);
+              touched.push(task.id);
+            }
+          }
+          return touched;
+        });
+
       const recover = () =>
         Effect.gen(function* () {
           for (const write of (yield* writes.all()).filter((w) => w.stage === "書き込み中")) {
@@ -273,6 +356,9 @@ export class WriteService extends Context.Service<
         approve: (id) => withDocs(approveOne(id)),
         cancel: (id) => withDocs(cancelOne(id)),
         recover: () => withDocs(recover()),
+        autonomy: () => withDocs(autonomyOf()),
+        setLimit: (operation, limit) => withDocs(setLimitOf(operation, limit)),
+        autoRun: () => withDocs(autoRunOf()),
         confirmCompletion: (taskId, shown) => withDocs(confirmCompletionOf(taskId, shown)),
         effectAction: (taskId, effectId, action) => withDocs(effectActionOf(taskId, effectId, action)),
       });

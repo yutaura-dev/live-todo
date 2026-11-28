@@ -48,7 +48,7 @@ const planRows: NonNullable<TaskView["plan"]> = [
   { kind: "item", id: "a3", title: "PR を merge する", depth: 0, turn: "番が来ている", completes: true, how: "write", options: [], chosen: null, added: false },
 ];
 
-const emptyInbox: InboxView = { proposals: [], undecided: [], accounts: [], writes: [] };
+const emptyInbox: InboxView = { proposals: [], undecided: [], accounts: [], writes: [], autonomy: [] };
 
 function fakeApi(
   cards: BoardCard[],
@@ -237,6 +237,7 @@ const inboxWith: InboxView = {
   undecided: [{ ...fact, id: "s2", title: "週次の連絡" }],
   accounts: [{ id: "github-work", label: "会社の GitHub", origin: "github://me@github.com", status: "つないでいる", problem: null, secret: "LIVE_TODO_SECRET_GITHUB_WORK_TOKEN" }],
   writes: [],
+  autonomy: [],
 };
 
 describe("提案", () => {
@@ -390,5 +391,18 @@ describe("完了待ち", () => {
     const list = await openWaiting(api);
     fireEvent.click(within(list).getByRole("button", { name: "もう一度頼む" }));
     await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "EffectAction", taskId: "t3", effectId: "ce2", action: "retry" }]));
+  });
+});
+
+describe("自動でやってよい範囲", () => {
+  it("操作ごとに、どの段まで自動でやるかを選ぶと、上限を決める操作を送る", async () => {
+    const inbox: InboxView = { ...emptyInbox, autonomy: [{ operation: "github.merge", label: "PR を merge する", level: "外への書き込み（本番）", limit: null }] };
+    const { api, inboxSent } = fakeApi(cards, undefined, {}, inbox);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: "設定" }));
+    const select = await screen.findByLabelText("PR を merge する");
+    assert.strictEqual((select as HTMLSelectElement).value, "");
+    fireEvent.change(select, { target: { value: "外への書き込み（本番）" } });
+    await waitFor(() => assert.deepStrictEqual(inboxSent, [{ _tag: "SetOperationLimit", operation: "github.merge", limit: "外への書き込み（本番）" }]));
   });
 });

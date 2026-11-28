@@ -3,6 +3,7 @@ import { DateTime, Effect, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { fromDrafts } from "../../../domain/plan/plan.js";
 import { complete, create, revisePlan } from "../../../domain/task/task.js";
+import { capture } from "../../../domain/source-item/source-item.js";
 import { effectsFact } from "../task-service.js";
 import { StoreDatabase } from "../../../store/database.js";
 import { DocumentStore } from "../../../store/document-store.js";
@@ -193,6 +194,85 @@ describe("WriteService（承認がなければ書き込まない）", () => {
         yield* service.effectAction("t1", "n2", "retry");
         assert.strictEqual((yield* taskOf).status, "終わった");
         assert.strictEqual(executed.length, 2);
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
+  describe("自動でやってよい範囲", () => {
+    const seedAuto = (subjectUri: string, ownFact = false) =>
+      Effect.gen(function* () {
+        if (ownFact) {
+          const item = yield* capture({ id: "s1", uri: subjectUri, url: null, stream: "通知", snapshot: { title: "PR", author: "alice", fact: { trusted: [], body: "" }, sourceUpdatedAt: null } }, { kind: "sync" });
+          yield* (yield* SourceItemStore).save(item, { accountId: "a", externalId: "pr42" });
+        }
+        yield* TestClock.setTime(DateTime.makeUnsafe("2026-11-28T00:00:00Z").epochMilliseconds);
+        const { plan } = fromDrafts(
+          { type: "serial", items: [{ title: "merge する", effort: "easy", due: null, completes: true, how: { type: "write", subjectUri, operation: "github.merge", paramsJson: "{}", trigger: "auto" } }] },
+          () => "a1",
+        );
+        const task = yield* revisePlan(yield* create({ id: "t1", title: "merge する", actor: { kind: "user" }, origin: "手で足した" }), { kind: "agent" }, plan);
+        yield* (yield* TaskStore).save(ownFact ? { ...task, sourceItemIds: ["s1"] } : task);
+      });
+
+    it.effect("上限を決めていない操作は、外へは自動で書き込まない", () => {
+      const { executed, layer } = layerWith({ inspect: () => ({ ready: "書き込める", version: null, summary: "merge", reason: null }) });
+      return Effect.gen(function* () {
+        yield* seedAuto("github://me@github.com/acme/app/pull/42");
+        assert.deepStrictEqual(yield* (yield* WriteService).autoRun(), []);
+        assert.deepStrictEqual(executed, []);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("上限を本番まで上げても、その Task の事実でない対象には自動で書き込まない", () => {
+      const { executed, layer } = layerWith({ inspect: () => ({ ready: "書き込める", version: null, summary: "merge", reason: null }) });
+      return Effect.gen(function* () {
+        yield* seedAuto("github://me@github.com/acme/app/pull/42");
+        const service = yield* WriteService;
+        yield* service.setLimit("github.merge", "外への書き込み（本番）");
+        assert.deepStrictEqual(yield* service.autoRun(), []);
+        assert.deepStrictEqual(executed, []);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("版を持つ操作は、計画を立てたときの版を確かめられないので、自動では書き込まない（fail closed）", () => {
+      const { executed, layer } = layerWith();
+      return Effect.gen(function* () {
+        yield* seedAuto("github://me@github.com/acme/app/pull/42");
+        const service = yield* WriteService;
+        yield* service.setLimit("github.merge", "外への書き込み（本番）");
+        assert.deepStrictEqual(yield* service.autoRun(), []);
+        assert.deepStrictEqual(executed, []);
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("範囲に入り、その Task の事実そのもので、版を持たないなら、自動で 1 回だけ書き込み、そのときの上限を残す", () => {
+      const { executed, layer } = layerWith({ inspect: () => ({ ready: "書き込める", version: null, summary: "merge", reason: null }) });
+      return Effect.gen(function* () {
+        yield* seedAuto("github://me@github.com/acme/app/pull/42", true);
+        const service = yield* WriteService;
+        yield* service.setLimit("github.merge", "外への書き込み（本番）");
+        assert.deepStrictEqual(yield* service.autoRun(), ["t1"]);
+        assert.deepStrictEqual(yield* service.autoRun(), []);
+        assert.deepStrictEqual(executed, ["github://me@github.com/acme/app/pull/42"]);
+        const [write] = yield* writes.all();
+        assert.deepStrictEqual(write?.approval?.policy, { operation: "github.merge", limit: "外への書き込み（本番）" });
+        assert.strictEqual((yield* taskOf).status, "終わった");
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("ない操作の上限は決められない", () => {
+      const { layer } = layerWith();
+      return Effect.gen(function* () {
+        assert.deepStrictEqual(yield* (yield* WriteService).setLimit("rm.rf", "調べる"), { ok: false, reason: "その操作はありません" });
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("決めた上限を、操作ごとに見せる", () => {
+      const { layer } = layerWith();
+      return Effect.gen(function* () {
+        const service = yield* WriteService;
+        yield* service.setLimit("github.merge", "外への書き込み（下書き）");
+        assert.deepStrictEqual((yield* service.autonomy()).map((row) => [row.operation, row.limit]), [["github.merge", "外への書き込み（下書き）"]]);
       }).pipe(Effect.provide(layer));
     });
   });
