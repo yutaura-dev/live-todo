@@ -171,7 +171,7 @@ export const actors: Record<string, Actor> = {
 export function triage(task: Task, actor: Actor, to: Open): Task {
   ensure(task.status === "triaging", "仕分け中のときだけ");
   ensure(to === "todo" || actor.kind === "sync", "要確認にするのは同期だけ");
-  return noted({ ...task, status: to }, actor, "変わった", [{ field: "列", before: task.status, after: to }]);
+  return noted({ ...task, status: to }, actor, "変わった", [{ field: "列", before: task.status, after: to, target: null }]);
 }
 
 /** 要確認と todo のあいだで移す */
@@ -179,7 +179,7 @@ export function move(task: Task, actor: Actor, to: Open): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
   ensure(task.work === "なし", "AI が作業中でないときだけ");
-  return noted({ ...task, status: to }, actor, "変わった", [{ field: "列", before: task.status, after: to }]);
+  return noted({ ...task, status: to }, actor, "変わった", [{ field: "列", before: task.status, after: to, target: null }]);
 }
 
 /**
@@ -192,22 +192,22 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
   ensure(isOpen(task), "要確認か todo のときだけ");
   ensure(task.work === "なし", "AI が作業中でないときだけ");
   ensure(reason !== "完了条件を満たした" || (task.status === "todo" && task.completion === "満たした"), "完了条件で終えるのは、todo で完了条件をすべて満たしたときだけ");
-  if (effects === "完了したときにすることがある") return noted({ ...task, status: "完了待ち" }, actor, "変わった", [{ field: "列", before: task.status, after: "完了待ち" }]);
+  if (effects === "完了したときにすることがある") return noted({ ...task, status: "完了待ち" }, actor, "変わった", [{ field: "列", before: task.status, after: "完了待ち", target: null }]);
   return noted({ ...task, status: "closed", closure: { outcome: "done", reason } }, actor, "変わった", [
-    { field: "列", before: task.status, after: "closed" },
-    { field: "どう終わったか", before: null, after: reason },
+    { field: "列", before: task.status, after: "closed", target: null },
+    { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
 }
 
 /** 計画の中の Action Item・完了したときにすることが進んだ（済んだ・やらない・やり直す・書き込んだ など）。だれが進めたかと一緒に出来事に残す */
 export function noteProgress(task: Task, actor: Actor, field: "Action Item の進み" | "完了したときにすること"): Task {
-  return noted(task, actor, "変わった", [{ field, before: "まだ", after: "済んだ" }]);
+  return noted(task, actor, "変わった", [{ field, before: null, after: null, target: "a2" }]);
 }
 
 /**
  * Task を見る（開く）
  *
- * 最後に見た時刻を進める。新着の印と、それまでの更新マークが消える。最後に変えた日時は変えない（Task の中身は変わらないので）。
+ * 最後に見た時刻を、開いた時刻に進める。新着の印と、それまでの更新マークが消える。開いている間に入った出来事は見たことにせず、次に開くまで更新マークが残る。最後に変えた日時は変えない（Task の中身は変わらないので）。
  */
 export function view(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
@@ -232,8 +232,8 @@ export function finishCompletion(task: Task, actor: Actor, effects: "すべて�
   ensure(task.status === "完了待ち", "完了待ちのときだけ");
   ensure(effects === "すべて済んだ", "完了したときにすることが、すべて書き込めた・外されたときだけ");
   return noted({ ...task, status: "closed", closure: { outcome: "done", reason } }, actor, "変わった", [
-    { field: "列", before: "完了待ち", after: "closed" },
-    { field: "どう終わったか", before: null, after: reason },
+    { field: "列", before: "完了待ち", after: "closed", target: null },
+    { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
 }
 
@@ -244,8 +244,8 @@ export function dismiss(task: Task, actor: Actor, reason: DismissReason, inFligh
   ensure(inFlight === "頼んだものはない", "書き込みを頼んで結果を待っている完了したときにすることがないときだけ（宙に浮かないように）");
   ensure(task.work === "なし", "AI が作業中でないときだけ");
   return noted({ ...task, status: "closed", closure: { outcome: "dismissed", reason } }, actor, "変わった", [
-    { field: "列", before: task.status, after: "closed" },
-    { field: "どう終わったか", before: null, after: reason },
+    { field: "列", before: task.status, after: "closed", target: null },
+    { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
 }
 
@@ -260,7 +260,7 @@ export function reopen(task: Task, actor: Actor, inFlight: "頼んだものは�
   ensure(inFlight === "頼んだものはない", "書き込みを頼んで結果を待っている完了したときにすることがないときだけ（宙に浮かないように）");
   ensure(actor.kind !== "agent" || task.closure?.reason !== "自分で片付けた", "自分で片付けた Task は、AI では戻らない");
   return noted({ ...task, status: "todo", closure: null, completion: task.completion === "満たした" ? "まだ" : task.completion }, actor, "変わった", [
-    { field: "列", before: task.status, after: "todo" },
+    { field: "列", before: task.status, after: "todo", target: null },
   ]);
 }
 
@@ -273,14 +273,14 @@ export function reopen(task: Task, actor: Actor, inFlight: "頼んだものは�
 export function startWork(task: Task, actor: Actor): Task {
   ensure(actor.kind !== "sync", "ユーザーか AI だけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
-  return noted({ ...task, work: "作業中" }, actor, "変わった", [{ field: "AI の作業", before: "なし", after: "作業中" }]);
+  return noted({ ...task, work: "作業中" }, actor, "変わった", [{ field: "AI の作業", before: "なし", after: "作業中", target: null }]);
 }
 
 /** AI の作業がすべて終わる */
 export function finishWork(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(task.work === "作業中", "AI が作業中のときだけ");
-  return noted({ ...task, work: "なし" }, actor, "変わった", [{ field: "AI の作業", before: "作業中", after: "終わった（下書きができた）" }], "agent-run:ar1");
+  return noted({ ...task, work: "なし" }, actor, "変わった", [{ field: "AI の作業", before: "作業中", after: "終わった（下書きができた）", target: null }], "agent-run:ar1");
 }
 
 /**
@@ -292,7 +292,7 @@ export function finishWork(task: Task, actor: Actor): Task {
 export function stopWork(task: Task, actor: Actor): Task {
   ensure(actor.kind !== "sync", "ユーザーか AI だけ");
   ensure(task.work === "作業中", "AI が作業中のときだけ");
-  return noted({ ...task, work: "なし" }, actor, "変わった", [{ field: "AI の作業", before: "作業中", after: "やめた（PR が merge された）" }], "agent-run:ar1");
+  return noted({ ...task, work: "なし" }, actor, "変わった", [{ field: "AI の作業", before: "作業中", after: "やめた（PR が merge された）", target: null }], "agent-run:ar1");
 }
 
 /**
@@ -303,7 +303,7 @@ export function stopWork(task: Task, actor: Actor): Task {
 export function revisePlan(task: Task, actor: Actor): Task {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(task.work === "作業中", "AI が作業中のときだけ");
-  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "計画", before: null, after: "新しい計画" }]);
+  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "計画", before: null, after: null, target: null }]);
 }
 
 /**
@@ -315,7 +315,7 @@ export function defineCompletionByHand(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
   ensure(task.completion === "未定", "完了条件が決まっていないときだけ");
-  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "完了条件", before: "未定", after: "まだ" }]);
+  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "完了条件", before: "未定", after: "まだ", target: null }]);
 }
 
 /**
@@ -326,7 +326,7 @@ export function defineCompletionByHand(task: Task, actor: Actor): Task {
 export function makeUndetermined(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(isOpen(task), "要確認か todo のときだけ");
-  return noted({ ...task, completion: "未定" }, actor, "変わった", [{ field: "完了条件", before: task.completion, after: "未定" }]);
+  return noted({ ...task, completion: "未定" }, actor, "変わった", [{ field: "完了条件", before: task.completion, after: "未定", target: null }]);
 }
 
 /**
@@ -337,13 +337,13 @@ export function makeUndetermined(task: Task, actor: Actor): Task {
 export function addPendingCriteria(task: Task, actor: Actor): Task {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.completion !== "未定", "完了条件が決まっているときだけ");
-  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "完了条件", before: task.completion, after: "まだ" }]);
+  return noted({ ...task, completion: "まだ" }, actor, "変わった", [{ field: "完了条件", before: task.completion, after: "まだ", target: null }]);
 }
 
 /** 完了条件をすべて満たす（最後の完了条件の Action Item が果たされた） */
 export function satisfyCompletion(task: Task, _actor: Actor): Task {
   ensure(task.completion === "まだ", "完了条件が決まっていて、まだのときだけ");
-  return noted({ ...task, completion: "満たした" }, _actor, "変わった", [{ field: "完了条件", before: "まだ", after: "満たした" }]);
+  return noted({ ...task, completion: "満たした" }, _actor, "変わった", [{ field: "完了条件", before: "まだ", after: "満たした", target: null }]);
 }
 
 /**
@@ -360,10 +360,10 @@ export function receive(task: Task, actor: Actor, input: "事実" | "書き込�
   ensure(task.status !== "triaging", "仕分けたあとだけ");
   if (outcome === "何も変わらない") return { ...task };
   if (outcome === "判定できなかった") {
-    if (isOpen(task)) return noted({ ...task, status: "needs_review" }, actor, "変わった", [{ field: "列", before: task.status, after: "needs_review" }], "activity:s1:3");
-    return noted({ ...task }, actor, "変わった", [{ field: "今の状況と次の一手", before: "終わった", after: "判定できなかった事実の変化がある。確かめる" }], "activity:s1:3");
+    if (isOpen(task)) return noted({ ...task, status: "needs_review" }, actor, "変わった", [{ field: "列", before: task.status, after: "needs_review", target: null }], "activity:s1:3");
+    return noted({ ...task }, actor, "変わった", [{ field: "今の状況と次の一手", before: "終わった", after: "判定できなかった事実の変化がある。確かめる", target: null }], "activity:s1:3");
   }
-  return noted({ ...task }, actor, "変わった", [{ field: "今の状況と次の一手", before: "レビュー待ち", after: input === "事実" ? "PR が merge された。確かめて閉じる" : "merge できなかった（権限が足りない）。権限をもらってからもう一度" }], input === "事実" ? "activity:s1:3" : "write:w1");
+  return noted({ ...task }, actor, "変わった", [{ field: "今の状況と次の一手", before: "レビュー待ち", after: input === "事実" ? "PR が merge された。確かめて閉じる" : "merge できなかった（権限が足りない）。権限をもらってからもう一度", target: null }], input === "事実" ? "activity:s1:3" : "write:w1");
 }
 
 /**
