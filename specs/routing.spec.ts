@@ -127,7 +127,7 @@ export const links = [
   { from: routeByUser, to: "task", action: "detachFact", label: "移すなら前の Task から、対象外にするならすべての Task から、事実を外す" },
   { from: addTask, to: "task", action: "attachFact", label: "足した Task に事実を持たせる" },
   { from: removeTask, to: "task", action: "detachFact", label: "その Task から事実を外す" },
-  { from: factChanged, to: "task", action: "receiveFact", label: "振り分けた事実なら、持ち主の Task が変化を受け取る" },
+  { from: factChanged, to: "task", action: "receive", label: "振り分けた事実なら、持ち主の Task が変化を受け取る（事実が変わった、として届く）" },
 ];
 
 export const scenarios = {

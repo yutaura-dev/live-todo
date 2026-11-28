@@ -21,7 +21,7 @@
 | Activity | Source Item に起きた出来事（appeared / changed / resolved / reopened / removed）。そのままでは更新マークにならない |
 | Link | Task と Source Item のつながり。tracks（完了を決める）と context（関連情報）。1 つの Item が属せる Task は 1 つまで |
 | Task | 自分がやること。Source の言葉ではなく自分にとっての意味（title: 何をするか、brief: 今の状況と次の一手）で持つ。手動追加の Task もある |
-| Task Change | Task の項目の変化（どの項目が何から何に）。更新マークはこれにだけ付く |
+| Task Activity | Task に起きた出来事（項目が変わった・AI が作業をやめた・書き込めなかった など）。Task が起きた順に足すだけで持つ。Source Item の Activity（Source の出来事）とは別 |
 | triage | Source Item の仕分け状態（pending: 未判定 / linked: Task に紐づけ済み / ignored: 対象外） |
 | Label / Priority | AI や規則で Task に付与される分類と優先度 |
 | Sync | ポーリングで Source の状態変化を取得し、Task に反映する処理 |
@@ -32,7 +32,7 @@
 | LLM Profile | 使う LLM プロバイダ・モデル・認証情報の組み合わせ。当面は PC 単位で 1 つ |
 | Epic | Task をまとめる親。Epic → Task の 2 段だけ。自動で作られる |
 | 未分類 | どの Epic にも入っていない Task |
-| 更新マーク | 未読の Task Change がある Task に付く目印。Source 側の変化ではなく Task の項目が変わったときだけ付く |
+| 更新マーク | ユーザーが最後に Task を見たあとに、ユーザー以外が起こした Task Activity がある Task に付く目印。Source 側の変化ではなく、Task の出来事から導く。まだ一度も見ていない Task は「新着」で見せる |
 | Decisions provider | 確率付きの判定 API（OpenAI Decisions / Azure OpenAI Decisions / Microsoft-Decision / Jev / Gemini Decisions） |
 | 要確認 | 判定の確率が閾値の中間、または refusal だった Task の置き場 |
 | SnapshotDiffer | 全件取得の結果を前回の fingerprint と比べて SourceChange に変換する共通処理 |
