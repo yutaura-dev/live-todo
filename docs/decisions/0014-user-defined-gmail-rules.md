@@ -1,6 +1,6 @@
 # ADR-0014: 利用者が決めたルールは、決めたことを承認とみなして自動で当てる
 
-- **Status**: Superseded by [ADR-0019](0019-task-first-model.md)（ルールの当て先と操作の分け方。ルールを決めたことを承認とみなす考え方は引き継ぐ）
+- **Status**: Superseded by [ADR-0019](0019-task-first-model.md)（ルールの当て先と操作の分け方。ルールを決めたことを承認とみなす考え方は引き継ぐ）、[ADR-0020](0020-builtin-rules-enabled-by-user.md)（組み込みのルールは、ユーザーが有効にしたときだけ書き込む）
 - **Date**: 2026-11-26
 - **Deciders**: YutaUra
 

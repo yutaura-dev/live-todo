@@ -4,6 +4,8 @@ import { ensure } from "@yutaura/live-spec";
  * Rule Run（ルールを 1 回当てたこと）。Rule の中にあり、Rule を通してだけ扱う。どの Task に、どのきっかけで、どの中身のルールを当てたか、条件に合ったか、何をしたかを残す。
  * 同じ Task に、同じ中身のルールを、同じきっかけで当てるのは一度だけ（書き込みを二重に効かせないため。Rule 集約の不変条件で守る）。ルールから頼む書き込みは、この記録を指す。
  * 記録を作れるのは、ルールが有効なときだけ（Rule を通して作る）。
+ * ルールで変えた Task の変化（完了にした など）も、ほかのルールのきっかけになる。終わらない連鎖を防ぐため、きっかけは連鎖（ユーザー・同期・AI が起こした最初の変化から、ルールが起こした変化をたどったもの）を持ち、1 つの連鎖の中で同じルールは 2 回以上当てない。
+ * 1 回の変化で、いくつものルールが当たることがある（ルールごとに記録が 1 つできる）。Task への操作が食い違ったら（完了にする と やることにする など）、どれも当てずに Task を要確認にする（fail closed）。外への書き込みは、食い違わないのでそれぞれ頼む。
  */
 export type RuleRun = {
   /** 当てたか */
@@ -16,6 +18,8 @@ export type RuleRun = {
   taskId: string;
   /** きっかけ（Task ができた・事実が増えた・事実が変わった・Task を完了にした などの出来事） */
   triggerKey: string;
+  /** きっかけの連鎖（最初の変化の ID と、この連鎖でもう当てたルール） */
+  chain: { chainId: string; appliedRuleIds: string[] };
   /** 条件に合う確率（Decisions で判定したとき。問いごとの確率のうち、いちばん低いもの。出来事のきっかけや、答えが返らなければ null） */
   probability: number | null;
   /** 当てなかった理由（当てた・判定待ちなら null） */
@@ -44,6 +48,8 @@ type Check = {
   trigger: "判定する" | "出来事";
   /** きっかけが、有効にした時刻より後に起きたか */
   afterEnabled: boolean;
+  /** このきっかけの連鎖の中で、このルールをもう当てたか */
+  inChain: "まだ当てていない" | "もう当てた";
 };
 
 type Actor = { kind: "app" } | { kind: "decisions" } | { kind: "user" };
@@ -66,6 +72,7 @@ const APPLIED = { task: "完了にする", writeIds: ["w1"] };
 export function initial(actor: Actor, check: Check): RuleRun {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(check.afterEnabled, "有効にしたあとに起きたきっかけだけ");
+  ensure(check.inChain === "まだ当てていない", "1 つの連鎖の中で、同じルールは 1 回だけ");
   const now = check.trigger === "出来事";
   return {
     status: now ? "当てた" : "判定待ち",
@@ -73,6 +80,7 @@ export function initial(actor: Actor, check: Check): RuleRun {
     ruleFingerprint: "f1",
     taskId: "t1",
     triggerKey: now ? "Task を完了にした" : "事実が増えた:s1",
+    chain: { chainId: "c1", appliedRuleIds: ["r1"] },
     probability: null,
     skipReason: null,
     applied: now ? { task: null, writeIds: ["w1"] } : null,
@@ -115,7 +123,7 @@ export function cancel(run: RuleRun, actor: Actor, reason: "ルールを止め�
   return { ...run, status: "当てなかった", skipReason: reason };
 }
 
-const ON_DECIDE: Check = { trigger: "判定する", afterEnabled: true };
+const ON_DECIDE: Check = { trigger: "判定する", afterEnabled: true, inChain: "まだ当てていない" };
 const ON_EVENT: Check = { ...ON_DECIDE, trigger: "出来事" };
 
 export const inputs = {
@@ -123,6 +131,7 @@ export const inputs = {
     判定するルール: [ON_DECIDE],
     出来事のルール: [ON_EVENT],
     有効にする前: [{ ...ON_DECIDE, afterEnabled: false }],
+    連鎖でもう当てた: [{ ...ON_EVENT, inChain: "もう当てた" }],
   },
   decide: {
     条件に合う: ["条件に合う", "開いている"],
@@ -146,9 +155,9 @@ export const reviewed = {
 };
 
 export const links = [
-  { from: initial, to: "task", label: "出来事のきっかけで当てたら、ルールの操作で Task を変える（完了にする など）" },
+  { from: initial, to: "task", label: "出来事のきっかけで当てたら、ルールの操作で Task を変える（完了にする など）。同じきっかけのほかのルールと操作が食い違ったら、どれも当てずに要確認にする。変えた Task の変化は、同じ連鎖の次のきっかけになる" },
   { from: initial, to: "write", label: "出来事のきっかけで当てたら、Task が持つ事実への書き込みを、この記録から頼む（Task を完了にしたらメールをアーカイブ など）" },
-  { from: decide, to: "task", label: "条件に合ったら、ルールの操作で Task を変える" },
+  { from: decide, to: "task", label: "条件に合ったら、ルールの操作で Task を変える。同じきっかけのほかのルールと操作が食い違ったら、どれも当てずに要確認にする。変えた Task の変化は、同じ連鎖の次のきっかけになる" },
   { from: decide, to: "write", label: "条件に合ったら、Task が持つ事実への書き込みを、この記録から頼む" },
 ];
 
@@ -178,6 +187,9 @@ export const scenarios = {
     { do: unavailable, by: "アプリ", denied: "判定待ちのときだけ" },
   ],
   "Task を完了にしたら、出来事のルールですぐ当てる": [{ do: initial, by: "アプリ", input: "出来事のルール", expect: { status: "当てた" } }],
+  "1 つの連鎖の中で、同じルールは 2 回当てない（ルールが行き来して終わらなくなるのを防ぐ）": [
+    { do: initial, by: "アプリ", input: "連鎖でもう当てた", denied: "1 つの連鎖の中で、同じルールは 1 回だけ" },
+  ],
   "有効にする前に起きたことには当てない": [{ do: initial, by: "アプリ", input: "有効にする前", denied: "有効にしたあとに起きたきっかけだけ" }],
   "判定を待っている間にルールを止めたら、当てない": [
     { do: initial, by: "アプリ", input: "判定するルール" },
