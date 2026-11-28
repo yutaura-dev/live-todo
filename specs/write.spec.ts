@@ -18,8 +18,12 @@ export type Write = {
   approval: { by: "ユーザーが確かめた" | "自動でやってよい範囲" | "完了のボタン"; at: string; policy: { operation: string; limit: Level } | null } | null;
   /** Write を見分ける ID */
   id: string;
-  /** 何に書き込むか。作る操作（draft の PR を作る・返信の下書きを作る など）では、作る元の事実（issue #12 を直す PR なら issue #12、返信の下書きならそのスレッド） */
+  /** 何に書き込むか。作る操作（draft の PR を作る・返信の下書きを作る など）では、作る元の事実（issue #12 を直す PR なら issue #12、返信の下書きならそのスレッド）。下書きは同期で戻ってこないので、元の事実への書き込みのまま扱う */
   subject: Subject;
+  /** 作る操作で、作る場所（PR を作るリポジトリ・下書きを置くスレッド）。作らない操作では null。自動で書き込めるのは、作る元の事実と同じ場所（同じリポジトリ・同じスレッド）のときだけ */
+  place: Subject | null;
+  /** 作る操作で書き込めたとき、書き込み先が返した作ったもの（PR・issue など、同期で戻ってくるもの）。同期で届いたとき、これと URI が一致すれば、この Write の Task に振り分ける */
+  created: Subject | null;
   /** どの操作か。provider が決めた名前（github.merge・github.push・gmail.archive・slack.complete_todo など） */
   operation: string;
   /** 操作ごとの中身（merge の方法・返信の本文・アーカイブするメールの一覧 など）。形は provider が操作ごとに決め、デコードして確かめる。ドメインは中身を読まず、書き込み先にそのまま渡す */
@@ -154,6 +158,8 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
       : null,
     id: "w1",
     subject: { uri: "github://yutaura@github.com/acme/app/pull/42" },
+    place: null,
+    created: null,
     operation: "github.merge",
     params: { method: "squash", title: "axios を 1.8 に上げる (#42)" },
     version: "abc1234",
@@ -278,7 +284,8 @@ export const links = [
   { from: settle, to: "task", label: "完了したときにすることから頼まれたなら、書けていたら書き込んだ、書けていなかったら書き込めなかったにする" },
   { from: succeed, to: "task", label: "Action Item から頼まれたなら、その Action Item を果たす（書き込みで果たされる）" },
   { from: settle, to: "task", label: "書けていたなら、Action Item から頼まれたものは、その Action Item を果たす" },
-  { from: succeed, to: "routing", action: "addTask", label: "作る操作なら、作ったもの（draft の PR など）を、元の事実と同じ Task の関連に加える（同期で届いたときに、別の Task に振り分けないように）" },
+  { from: succeed, to: "routing", action: "route", label: "作る操作で作ったもの（PR・issue など）が同期で届いたら、この Write の Task に振り分ける（Decisions を通さず、作ったものの URI との一致で決める。URI が作る場所の中にあるときだけ）。作ったものへのそのあとの書き込みも、その操作の上限で決まる" },
+  { from: settle, to: "routing", action: "route", label: "書けていたなら、作る操作で作ったものを、同期で届いたときにこの Write の Task に振り分ける（succeed と同じ）" },
   { from: fail, to: "task", action: "receive", label: "Action Item から頼まれたなら、その Task に、書き込めなかったこと（理由つき）が届く" },
 ];
 
