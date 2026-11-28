@@ -149,6 +149,10 @@ export const initial: Task = {
 };
 
 export const links = [
+  { from: triage, to: "priority", label: "要確認か todo に仕分けたら、優先度を決め始める（仕分け中の Task は判定しない）" },
+  { from: complete, to: "priority", action: "stop", label: "終わった・完了待ちの Task は、優先度を判定しない" },
+  { from: dismiss, to: "priority", action: "stop", label: "やらないことにした Task は、優先度を判定しない" },
+  { from: reopen, to: "priority", action: "resume", label: "やり直した Task は、優先度を判定し直す" },
   { from: complete, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）。自動で終えたとき（完了条件を満たした）も同じで、途中までの報告を残す。追う項目が片付いて判断中の作業も、Task を終えるほうを先にする（ADR-0016 の判断より優先）" },
   { from: finishCompletion, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）" },
   { from: dismiss, to: "action-item", action: "skip", label: "まだの Action Item をすべてやらなくする（その作業は、Action Item の側からやめる）" },
@@ -201,6 +205,12 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
     { field: "列", before: task.status, after: "closed", target: null },
     { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
+}
+
+/** 優先度の段階が変わった（Priority から届く。だれが決めたかと一緒に出来事に残す。ユーザーが決めたなら既読） */
+export function notePriority(task: Task, actor: Actor): Task {
+  ensure(isOpen(task), "要確認か todo のときだけ（終わった Task の優先度は判定しない）");
+  return noted(task, actor, "変わった", [{ field: "優先度", before: "今週やる", after: "今日やる", target: null }]);
 }
 
 /** 計画の中の Action Item・完了したときにすることが進んだ（済んだ・やらない・やり直す・書き込んだ など）。だれが進めたかと一緒に出来事に残す */
@@ -468,6 +478,13 @@ export const decisions = {
 };
 
 export const scenarios = {
+  "優先度の変化は、開いている Task にだけ残す": [
+    { do: notePriority, by: "アプリ", denied: "要確認か todo のときだけ（終わった Task の優先度は判定しない）" },
+    { do: triage, by: "同期", input: "要確認" },
+    { do: notePriority, by: "アプリ" },
+    { do: dismiss, by: "AI", input: "もう要らない", expect: { status: "closed" } },
+    { do: notePriority, by: "アプリ", denied: "要確認か todo のときだけ（終わった Task の優先度は判定しない）" },
+  ],
   "届いたものは、事実は AI が、書き込めなかったはアプリが受け取る": [
     { do: triage, by: "同期", input: "todo" },
     { do: receive, by: "アプリ", input: "事実で項目が変わる", denied: "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ" },
@@ -607,6 +624,8 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "anyone-can:notePriority": "優先度を決めた人（同期の規則・AI の判定・ユーザー）が、そのまま出来事に残る。だれが決めてよいかは Priority の側で確かめる",
+  "same-for-similar-actors:notePriority": "優先度を決めた人を出来事に残すだけで、だれが決めてよいかは Priority の側で確かめる",
   "indistinguishable-example:receive:事実で項目が変わる,事実で何も変わらない,AI の作業の成果": "項目が変わるかどうかは、Task の出来事が残るかどうか（更新マークが付くかどうか）に出る。列などの状態は変わらないので、状態としては同じに見える",
   "anyone-can:noteProgress": "計画の中の Action Item・完了したときにすることが進んだことは、だれが進めても（ユーザー・AI・同期・アプリ）出来事として残す。だれが進めたかは出来事の by に残り、ユーザーが進めたものは更新マークにしない",
   "anytime:noteProgress": "計画の中の Action Item・完了したときにすることが進んだことは、だれが進めても（ユーザー・AI・同期・アプリ）出来事として残す。だれが進めたかは出来事の by に残り、ユーザーが進めたものは更新マークにしない",

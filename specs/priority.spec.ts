@@ -34,6 +34,8 @@ export const Status = {
   undecided: "段階未定",
   /** ユーザーが決めた（AI は変えない） */
   byUser: "ユーザーが決めた",
+  /** Task が終わった・完了待ち・やらないことにしたので、判定しない（やり直したら判定し直す） */
+  stopped: "判定しない",
 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
 
@@ -42,7 +44,7 @@ type RuleResult = Level | "規則では決めない";
 
 type Actor = { kind: "sync" } | { kind: "agent" } | { kind: "user" };
 
-/** 同期: 規則で決める・材料や日付の変化に気づく。AI: 判定する（Decisions） */
+/** 同期: 規則で決める・材料や日付の変化に気づく。AI: Decisions で判定する（Claude Code などの Agent ではない） */
 export const actors: Record<string, Actor> = {
   同期: { kind: "sync" },
   AI: { kind: "agent" },
@@ -58,21 +60,24 @@ export function initial(actor: Actor): Priority {
 /** 規則で決まる（判定表「規則で決まる優先度」で段階が出た。LLM は呼ばない） */
 export function decideByRule(priority: Priority, actor: Actor, rule: RuleResult): Priority {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(priority.status === "未判定", "未判定のときだけ");
+  ensure(priority.status === "未判定" || priority.status === "段階未定", "未判定・段階未定のときだけ");
   ensure(rule !== "規則では決めない", "規則で段階が出たときだけ");
-  return { ...priority, status: "アプリが決めた", level: "今日やる", reason: "今日が期限" };
+  return rule === "今日やる"
+    ? { ...priority, status: "アプリが決めた", level: "今日やる", reason: "今日が期限" }
+    : { ...priority, status: "アプリが決めた", level: "今週やる", reason: "今週が期限" };
 }
 
 /**
  * 判定した（規則で決まらなかったものだけ）
  *
- * Decisions で、いちばん確率の高い段階が閾値以上なら、その段階に決める。閾値の間・断られた・答えが返らないなら、段階未定にする。
+ * Decisions で、いちばん確率の高い段階が閾値以上なら、その段階に決める。閾値の間・断られた・形に合わない・答えが返らないなら、段階未定にする。
  */
-export function judge(priority: Priority, actor: Actor, rule: RuleResult, result: "今週やる" | "いつか" | "閾値の間・断られた" | "答えが返らない"): Priority {
+export function judge(priority: Priority, actor: Actor, rule: RuleResult, result: Level | "閾値の間・断られた・形に合わない" | "答えが返らない", basis: "今の材料" | "古い材料"): Priority {
   ensure(actor.kind === "agent", "AI だけ");
-  ensure(priority.status === "未判定", "未判定のときだけ");
+  ensure(priority.status === "未判定" || priority.status === "段階未定", "未判定・段階未定のときだけ");
   ensure(rule === "規則では決めない", "規則で決まらなかったときだけ");
-  if (result === "今週やる" || result === "いつか") return { ...priority, status: "アプリが決めた", level: result, reason: "判定した" };
+  ensure(basis === "今の材料", "判定に渡した材料が今のものと同じときだけ（判定の間に材料が変わったら、答えを捨てて判定し直す）");
+  if (result === "今日やる" || result === "今週やる" || result === "いつか") return { ...priority, status: "アプリが決めた", level: result, reason: "判定した" };
   return { ...priority, status: "段階未定", level: null, reason: null };
 }
 
@@ -82,32 +87,49 @@ export function setByUser(priority: Priority, actor: Actor): Priority {
   return { ...priority, status: "ユーザーが決めた", level: "今日やる", reason: "ユーザーが決めた" };
 }
 
-/** ユーザーが決めた優先度を外す（アプリに決め直させる） */
+/** ユーザーが決めた優先度を外す（アプリに決め直させる。決め直すまで、ユーザーが決めた段階のまま並べる） */
 export function clearByUser(priority: Priority, actor: Actor): Priority {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(priority.status === "ユーザーが決めた", "ユーザーが決めたときだけ");
-  return { ...priority, status: "未判定", level: null, reason: null };
+  return { ...priority, status: "未判定" };
 }
 
 /**
  * 判定の材料（Task の事実と項目）が変わった・日が変わった
  *
- * アプリが決めた・段階未定の優先度は、判定し直す（「今週まで」が翌日に「今日まで」になる・期限が過ぎる、を拾うため、日が変わったときも）。ユーザーが決めた優先度は変えない。
+ * アプリが決めた・段階未定・判定している途中の優先度は、判定し直す（「今週まで」が翌日に「今日まで」になる・期限が過ぎる、を拾うため、日が変わったときも）。段階未定は、決まるまで段階未定の印のまま見せる。ユーザーが決めた優先度は変えない。
  */
 export function basisChanged(priority: Priority, actor: Actor, _why: "材料が変わった" | "日が変わった"): Priority {
   ensure(actor.kind === "sync", "同期だけ");
-  ensure(priority.status === "アプリが決めた" || priority.status === "段階未定", "アプリが決めた・段階未定のときだけ（ユーザーが決めた優先度は変えない）");
+  ensure(priority.status !== "ユーザーが決めた", "ユーザーが決めた優先度は変えない");
+  ensure(priority.status !== "判定しない", "判定する Task のときだけ（終わった Task は判定しない）");
+  return { ...priority, status: priority.status === "段階未定" ? "段階未定" : "未判定", basisFingerprint: "b2" };
+}
+
+/** 判定をやめる（Task が終わった・完了待ちになった・やらないことにした） */
+export function stop(priority: Priority, actor: Actor): Priority {
+  ensure(actor.kind === "sync", "同期だけ");
+  ensure(priority.status !== "判定しない", "判定しているときだけ");
+  return { ...priority, status: "判定しない" };
+}
+
+/** 判定し直す（Task をやり直した） */
+export function resume(priority: Priority, actor: Actor): Priority {
+  ensure(actor.kind === "sync", "同期だけ");
+  ensure(priority.status === "判定しない", "判定しないときだけ");
   return { ...priority, status: "未判定", basisFingerprint: "b2" };
 }
 
 export const inputs = {
-  decideByRule: { 今日やる: ["今日やる"], 規則で決まらない: ["規則では決めない"] },
+  decideByRule: { 今日やる: ["今日やる"], 今週やる: ["今週やる"], 規則で決まらない: ["規則では決めない"] },
   judge: {
-    今週やる: ["規則では決めない", "今週やる"],
-    いつか: ["規則では決めない", "いつか"],
-    閾値の間: ["規則では決めない", "閾値の間・断られた"],
-    答えが返らない: ["規則では決めない", "答えが返らない"],
-    規則で決まった: ["今日やる", "今週やる"],
+    今日やる: ["規則では決めない", "今日やる", "今の材料"],
+    今週やる: ["規則では決めない", "今週やる", "今の材料"],
+    いつか: ["規則では決めない", "いつか", "今の材料"],
+    閾値の間: ["規則では決めない", "閾値の間・断られた・形に合わない", "今の材料"],
+    答えが返らない: ["規則では決めない", "答えが返らない", "今の材料"],
+    規則で決まった: ["今日やる", "今週やる", "今の材料"],
+    古い材料: ["規則では決めない", "今週やる", "古い材料"],
   },
   basisChanged: { 材料: ["材料が変わった"], 日: ["日が変わった"] },
 };
@@ -115,7 +137,7 @@ export const inputs = {
 export const invariants = {
   "決まっているときは段階と理由があり、段階未定のときはない": (priority: Priority) =>
     priority.status === "段階未定" ? priority.level === null && priority.reason === null
-    : priority.status === "未判定" ? (priority.level === null) === (priority.reason === null)
+    : priority.status === "未判定" || priority.status === "判定しない" ? (priority.level === null) === (priority.reason === null)
     : priority.level !== null && priority.reason !== null,
 };
 
@@ -141,20 +163,46 @@ export const decisions = {
 };
 
 export const links = [
-  { from: decideByRule, to: "task", label: "段階が変わったときだけ、Task の変化として残す（同じ段階に決め直したときは残さない）" },
-  { from: judge, to: "task", label: "段階が変わった・段階未定になったときだけ、Task の変化として残す" },
-  { from: setByUser, to: "task", label: "ユーザーが決めた段階を、Task の変化として残す（ユーザーが変えたので既読）" },
-  { from: clearByUser, to: "task", label: "ユーザーが決めた段階を外したことを、Task の変化として残す（既読）" },
-  { from: basisChanged, to: "task", label: "判定し直す間は、Task の変化を残さない（決まったときに残す）" },
+  { from: decideByRule, to: "task", action: "notePriority", label: "段階が変わったときだけ、Task の変化として残す（同じ段階に決め直したときは残さない）" },
+  { from: judge, to: "task", action: "notePriority", label: "段階が変わった・段階未定になったときだけ、Task の変化として残す" },
+  { from: setByUser, to: "task", action: "notePriority", label: "ユーザーが決めた段階を、Task の変化として残す（ユーザーが変えたので既読）" },
+  { from: clearByUser, to: "task", action: "notePriority", label: "ユーザーが決めた段階を外したことを、Task の変化として残す（既読）" },
 ];
 
 export const scenarios = {
+  "判定の間に材料が変わったら、古い材料での答えは捨てる": [
+    { do: initial, by: "同期" },
+    { do: basisChanged, by: "同期", input: "材料", expect: { status: "未判定" } },
+    { do: judge, by: "AI", input: "古い材料", denied: "判定に渡した材料が今のものと同じときだけ（判定の間に材料が変わったら、答えを捨てて判定し直す）" },
+    { do: judge, by: "AI", input: "今日やる", expect: { level: "今日やる" } },
+  ],
+  "段階未定は、判定し直す間も段階未定のまま見せる": [
+    { do: initial, by: "同期" },
+    { do: judge, by: "AI", input: "閾値の間", expect: { status: "段階未定" } },
+    { do: basisChanged, by: "同期", input: "日", expect: { status: "段階未定" } },
+    { do: judge, by: "AI", input: "今週やる", expect: { status: "アプリが決めた" } },
+  ],
+  "終わった Task は判定せず、やり直したら判定し直す": [
+    { do: initial, by: "同期" },
+    { do: judge, by: "AI", input: "今週やる" },
+    { do: resume, by: "同期", denied: "判定しないときだけ" },
+    { do: stop, by: "AI", denied: "同期だけ" },
+    { do: stop, by: "同期", expect: { status: "判定しない" } },
+    { do: stop, by: "同期", denied: "判定しているときだけ" },
+    { do: resume, by: "AI", denied: "同期だけ" },
+    { do: basisChanged, by: "同期", input: "日", denied: "判定する Task のときだけ（終わった Task は判定しない）" },
+    { do: resume, by: "同期", expect: { status: "未判定", level: "今週やる" } },
+  ],
+  "規則で今週やるに決まる": [
+    { do: initial, by: "同期" },
+    { do: decideByRule, by: "同期", input: "今週やる", expect: { level: "今週やる" } },
+  ],
   "今日が期限の Task は、規則で今日やるにする": [
     { do: initial, by: "同期", expect: { status: "未判定" } },
     { do: judge, by: "AI", input: "規則で決まった", denied: "規則で決まらなかったときだけ" },
     { do: decideByRule, by: "同期", input: "今日やる", expect: { status: "アプリが決めた", level: "今日やる" } },
-    { do: decideByRule, by: "同期", input: "今日やる", denied: "未判定のときだけ" },
-    { do: judge, by: "AI", input: "今週やる", denied: "未判定のときだけ" },
+    { do: decideByRule, by: "同期", input: "今日やる", denied: "未判定・段階未定のときだけ" },
+    { do: judge, by: "AI", input: "今週やる", denied: "未判定・段階未定のときだけ" },
   ],
   "規則で決まらないものは、判定する": [
     { do: initial, by: "同期" },
@@ -184,10 +232,10 @@ export const scenarios = {
     { do: initial, by: "同期" },
     { do: judge, by: "AI", input: "今週やる" },
     { do: basisChanged, by: "同期", input: "材料", expect: { status: "未判定" } },
-    { do: basisChanged, by: "同期", input: "材料", denied: "アプリが決めた・段階未定のときだけ（ユーザーが決めた優先度は変えない）" },
+    { do: basisChanged, by: "同期", input: "材料", expect: { status: "未判定" } },
     { do: setByUser, by: "ユーザー" },
-    { do: basisChanged, by: "同期", input: "日", denied: "アプリが決めた・段階未定のときだけ（ユーザーが決めた優先度は変えない）" },
-    { do: clearByUser, by: "ユーザー", expect: { status: "未判定" } },
+    { do: basisChanged, by: "同期", input: "日", denied: "ユーザーが決めた優先度は変えない" },
+    { do: clearByUser, by: "ユーザー", expect: { status: "未判定", level: "今日やる" } },
     { do: clearByUser, by: "ユーザー", denied: "ユーザーが決めたときだけ" },
   ],
   "優先度を決め始めるのは同期だけ": [{ do: initial, by: "ユーザー", denied: "同期だけ" }],
@@ -203,10 +251,11 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "equivalent-states:未判定 · level=なし · reason=なし/段階未定 · level=なし · reason=なし/未判定 · 今日やる · 今日が期限/未判定 · 今週やる · 今週が期限/未判定 · 今日やる · 判定した/未判定 · 今週やる · 判定した/未判定 · いつか · 判定した/未判定 · 今日やる · ユーザーが決めた": "判定し直す間・段階未定は、できること（判定する・材料や日が変わったら判定し直す・ユーザーが決める）は同じだが、見せ方が違う（前の段階のまま並べる・段階未定の印を付ける・はじめての判定の前は並べない）",
+  "equivalent-states:アプリが決めた · 今日やる · 今日が期限/アプリが決めた · 今週やる · 今週が期限/アプリが決めた · 今日やる · 判定した/アプリが決めた · 今週やる · 判定した/アプリが決めた · いつか · 判定した": "アプリが決めた段階ごとに、できることは同じだが、一覧の並びと見せる理由が違う",
+  "equivalent-states:判定しない · level=なし · reason=なし/判定しない · 今日やる · 今日が期限/判定しない · 今週やる · 今週が期限/判定しない · 今日やる · 判定した/判定しない · 今週やる · 判定した/判定しない · いつか · 判定した/判定しない · 今日やる · ユーザーが決めた": "判定しない Task の優先度は見せないが、やり直したときに前の段階のまま並べるために残す",
   "indistinguishable-example:judge:閾値の間,答えが返らない": "どちらも、低い優先度ではなく段階未定に倒す（fail closed）。返らなかったのか、閾値の間・断られたのかは記録では分けるが、できることは同じ",
   "anytime:setByUser": "ユーザーはいつでも優先度を決められる（段階未定に答える・アプリが決めたものを変える・自分で決め直す）",
   "ignores-input:basisChanged": "材料が変わっても日が変わっても、同じく判定し直す。どちらで判定し直したかは記録のために受け取る",
-  "equivalent-states:未判定 · level=なし · reason=なし/未判定 · 今日やる · 今日が期限/未判定 · 今週やる · 判定した/未判定 · いつか · 判定した": "判定し直す間は、前の段階のまま並べる（見せ方だけが違い、できることは同じ）。はじめて判定する前は並びに出さない",
   "unused-field:reason": "なぜその段階かは、ユーザーに見せる一言で、操作の可否は変えない。決まっているときだけあることを、不変条件で確かめるために読んでいる",
-  "equivalent-states:アプリが決めた · 今日やる · 今日が期限/アプリが決めた · 今週やる · 判定した/アプリが決めた · いつか · 判定した/段階未定 · level=なし · reason=なし": "アプリが決めた（段階ごと）と段階未定は、できること（材料・日が変わったら判定し直す・ユーザーが決める）は同じだが、見せ方が違う（段階は一覧の並びに効き、段階未定はユーザーに決めてもらう）",
 };
