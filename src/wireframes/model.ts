@@ -26,7 +26,8 @@ export type PriorityView =
   /** まだ一度も決めていない */
   | { status: "未判定" };
 
-export type WireStatus = "triaging" | "needs_review" | "todo" | "完了待ち" | "closed";
+/** 列（specs/task.spec.ts の status）。Task はやると決まったものだけなので、できた時点で todo（仕分け中・要確認の列はない。ADR-0025） */
+export type WireStatus = "todo" | "完了待ち" | "closed";
 
 /** 次の一手が、何によって果たされるか（specs/action-definition.value.ts の How） */
 export type How = "human" | "claude" | "condition" | "write" | "decision";
@@ -41,6 +42,8 @@ export type WireTask = {
   priority: PriorityView | null;
   blocksOthers: boolean;
   sources: string[];
+  /** 優先度を決めたもとの Action Item の題（事実から計画に足した項目の期日で段階が上がったとき。specs/prioritization.spec.ts の drivenByItemId）。見通しのカードの行に出す */
+  drivenBy?: string;
   /** いま着手できる Action Item（番が来ているもの）。並列のまとまりに番が来ていれば複数ある。なければ空 */
   now: Array<{ title: string; how: How; working?: boolean }>;
   lastSeenAt: string | null;

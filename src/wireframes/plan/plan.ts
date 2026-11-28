@@ -24,6 +24,8 @@ export type PlanItem = {
   condition?: { label: string; expectedWait?: string; observed: "まだ" | "成り立った" | "達成できない" };
   /** 人がやる場所（「開く」ボタンを出す） */
   place?: { label: string; certainty: "確かめた" | "AI が拾った" };
+  /** 事実から計画に足した項目なら、もとの事実の題（ADR-0025）。切り出す操作を出し、完了条件で自動で閉じる前に済んでいるかを見る */
+  addedFrom?: string;
   /** 書き込みで果たす項目の、ボタンに書く動詞と、書き込む中身の要約 */
   write?: { verb: string; summary: string };
 };

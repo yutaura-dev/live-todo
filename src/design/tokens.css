@@ -1,0 +1,169 @@
+/*
+ * live-todo の UI デザインのトークン。
+ * 動く先は Electron（Chromium）だけなので、light-dark()・@starting-style・popover は代わりの書き方なしで使う。
+ *
+ * 色の考え方: 面は「紙」と「白」の 2 枚だけ。意味を持つ色は 3 つに絞る。
+ *   瑠璃 … 自分の番（主要操作・選択・番が来ている項目・新着／更新）
+ *   青磁 … AI が書いたもの・AI が作業中のもの
+ *   弁柄 … 失敗・書き込めなかったもの（それ以外には使わない）
+ * 色だけで状態を伝えない。どの状態にも文言か形（印・線の種類）を添える。
+ */
+/*
+ * color-scheme は根元にだけ付ける。.ui に付けない理由: .ui は入れ子になる（窓・画面・ダイアログ）ので、
+ * 内側の .ui が付け直すと、外で選んだ配色（Storybook の切り替えなど）を打ち消してしまうため。
+ */
+:root {
+  color-scheme: light dark;
+}
+
+.ui {
+  /* 生の色。light-dark() の外でも組み合わせられるように分けて持つ */
+  --paper-light: #f4f5f2;
+  --paper-dark: #15181a;
+  --sheet-light: #ffffff;
+  --sheet-dark: #1d2124;
+  --sunken-light: #eaece8;
+  --sunken-dark: #101315;
+  --ink-light: #1f2427;
+  --ink-dark: #e7e9e6;
+  --ink-sub-light: #5d666b;
+  --ink-sub-dark: #a0a8ab;
+  --rule-light: #dadddb;
+  --rule-dark: #30363a;
+  --rule-strong-light: #b9bfbd;
+  --rule-strong-dark: #4a5257;
+  --ruri-light: #2c4c9c;
+  --ruri-dark: #9fb4ee;
+  --on-ruri-light: #ffffff;
+  --on-ruri-dark: #0e1830;
+  --seiji-light: #2f6457;
+  --seiji-dark: #8fc7b8;
+  --bengara-light: #a8402e;
+  --bengara-dark: #ef917c;
+
+  --c-paper: light-dark(var(--paper-light), var(--paper-dark));
+  --c-sheet: light-dark(var(--sheet-light), var(--sheet-dark));
+  --c-sunken: light-dark(var(--sunken-light), var(--sunken-dark));
+  --c-ink: light-dark(var(--ink-light), var(--ink-dark));
+  --c-ink-sub: light-dark(var(--ink-sub-light), var(--ink-sub-dark));
+  --c-rule: light-dark(var(--rule-light), var(--rule-dark));
+  --c-rule-strong: light-dark(var(--rule-strong-light), var(--rule-strong-dark));
+  --c-ruri: light-dark(var(--ruri-light), var(--ruri-dark));
+  --c-on-ruri: light-dark(var(--on-ruri-light), var(--on-ruri-dark));
+  --c-seiji: light-dark(var(--seiji-light), var(--seiji-dark));
+  --c-bengara: light-dark(var(--bengara-light), var(--bengara-dark));
+
+  /* 淡い面は color-mix で作る。in oklch で無彩色と混ぜると Chromium で赤みが出るので in oklab にする */
+  /* 暗い面では同じ割合だと色が沈むので、ダークだけ多めに混ぜる */
+  --c-ruri-wash: light-dark(color-mix(in oklab, var(--ruri-light) 9%, var(--sheet-light)), color-mix(in oklab, var(--ruri-dark) 14%, var(--sheet-dark)));
+  --c-ruri-line: color-mix(in oklab, var(--c-ruri) 45%, var(--c-sheet));
+  --c-seiji-wash: light-dark(color-mix(in oklab, var(--seiji-light) 10%, var(--sheet-light)), color-mix(in oklab, var(--seiji-dark) 15%, var(--sheet-dark)));
+  --c-seiji-line: color-mix(in oklab, var(--c-seiji) 40%, var(--c-sheet));
+  --c-bengara-wash: light-dark(color-mix(in oklab, var(--bengara-light) 8%, var(--sheet-light)), color-mix(in oklab, var(--bengara-dark) 13%, var(--sheet-dark)));
+  --c-bengara-line: color-mix(in oklab, var(--c-bengara) 50%, var(--c-sheet));
+  --c-hover: color-mix(in oklab, var(--c-ink) 5%, transparent);
+  --c-press: color-mix(in oklab, var(--c-ink) 9%, transparent);
+
+  /*
+   * 文字。macOS の純正の書体（欧文は SF、和文は Hiragino Sans）を使う。
+   * Web フォントを持ち込まない理由: ローカルで完結するアプリで、OS の文字と並んだときに浮かないことを優先した。
+   */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-26: 26px;
+  --lh-tight: 1.4;
+  --lh-body: 1.7;
+  --fw-regular: 400;
+  --fw-bold: 600;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* 角丸は階層で変える（操作 < カード < 窓）。どこにも同じ角丸を付けない */
+  --r-control: 7px;
+  --r-card: 12px;
+  --r-pill: 999px;
+
+  /* 影は浮いているもの（詳細・ダイアログ・お知らせ）にだけ付ける。並んでいるカードには付けない */
+  --shadow-float: 0 1px 2px light-dark(rgb(20 30 30 / 0.06), rgb(0 0 0 / 0.4)), 0 8px 24px light-dark(rgb(20 30 30 / 0.08), rgb(0 0 0 / 0.45));
+  --shadow-dialog: 0 2px 6px light-dark(rgb(20 30 30 / 0.08), rgb(0 0 0 / 0.5)), 0 24px 64px light-dark(rgb(20 30 30 / 0.18), rgb(0 0 0 / 0.6));
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
+  line-height: var(--lh-body);
+  color: var(--c-ink);
+  background: var(--c-paper);
+  accent-color: var(--c-ruri);
+  -webkit-font-smoothing: antialiased;
+  font-kerning: normal;
+}
+
+.ui *,
+.ui *::before,
+.ui *::after {
+  box-sizing: border-box;
+}
+
+.ui :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure, blockquote) {
+  margin: 0;
+}
+
+.ui :where(ul, ol) {
+  padding: 0;
+  list-style: none;
+}
+
+.ui :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+ * 見出しは文節で折り返す（lang="ja" のときに効く）。text-wrap: balance だけだと、
+ * 行の長さをそろえるために語の途中（「メンションされ／た」）で切ってしまうため。
+ */
+.ui :where(h1, h2, h3, .ui-kcard-title, .ui-task-open) {
+  font-feature-settings: "palt";
+  word-break: auto-phrase;
+  text-wrap: balance;
+}
+
+.ui :where(p, li) {
+  text-wrap: pretty;
+}
+
+.ui :focus-visible {
+  outline: 2px solid var(--c-ruri);
+  outline-offset: 2px;
+}
+
+.ui ::selection {
+  background: color-mix(in oklab, var(--c-ruri) 22%, transparent);
+}
+
+.ui-num {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (forced-colors: active) {
+  .ui {
+    --c-ruri: Highlight;
+    --c-on-ruri: HighlightText;
+    --c-rule: CanvasText;
+    --c-rule-strong: CanvasText;
+  }
+}

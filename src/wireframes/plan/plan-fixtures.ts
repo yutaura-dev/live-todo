@@ -42,7 +42,7 @@ export const parallelPlan = serial(
     ],
     branches: [],
   },
-  item("report", "障害報告を書く", "human", { effort: "ふつう", completes: true }),
+  item("report", "障害報告を書く", "human", { effort: "ふつう", completes: true, addedFrom: "#incident のスレッド「障害報告もお願いします」" }),
 );
 
 /** 番が来ている分かれ道。先が決まった選択肢と、選んでから AI が考える選択肢 */

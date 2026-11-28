@@ -14,7 +14,7 @@ const ORDER: readonly GroupKey[] = ["ラベル未定", ...HORIZONS, "未判定"]
 /** 空でも見せるまとまり。「今日やることはない」と分かること自体が、朝いちばんに知りたい答えなので */
 const ALWAYS_SHOWN: ReadonlySet<GroupKey> = new Set(["今すぐ", "今日中"]);
 
-const isOpen = (task: WireTask) => task.status === "needs_review" || task.status === "todo";
+const isOpen = (task: WireTask) => task.status === "todo";
 
 const groupOf = (task: WireTask): GroupKey | null => {
   if (task.priority === null) return null;

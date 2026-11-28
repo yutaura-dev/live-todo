@@ -6,7 +6,7 @@ import { AttentionMark, Box, Button, Mark, SourceMarks, StopWorkButton, WorkingM
 import { Plan } from "../plan/PlanView.js";
 
 const LEVELS: Level[] = ["今すぐ", "今日中", "3 日以内", "10 日以内", "30 日以内", "それより先でよい"];
-const COLUMN_LABELS = { triaging: "仕分け中", needs_review: "要確認", todo: "Todo", 完了待ち: "完了待ち", closed: "終わった" } as const;
+const COLUMN_LABELS = { todo: "Todo", 完了待ち: "完了待ち", closed: "終わった" } as const;
 
 /**
  * Task の詳細。見通しの右に並べて出すときは h2、単独の画面として出すときは h1 にする。
@@ -36,7 +36,7 @@ export function TaskDetail({
   const [plan, setPlan] = useState(data.plan);
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const working = task.work === "作業中";
-  const open = task.status === "needs_review" || task.status === "todo";
+  const open = task.status === "todo";
   return (
     <article className="wf-detail" aria-labelledby="wf-detail-title">
       <header className="wf-stack">
@@ -159,19 +159,18 @@ function Menu({ label, items, note }: { label: string; items: Array<{ label: str
   );
 }
 
-/** Task そのものへの操作（specs/task.spec.ts の complete・dismiss・move・reopen）。いちばん使う「完了にする」だけを出し、残りは「…」に入れる */
+/** Task そのものへの操作（specs/task.spec.ts の complete・dismiss・mergeInto・reopen）。いちばん使う「完了にする」だけを出し、残りは「…」に入れる */
 function TaskActions({ data }: { data: TaskDetailData }) {
   const { task } = data;
   const working = task.work === "作業中";
   if (task.status === "完了待ち") return <Menu label="Task の操作" items={[{ label: "まだ終わっていない（やり直す）" }, { label: "やらないことにする" }]} />;
-  const move = task.status === "needs_review" ? "Todo に移す" : "要確認に戻す";
   return (
     <div className="wf-button-row">
       {working ? <StopWorkButton label="完了にする" tone="default" what="この Task で Claude Code が作業しています" onConfirm={() => undefined} /> : <Button>完了にする</Button>}
       <Menu
         label="Task の操作"
-        items={[{ label: "やらないことにする" }, { label: move, disabled: working }]}
-        {...(working ? { note: "AI の作業中は、要確認と Todo のあいだを移せません" } : {})}
+        items={[{ label: "別の Task にまとめる…", disabled: working }, { label: "やらないことにする" }]}
+        {...(working ? { note: "AI の作業中は、別の Task にまとめられません（作業を止めるか、終わるのを待つ）" } : {})}
       />
     </div>
   );
@@ -361,7 +360,7 @@ function AskAi({ questions }: { questions: TaskDetailData["questions"] }) {
 
 
 export const DETAIL_NOTES = [
-  { n: 1, text: "いちばん使う「完了にする」だけを出し、やらないことにする・列を移すは「…」に入れる。AI が作業中に完了にするときは「作業を止めますか」と確かめる" },
+  { n: 1, text: "いちばん使う「完了にする」だけを出し、別の Task にまとめる・やらないことにするは「…」に入れる（まとめると、事実とまだの項目がまとめ先に移り、この Task は完了の列にも出ない）。AI が作業中に完了にするときは「作業を止めますか」と確かめる。AI の作業中はまとめられない" },
   { n: 2, text: "優先度・理由・期日を 1 行で見せ、変えるときだけ広げる。自分で決めたときだけ「アプリに任せる」が出る。ラベル未定のときだけは、選択肢を最初から出す" },
   { n: 3, text: "計画は線路で見せる（ワイヤーフレーム/Task の詳細/計画 を参照）。計画を立て直すのは AI だけなので、ここに「考え直してもらう」は置かない" },
   { n: 4, text: "事実は題と「開く」だけ。振り分けを間違えたときの「別の Task に移す」「外す」は「…」に入れる" },
