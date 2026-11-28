@@ -23,7 +23,7 @@
 | Task | 自分がやること。Source の言葉ではなく自分にとっての意味（title: 何をするか、brief: 今の状況と次の一手）で持つ。手動追加の Task もある |
 | Task Activity | Task に起きた出来事（項目が変わった・AI が作業をやめた・書き込めなかった など）。Task が起きた順に足すだけで持つ。Source Item の Activity（Source の出来事）とは別 |
 | triage | Source Item の仕分け状態（pending: 未判定 / linked: Task に紐づけ済み / ignored: 対象外） |
-| Label / Priority | AI や規則で Task に付与される分類と優先度 |
+| Label / Priority | Label は AI や規則で Task に付く分類。Priority は「いつまでに手を付けるとよいか」（今すぐ・今日中・3 日以内・10 日以内・30 日以内・それより先でよい）。期日から手間を引いて規則で決め、決まらなければ Decisions が判定する |
 | Sync | ポーリングで Source の状態変化を取得し、Task に反映する処理 |
 | Agent Thread | Task ごとの AI Agent との会話履歴 |
 | Pre-work | AI がユーザーの依頼を待たずに先回りして進める作業 |
