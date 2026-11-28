@@ -5,7 +5,7 @@ import type { Task } from "./task.spec.ts";
 
 /**
  * Task と、その計画の中の Action Item・完了したときにすること・優先度の決まり方。どれも Task を通してだけ扱い、Task と一緒に変わる。
- * Task がいつ終わるか・Action Item に番が来たかは、Task の計画と Action Item の状態を一緒に見て決まる。AI が作業中かは、Action Item が持つ Agent Run の ID の先（Agent Thread 集約の Agent Run）で決まる。
+ * Task がいつ終わるか・Action Item に番が来たかは、Task の計画と Action Item の状態を一緒に見て決まる。AI が作業中かは、Task にも Action Item にも持たず、Agent Thread 集約の Agent Run の段階から導く。
  */
 export const displayName = "Task";
 export const root = "task";

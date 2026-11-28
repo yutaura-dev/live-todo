@@ -2,7 +2,7 @@
  * Task に届いたもの 1 つ（Task Input）。Source と Task の間の抽象化を受け持つ型で、保存しない。
  * Task の入口は receive の 1 本で、届いたものを、AI か規則が Task の言葉（項目の変化）に置き換える。項目が変わったときだけ、Task の出来事（Task Activity）が残る。
  * 何も変えなかった入力（関係ないと判定した など）と判定できなかった入力は、Task の外の受け取りのログに残す。ユーザーには見せず、デバッグと判定の精度の見直しに使う（本文やトークンは残さない）。
- * AI の作業の始まり・終わり・やめたは、作業の操作（startWork・finishWork・stopWork）で受け、「AI の作業」の変化として残す。Agent は Task を直接は変えないので、Agent の成果物（調べた結果・下書き など）は「AI の作業の成果」として届き、Generationが Task の言葉に置き換える。
+ * AI の作業の始まり・終わり・やめたは、noteWork で受け、「AI の作業」の出来事として残す（作業中かは Task に持たず、Agent Run から導く）。Agent は Task を直接は変えないので、Agent の成果物（調べた結果・下書き など）は「AI の作業の成果」として届き、Generationが Task の言葉に置き換える。
  */
 export type TaskInput = {
   /** 何が届いたか */
