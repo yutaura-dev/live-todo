@@ -67,7 +67,7 @@ export function initial(actor: Actor): CompletionEffect {
     addedBy: actor.kind === "agent" ? { type: "AI" } : { type: "ユーザー" },
     id: "ce1",
     title: "レビュー依頼のメールをアーカイブする",
-    subject: { accountId: "gmail-work", uri: "gmail:thread/18c2f" },
+    subject: { uri: "gmail://me@acme.co.jp/thread/18c2f" },
     operation: "gmail.archive",
     params: { scope: "受け取り済み" },
     version: null,
@@ -139,7 +139,6 @@ export const invariants = {
     !FINISHED.includes(before.delivery) || (before.delivery === after.delivery && before.checked === after.checked),
   "頼むのは ☑ が付いているものだけ": (effect: CompletionEffect) => effect.delivery !== "頼んだ" || effect.checked,
   "何に・どの操作で・どの中身を・どの版に書き込むかは、足したあと変わらない（☑ と完了のボタンが承認なので）": (before: CompletionEffect, after: CompletionEffect) =>
-    before.subject.accountId === after.subject.accountId &&
     before.subject.uri === after.subject.uri &&
     before.operation === after.operation &&
     JSON.stringify(before.params) === JSON.stringify(after.params) &&

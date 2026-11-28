@@ -16,9 +16,7 @@ export type SourceItem = {
   history: Activity[];
   /** Source Item を見分ける ID */
   id: string;
-  /** どのアカウントから届いたか（会社の GitHub・私用の Gmail など）。どの Source かは、アカウントが知っている */
-  accountId: string;
-  /** Source の中で、この事実を見分ける識別子（github:acme/app/pull/42・gmail:thread/18c2f… など）。開く先（URL）とは限らない。同じ事実かは、アカウントとこの識別子の組で決まる */
+  /** この事実を見分ける識別子。アカウントの origin（scheme と authority）にパスを続けたもの（github://yutaura@github.com/acme/app/pull/42・gmail://me@gmail.com/thread/18c2f… など）。開く先（URL）とは限らない。同じ事実かは、この識別子だけで決まる。どのアカウントから届いたか・どの Source かは、origin で分かる */
   uri: string;
   /** 開く先（なければ null） */
   url: string | null;
@@ -46,7 +44,7 @@ export const actors: Record<string, Actor> = {
 /**
  * 取り込む
  *
- * 同じ事実かは、アカウントと uri の組で決まる。取り込みはまずこの組で探し、あれば「事実が変わる」か「また現れる」にする（同じ事実を 2 件作らない）。
+ * 同じ事実かは、uri だけで決まる。取り込みはまず uri で探し、あれば「事実が変わる」か「また現れる」にする（同じ事実を 2 件作らない）。
  * 同期が、Source から初めて届いた 1 件を取り込む。Slack の会話・Gmail のスレッドのように、何件かをまとめて 1 つの事実にする単位は、Source ごとに決める。
  */
 export function initial(actor: Actor): SourceItem {
@@ -62,8 +60,7 @@ export function initial(actor: Actor): SourceItem {
     },
     history: [{ kind: "appeared", observedAt: "2026-11-28T00:00:00Z", sourceAt: "2026-11-27T23:50:00Z", removal: null, changes: [] }],
     id: "s1",
-    accountId: "github-work",
-    uri: "github:acme/app/pull/42",
+    uri: "github://yutaura@github.com/acme/app/pull/42",
     url: "https://github.com/acme/app/pull/42",
     firstSeenAt: "2026-11-28T00:00:00Z",
   };
@@ -166,14 +163,13 @@ export const scenarios = {
 
 
 export const invariants = {
-  "見分けるための値（ID・アカウント・uri・初めて届いた日時）は、変わらない": (before: SourceItem, after: SourceItem) =>
-    before.id === after.id && before.accountId === after.accountId && before.uri === after.uri && before.firstSeenAt === after.firstSeenAt,
+  "見分けるための値（ID・uri・初めて届いた日時）は、変わらない": (before: SourceItem, after: SourceItem) =>
+    before.id === after.id && before.uri === after.uri && before.firstSeenAt === after.firstSeenAt,
 };
 
 export const reviewed = {
   "ignores-input:remove": "削除されたか範囲の外になったかで、Source Item の振る舞いは変わらない。消えた理由は出来事に残り、Task が受け取って判定するときの材料になる",
   "unused-field:id": "見分けるための値で、振る舞いは変えない。作ったあと変わらないことを、不変条件で確かめるために読んでいる",
-  "unused-field:accountId": "見分けるための値で、振る舞いは変えない。作ったあと変わらないことを、不変条件で確かめるために読んでいる",
   "unused-field:uri": "見分けるための値で、振る舞いは変えない。作ったあと変わらないことを、不変条件で確かめるために読んでいる",
   "unused-field:firstSeenAt": "初めて届いた日時で、振る舞いは変えない。作ったあと変わらないことを、不変条件で確かめるために読んでいる",
 };

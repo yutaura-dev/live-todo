@@ -20,34 +20,32 @@ export type Condition = {
  * 1 つの項目（PR・メールのスレッド）だけでなく、検索やワークフローの実行も、provider が決めた識別子で表す（github:search/acme/deploy?q=… など）。
  */
 export type Subject = {
-  /** どのアカウントで見るか */
-  accountId: string;
-  /** Source の中で、対象を見分ける識別子 */
+  /** 対象を見分ける識別子。アカウントの origin（scheme と authority）にパスを続けたもの（github://yutaura@github.com/acme/app/pull/42）。どのアカウントで見るかは、origin で分かる */
   uri: string;
 };
 
 export const invariants = {
-  "見張る対象は、アカウントと識別子を持つ": (condition: Condition) => condition.subject.accountId.trim() !== "" && condition.subject.uri.trim() !== "",
+  "見張る対象は、アカウントの origin を頭に持つ識別子を持つ": (condition: Condition) => /^[a-z][a-z0-9-]*:\/\/[^/]+\/./.test(condition.subject.uri),
   "条件の名前は、provider の名前から始まる（provider が実装する条件だけを使う）": (condition: Condition) => /^[a-z][a-z0-9-]*\.[a-z_]+$/.test(condition.name),
   "何を待つかの説明がある": (condition: Condition) => condition.label.trim() !== "",
 };
 
-const pr: Subject = { accountId: "github-work", uri: "github:acme/app/pull/42" };
+const pr: Subject = { uri: "github://yutaura@github.com/acme/app/pull/42" };
 
 export const examples = {
   valid: {
     "merge を待つ": { subject: pr, name: "github.merged", afterStart: false, label: "PR #42 が merge される" },
     "待ち始めたあとのレビューを待つ": { subject: pr, name: "github.review_submitted", afterStart: true, label: "PR #42 にレビューが付く" },
     "deploy の PR に入るのを待つ（検索の対象）": {
-      subject: { accountId: "github-work", uri: "github:search/acme/deploy?q=is:open+label:release" },
+      subject: { uri: "github://yutaura@github.com/search/acme/deploy?q=is:open+label:release" },
       name: "github.includes_merge_commit",
       afterStart: false,
       label: "PR #42 の変更が deploy の PR に入る",
     },
-    "送ったメールに返信が来る": { subject: { accountId: "gmail-private", uri: "gmail:thread/18c2f" }, name: "gmail.reply_received", afterStart: true, label: "見積もりの返信が来る" },
+    "送ったメールに返信が来る": { subject: { uri: "gmail://me@gmail.com/thread/18c2f" }, name: "gmail.reply_received", afterStart: true, label: "見積もりの返信が来る" },
   },
   invalid: {
-    "対象の識別子が空": { subject: { accountId: "github-work", uri: "" }, name: "github.merged", afterStart: false, label: "merge される" },
+    "対象の識別子が空": { subject: { uri: "" }, name: "github.merged", afterStart: false, label: "merge される" },
     "provider のない条件の名前": { subject: pr, name: "merged", afterStart: false, label: "merge される" },
     "説明がない": { subject: pr, name: "github.merged", afterStart: false, label: " " },
   },

@@ -76,7 +76,7 @@ export function initial(actor: Actor, reason: "関わっている" | "待って�
   return {
     reason,
     ...RESTART,
-    subject: { accountId: "github-work", uri: "github:acme/app/pull/42" },
+    subject: { uri: "github://yutaura@github.com/acme/app/pull/42" },
     waitingItems: reason === "待っている" ? [ITEMS["Task 1 の Action Item"]] : [],
     revision: null,
     fingerprint: null,
@@ -195,7 +195,7 @@ export const inputs = {
 
 export const invariants = {
   "待っている・両方なのは、待っている Action Item があるときだけ": (target: WatchTarget) => (target.reason === "待っている" || target.reason === "両方") === target.waitingItems.length > 0,
-  "見張る対象は、作ったあと変わらない": (before: WatchTarget, after: WatchTarget) => before.subject.accountId === after.subject.accountId && before.subject.uri === after.subject.uri,
+  "見張る対象は、作ったあと変わらない": (before: WatchTarget, after: WatchTarget) => before.subject.uri === after.subject.uri,
 };
 
 export const links = [
