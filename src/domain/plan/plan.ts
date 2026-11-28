@@ -30,7 +30,15 @@ export type How =
     };
 export type Definition = { readonly title: string; readonly effort: Effort; readonly due: DueDate | null; readonly completes: boolean; readonly how: How };
 export type ItemStatus = "まだ" | "済んだ" | "やらなくなった";
-export type ActionItem = { readonly id: string; readonly status: ItemStatus; readonly definition: Definition; readonly addedFrom: string | null; readonly chosen?: number | null | undefined };
+export type ActionItem = {
+  readonly id: string;
+  readonly status: ItemStatus;
+  readonly definition: Definition;
+  readonly addedFrom: string | null;
+  readonly chosen?: number | null | undefined;
+  /** Claude Code に頼んだ作業（Agent Run）の ID。作業の段階と成果は Agent Run が持つ */
+  readonly agentRunId?: string | null | undefined;
+};
 export type PlanNode =
   | { readonly type: "item"; readonly item: ActionItem }
   | { readonly type: "group"; readonly group: PlanGroup }
@@ -71,6 +79,7 @@ const ActionItemSchema = Schema.Struct({
   definition: DefinitionSchema,
   addedFrom: Schema.NullOr(Schema.String),
   chosen: Schema.optional(Schema.NullOr(Schema.Number)),
+  agentRunId: Schema.optional(Schema.NullOr(Schema.String)),
 });
 const PlanNodeSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("item"), item: ActionItemSchema }),
@@ -214,6 +223,66 @@ export const completeByWrite = Effect.fn("Plan.completeByWrite")(function* (plan
   yield* ensure(item?.status === "まだ", "まだのときだけ");
   yield* ensure(turnOf(plan, id) === "番が来ている", "番が来ているときだけ");
   yield* ensure(item?.definition.how.type === "write", "書き込みで果たされる Action Item だけ");
+  return setStatus(plan, id, "済んだ");
+});
+
+export const agentRunOf = (plan: PlanGroup, id: string) => findItem(plan, id)?.agentRunId ?? null;
+const withRun = (plan: PlanGroup, id: string, runId: string) => mapItems(plan, (item) => (item.id === id ? { ...item, agentRunId: runId } : item));
+
+/** Claude Code に頼む（ボタンで）。番が来る前でも頼める（果たすのは番が来てから） */
+export const requestAgent = Effect.fn("Plan.requestAgent")(function* (
+  plan: PlanGroup,
+  id: string,
+  actor: PlanActor,
+  given: { running: "終わっていない作業はない" | "終わっていない作業がある"; task: "開いている" | "開いていない" },
+  runId: string,
+) {
+  const ensure = guard("action-item", "request");
+  const item = findItem(plan, id);
+  yield* ensure(actor.kind === "user", "ユーザーだけ");
+  yield* ensure(item?.status === "まだ", "まだのときだけ");
+  yield* ensure(item?.definition.how.type === "claude", "Claude Code が果たす Action Item だけ");
+  yield* ensure(given.running === "終わっていない作業はない", "この Action Item の作業が終わっているときだけ（待ち行列も含む）");
+  yield* ensure(given.task === "開いている", "Task がやること のときだけ（完了待ちの Task では頼まない）");
+  return withRun(plan, id, runId);
+});
+
+/** 番が来たので、自動で Claude Code に頼む（自動でやってよい範囲に入る作業だけ。一度だけ） */
+export const autoStartAgent = Effect.fn("Plan.autoStartAgent")(function* (
+  plan: PlanGroup,
+  id: string,
+  actor: PlanActor,
+  given: { policy: "範囲に入る" | "範囲に入らない"; task: "やること" | "やることでない" },
+  runId: string,
+) {
+  const ensure = guard("action-item", "autoStart");
+  const item = findItem(plan, id);
+  const how = item?.definition.how;
+  yield* ensure(actor.kind === "app", "アプリだけ");
+  yield* ensure(item?.status === "まだ", "まだのときだけ");
+  yield* ensure(turnOf(plan, id) === "番が来ている", "番が来ているときだけ");
+  yield* ensure(how?.type === "claude" && how.trigger === "auto", "自動でやる Action Item だけ");
+  yield* ensure((item?.agentRunId ?? null) === null, "一度も頼んでいないときだけ");
+  yield* ensure(given.policy === "範囲に入る", "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）");
+  yield* ensure(given.task === "やること", "Task がやること のときだけ（完了待ちでは、自動で頼まない）");
+  return withRun(plan, id, runId);
+});
+
+/** Claude Code がやり遂げた作業で、Action Item を果たす（作業がやり遂げたとき、または番が来たとき） */
+export const succeedByAgent = Effect.fn("Plan.succeedByAgent")(function* (
+  plan: PlanGroup,
+  id: string,
+  actor: PlanActor,
+  given: { run: "やり遂げた" | "まだやり遂げていない"; subject: "頼んだときのまま" | "変わった" },
+) {
+  const ensure = guard("action-item", "succeed");
+  const item = findItem(plan, id);
+  yield* ensure(actor.kind === "app", "アプリだけ");
+  yield* ensure(item?.status === "まだ", "まだのときだけ");
+  yield* ensure(turnOf(plan, id) === "番が来ている", "番が来ているときだけ（番が来る前にやり遂げたら、番が来るまで待つ）");
+  yield* ensure(item?.definition.how.type === "claude" && (item.agentRunId ?? null) !== null, "Claude Code に頼んだ Action Item だけ");
+  yield* ensure(given.run === "やり遂げた", "頼んだ作業がやり遂げたときだけ");
+  yield* ensure(given.subject === "頼んだときのまま", "頼んだときから元の項目（PR の commit など）が変わっていないときだけ（変わっていたら果たさず、もう一度頼むよう見せる）");
   return setStatus(plan, id, "済んだ");
 });
 

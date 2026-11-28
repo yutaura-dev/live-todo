@@ -4,7 +4,7 @@ import { DateTime, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
 import { fromDrafts } from "../plan/plan.js";
-import { attachFact, complete, confirmCompletion, create, finishCompletion, noteProgress, receive, revisePlan, defineCompletionByHand, detachFact, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
+import { attachFact, complete, confirmCompletion, create, finishCompletion, noteProgress, noteWork, receive, revisePlan, defineCompletionByHand, detachFact, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
 const user = { kind: "user" } as const;
@@ -410,5 +410,32 @@ describe(specOf(Spec.finishCompletion), () => {
   it.effect(specOf(Spec.finishCompletion, "完了したときにすることが、すべて書き込めた・外されたときだけ"), () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* denied(finishCompletion(yield* waiting, app, "まだ・書き込めなかったものがある")), "完了したときにすることが、すべて書き込めた・外されたときだけ");
+    }));
+});
+
+describe(specOf(Spec.noteWork), () => {
+  it.effect("AI の作業が始まった・終わったことを、どの作業かと一緒に出来事に残す", () =>
+    Effect.gen(function* () {
+      const started = yield* noteWork(yield* byHand(), app, "始まった", "agent-run:ar1");
+      const last = started.history.at(-1);
+      assert.deepStrictEqual({ changes: last?.changes, cause: last?.cause, by: last?.by }, { changes: [{ field: "AI の作業", before: null, after: "始まった", target: null }], cause: "agent-run:ar1", by: "アプリ" });
+    }));
+
+  it.effect(specOf(Spec.noteWork, "アプリだけ（Agent Run の段階を受ける）"), () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* denied(noteWork(yield* byHand(), ai, "終わった", "agent-run:ar1")), "アプリだけ（Agent Run の段階を受ける）");
+    }));
+
+  it.effect(specOf(Spec.noteWork, "作業が始まるのは、やること のときだけ"), () =>
+    Effect.gen(function* () {
+      const done = yield* complete(yield* byHand(), user, "自分で完了にした", { effects: "完了したときにすることがない", added: "足した項目はすべて済んだ" });
+      assert.strictEqual(yield* denied(noteWork(done, app, "始まった", "agent-run:ar1")), "作業が始まるのは、やること のときだけ");
+    }));
+
+  it.effect("終わった Task でも、作業が終わった・やめたことは残す", () =>
+    Effect.gen(function* () {
+      const done = yield* complete(yield* byHand(), user, "自分で完了にした", { effects: "完了したときにすることがない", added: "足した項目はすべて済んだ" });
+      const noted = yield* noteWork(done, app, "やめた", "agent-run:ar1");
+      assert.strictEqual(noted.history.at(-1)?.changes[0]?.after, "やめた");
     }));
 });

@@ -6,6 +6,7 @@ import { SyncRunner } from "./sources/sync-runner.js";
 import { WriteService } from "./writes/write-service.js";
 import { AiSettingsService } from "./ai/ai-settings-service.js";
 import { TaskService } from "./task-service.js";
+import { AgentService } from "./agent/agent-service.js";
 
 const decodeCommand = Schema.decodeUnknownEffect(Command);
 const decodeQuery = Schema.decodeUnknownEffect(Query);
@@ -15,13 +16,26 @@ const decodeInboxCommand = Schema.decodeUnknownEffect(InboxCommand);
 export const handleCommand = (raw: unknown) =>
   Effect.gen(function* () {
     const service = yield* TaskService;
+    const agents = yield* AgentService;
     return yield* decodeCommand(raw).pipe(
       Effect.matchEffect({
         onFailure: () => Effect.succeed({ ok: false, reason: "操作の形が正しくありません" } as const),
-        onSuccess: (command) => service.command(command),
+        onSuccess: (command) =>
+          service.command(command).pipe(
+            // 済ませた・やらなくなった Action Item の作業をやめ、番が来た Action Item をやり遂げていた作業で果たす
+            Effect.tap((reply) => (reply.ok && "id" in command ? settleAgents(agents, service, command.id) : Effect.void)),
+          ),
       }),
     );
   });
+
+const settleAgents = (agents: AgentService["Service"], tasks: TaskService["Service"], taskId: string) =>
+  Effect.gen(function* () {
+    yield* agents.settleFinished(taskId);
+    yield* agents.autoStart();
+    yield* agents.pump();
+    yield* tasks.notify(taskId);
+  }).pipe(Effect.catchTag("StoreCorrupted", () => Effect.void));
 
 export const handleQuery = (raw: unknown) =>
   Effect.gen(function* () {
@@ -67,7 +81,10 @@ export const syncOnce = Effect.gen(function* () {
   const outcomes = yield* runner.runOnce();
   // 取り込みで番が来た「自動でやる」書き込みを、範囲に入るものだけ書き込む
   const written = yield* writes.autoRun().pipe(Effect.orElseSucceed(() => []));
-  for (const id of new Set([...outcomes.flatMap((outcome) => outcome.changedTaskIds), ...written])) yield* tasks.notify(id);
+  const agents = yield* AgentService;
+  const asked = yield* agents.autoStart().pipe(Effect.orElseSucceed(() => []));
+  yield* agents.pump().pipe(Effect.ignore);
+  for (const id of new Set([...outcomes.flatMap((outcome) => outcome.changedTaskIds), ...written, ...asked])) yield* tasks.notify(id);
   return outcomes;
 });
 
@@ -78,6 +95,8 @@ export const handleInbox = (raw: unknown) =>
     const accounts = yield* AccountService;
     const tasks = yield* TaskService;
     const writes = yield* WriteService;
+    const agents = yield* AgentService;
+    const forTask = (taskId: string) => <A>(reply: Reply<A>) => (reply.ok ? { ok: true as const, value: { taskId } } : reply);
     if (raw !== null) {
       const decoded = yield* decodeInboxCommand(raw).pipe(Effect.option);
       if (decoded._tag === "None") return { ok: false, reason: "操作の形が正しくありません" } as Reply<InboxView>;
@@ -105,7 +124,15 @@ export const handleInbox = (raw: unknown) =>
                           ? yield* writes.confirmCompletion(command.taskId, command.shown).pipe(Effect.map((reply) => (reply.ok ? { ok: true as const, value: { taskId: command.taskId } } : reply)))
                           : command._tag === "EffectAction"
                             ? yield* writes.effectAction(command.taskId, command.effectId, command.action).pipe(Effect.map((reply) => (reply.ok ? { ok: true as const, value: { taskId: command.taskId } } : reply)))
-                            : { ok: true, value: yield* syncOnce };
+                            : command._tag === "AskAgent"
+                              ? yield* agents.ask(command.taskId, command.request).pipe(Effect.map(forTask(command.taskId)), Effect.tap(() => agents.pump()))
+                              : command._tag === "RequestAgent"
+                                ? yield* agents.requestFromItem(command.taskId, command.itemId).pipe(Effect.map(forTask(command.taskId)), Effect.tap(() => agents.pump()))
+                                : command._tag === "StopAgent"
+                                  ? yield* agents.stop(command.id)
+                                  : command._tag === "CancelAgent"
+                                    ? yield* agents.cancel(command.id)
+                                    : { ok: true, value: yield* syncOnce };
       if (!result.ok) return result as Reply<InboxView>;
       const value = result.value as { taskId?: string | null } | null;
       if (value !== null && typeof value === "object" && "taskId" in value && typeof value.taskId === "string") yield* tasks.notify(value.taskId);

@@ -7,7 +7,15 @@ const STATE_CLASS = { 番が来ている: "now", 番待ち: "waiting", 済んだ
 const HOW_LABELS = { human: null, claude: "Claude Code", condition: "待つ", write: "書き込み", decision: null } as const;
 
 /** 計画。番が来ている Action Item にだけ操作を出す（番待ちのものは、押せても断られるだけなので出さない） */
-export function PlanView(props: { rows: ReadonlyArray<PlanRow> | null; open: boolean; onCommand: (command: PanelCommand) => void; onRequestWrite?: (itemId: string) => void }) {
+export function PlanView(props: {
+  rows: ReadonlyArray<PlanRow> | null;
+  open: boolean;
+  onCommand: (command: PanelCommand) => void;
+  onRequestWrite?: (itemId: string) => void;
+  onRequestAgent?: (itemId: string) => void;
+  /** 終わっていない Claude Code の作業がある Action Item（もう一度は頼めない） */
+  busyItems?: ReadonlySet<string>;
+}) {
   const { rows } = props;
   const items = rows?.filter((row) => row.kind === "item" || row.kind === "decision") ?? [];
   const done = items.filter((row) => row.turn === "済んだ" || row.turn === "やらない").length;
@@ -53,6 +61,12 @@ export function PlanView(props: { rows: ReadonlyArray<PlanRow> | null; open: boo
                   {props.open && row.kind === "item" && row.turn === "番が来ている" && row.how === "write" && props.onRequestWrite && (
                     <Button size="sm" tone="primary" className="ui-self-start" onClick={() => props.onRequestWrite?.(row.id)}>
                       書き込みを頼む
+                    </Button>
+                  )}
+                  {/* Claude Code には番が来る前でも頼める（果たすのは番が来てから。action-item.spec） */}
+                  {props.open && row.kind === "item" && row.how === "claude" && (row.turn === "番が来ている" || row.turn === "番待ち") && props.onRequestAgent && !props.busyItems?.has(row.id) && (
+                    <Button size="sm" tone="secondary" className="ui-self-start" onClick={() => props.onRequestAgent?.(row.id)}>
+                      Claude Code に頼む
                     </Button>
                   )}
                   {props.open && row.kind === "item" && row.turn === "済んだ" && (row.how === "human" || row.how === "claude") && (

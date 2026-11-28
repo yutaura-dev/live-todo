@@ -16,6 +16,8 @@ export class AiServices extends Context.Service<
   {
     readonly decisions: Effect.Effect<Option.Option<Decisions["Service"]>>;
     readonly generation: Effect.Effect<Option.Option<Generation["Service"]>>;
+    /** AI 設定が使えるか（Agent に作業を渡してよいか。3 つとも揃うまで AI を呼ばない） */
+    readonly active: Effect.Effect<boolean>;
     install(use: AiUse, connected: Connected): Effect.Effect<void>;
     setActive(active: boolean): Effect.Effect<void>;
     onAuthFailure(handler: (error: AiUnreachableError) => Effect.Effect<void>): Effect.Effect<void>;
@@ -43,6 +45,7 @@ export class AiServices extends Context.Service<
       return AiServices.of({
         decisions,
         generation,
+        active: Effect.map(Ref.get(state), (s) => s.active),
         install: (use, connected) => Ref.update(state, (s) => ({ ...s, connected: { ...s.connected, [use]: connected } })),
         setActive: (active) => Ref.update(state, (s) => ({ ...s, active })),
         onAuthFailure: (handler) => Ref.update(state, (s) => ({ ...s, onAuthFailure: handler })),
@@ -60,6 +63,7 @@ export class AiServices extends Context.Service<
       return AiServices.of({
         decisions: Effect.succeed(decisions),
         generation: Effect.succeed(generation),
+        active: Effect.succeed(true),
         install: () => Effect.void,
         setActive: () => Effect.void,
         onAuthFailure: () => Effect.void,

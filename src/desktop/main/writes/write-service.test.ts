@@ -272,7 +272,11 @@ describe("WriteService（承認がなければ書き込まない）", () => {
       return Effect.gen(function* () {
         const service = yield* WriteService;
         yield* service.setLimit("github.merge", "外への書き込み（下書き）");
-        assert.deepStrictEqual((yield* service.autonomy()).map((row) => [row.operation, row.limit]), [["github.merge", "外への書き込み（下書き）"]]);
+        assert.deepStrictEqual((yield* service.autonomy()).map((row) => [row.operation, row.limit]), [
+          ["github.merge", "外への書き込み（下書き）"],
+          ["claude-code.read", null],
+          ["claude-code.fix", null],
+        ]);
       }).pipe(Effect.provide(layer));
     });
   });
