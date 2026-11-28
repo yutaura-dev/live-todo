@@ -167,6 +167,12 @@ export const defineCompletionByHand = Effect.fn("Task.defineCompletionByHand")(f
   return yield* noted(task, actor, [{ field: "完了条件", before: "未定", after: "まだ", target: null }], { completion: "まだ" });
 });
 
+/** 優先度の段階が変わった（優先度の決まり方から届く）。ラベル未定は「ラベル未定」として残す */
+export const notePriority = Effect.fn("Task.notePriority")(function* (task: Task, actor: Actor, before: string | null, after: string | null) {
+  yield* guard("notePriority")(isOpen(task), "やること のときだけ（終わった Task の優先度は判定しない）");
+  return yield* noted(task, actor, [{ field: "優先度", before, after, target: null }], {});
+});
+
 /** 見ても、最後に変えた日時は変えない（Task の中身は変わらないので） */
 export const view = Effect.fn("Task.view")(function* (task: Task, actor: Actor) {
   yield* guard("view")(actor.kind === "user", "ユーザーだけ");

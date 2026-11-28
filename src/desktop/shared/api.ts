@@ -2,10 +2,16 @@ import { Schema } from "effect";
 import { DueDate } from "../../domain/values.js";
 import { TaskActivity } from "../../domain/task/activity.js";
 import { Closure, Completion, TaskStatus } from "../../domain/task/task.js";
+import { PrioritizationStatus } from "../../domain/priority/prioritization.js";
+import { PriorityLevel } from "../../llm/shared/vocabulary.js";
 
 // renderer と main の間でやりとりする形。renderer はこれだけを知り、DB・秘密情報・AI には触れない（ADR-0002）
 
 export const Mark = Schema.Literals(["新着", "更新マーク", "なし"]);
+
+/** 見せる優先度（いまのラベルと、どう決まったか。まだ決め始めていなければ status は未判定） */
+export const PriorityView = Schema.Struct({ status: PrioritizationStatus, level: Schema.NullOr(PriorityLevel), reason: Schema.NullOr(Schema.String) });
+export type PriorityView = typeof PriorityView.Type;
 
 export const BoardCard = Schema.Struct({
   id: Schema.String,
@@ -13,6 +19,8 @@ export const BoardCard = Schema.Struct({
   status: TaskStatus,
   mark: Mark,
   due: Schema.NullOr(Schema.String),
+  blocksOthers: Schema.Boolean,
+  priority: PriorityView,
 });
 export type BoardCard = typeof BoardCard.Type;
 
@@ -25,6 +33,7 @@ export const TaskView = Schema.Struct({
   closure: Schema.NullOr(Closure),
   due: Schema.NullOr(DueDate),
   mark: Mark,
+  priority: PriorityView,
   history: Schema.Array(TaskActivity),
   createdAt: Schema.String,
 });
@@ -41,6 +50,8 @@ export const Command = Schema.Union([
   Schema.TaggedStruct("SetDue", { id: Id, due: Schema.NullOr(DueDate) }),
   Schema.TaggedStruct("DefineCompletion", { id: Id }),
   Schema.TaggedStruct("ViewTask", { id: Id }),
+  Schema.TaggedStruct("SetPriority", { id: Id, level: PriorityLevel }),
+  Schema.TaggedStruct("ClearPriority", { id: Id }),
 ]);
 export type Command = typeof Command.Type;
 

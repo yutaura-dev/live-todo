@@ -16,6 +16,7 @@ const view = (card: BoardCard): TaskView => ({
   closure: card.status === "終わった" ? { outcome: "done", reason: "自分で完了にした" } : null,
   due: null,
   mark: card.mark,
+  priority: card.priority,
   history: [{ kind: "できた", by: "ユーザー", occurredAt: "2026-11-28T09:00:00.000Z", changes: [], cause: "手で足した" }],
   createdAt: "2026-11-28T09:00:00.000Z",
 });
@@ -38,13 +39,33 @@ function fakeApi(cards: BoardCard[], reply?: (command: Command) => Reply<TaskVie
 }
 
 const cards: BoardCard[] = [
-  { id: "t1", title: "請求書を送る", status: "やること", mark: "新着", due: "金曜まで" },
-  { id: "t2", title: "週報を書く", status: "終わった", mark: "なし", due: null },
+  { id: "t1", title: "請求書を送る", status: "やること", mark: "新着", due: "金曜まで", blocksOthers: false, priority: { status: "アプリが決めた", level: "3 日以内", reason: "期日まで 3 日" } },
+  { id: "t2", title: "週報を書く", status: "終わった", mark: "なし", due: null, blocksOthers: false, priority: { status: "決めるのをやめた", level: null, reason: null } },
 ];
+
+const openKanban = async () => fireEvent.click(await screen.findByRole("button", { name: "カンバン" }));
+
+describe("見通し", () => {
+  it("最初に見通しを出し、Task を優先度の段に並べる", async () => {
+    render(<App api={fakeApi(cards).api} />);
+    const band = await screen.findByRole("region", { name: /3 日以内/ });
+    assert.isNotNull(within(band).getByRole("button", { name: /請求書を送る/ }));
+  });
+
+  it("ラベル未定の Task は、その場で優先度を決められる", async () => {
+    const undecided: BoardCard = { ...cards[0]!, priority: { status: "ラベル未定", level: null, reason: null } };
+    const { api, sent } = fakeApi([undecided]);
+    render(<App api={api} />);
+    const group = await screen.findByRole("group", { name: "「請求書を送る」にいつまでに手を付けるか" });
+    fireEvent.click(within(group).getByRole("button", { name: "今日中" }));
+    await waitFor(() => assert.deepStrictEqual(sent.at(-1), { _tag: "SetPriority", id: "t1", level: "今日中" }));
+  });
+});
 
 describe("カンバン", () => {
   it("Task を列（Todo・完了待ち・完了）に分けて並べ、まだ見ていない Task に新着の印を付ける", async () => {
     render(<App api={fakeApi(cards).api} />);
+    await openKanban();
     const todo = await screen.findByRole("region", { name: /Todo/ });
     assert.include(within(todo).getByText("請求書を送る").closest("li")?.textContent ?? "", "新着");
     assert.isNotNull(within(screen.getByRole("region", { name: /^完了\s*\d+$/ })).queryByText("週報を書く"));
@@ -53,6 +74,7 @@ describe("カンバン", () => {
   it("「Task を足す」で題を書いて足すと、手で足した Task として送る", async () => {
     const { api, sent } = fakeApi(cards);
     render(<App api={api} />);
+    await openKanban();
     fireEvent.click(await screen.findByRole("button", { name: "Task を足す" }));
     fireEvent.change(screen.getByLabelText("何をするか"), { target: { value: "  歯医者を予約する " } });
     fireEvent.click(screen.getByRole("button", { name: "足す" }));
@@ -62,6 +84,7 @@ describe("カンバン", () => {
   it("題が空のままでは足せない", async () => {
     const { api, sent } = fakeApi(cards);
     render(<App api={api} />);
+    await openKanban();
     fireEvent.click(await screen.findByRole("button", { name: "Task を足す" }));
     assert.isTrue((screen.getByRole("button", { name: "足す" }) as HTMLButtonElement).disabled);
     assert.deepStrictEqual(sent, []);
@@ -88,6 +111,7 @@ describe("Task の詳細", () => {
 
   it("終わった Task には「やり直す」を出し、「完了にする」は出さない", async () => {
     render(<App api={fakeApi(cards).api} />);
+    await openKanban();
     fireEvent.click(await screen.findByRole("button", { name: /週報を書く/ }));
     await screen.findByRole("button", { name: "やり直す" });
     assert.isNull(screen.queryByRole("button", { name: "完了にする" }));
@@ -99,5 +123,24 @@ describe("Task の詳細", () => {
     fireEvent.click(await screen.findByRole("button", { name: /請求書を送る/ }));
     fireEvent.click(await screen.findByRole("button", { name: "完了にする" }));
     assert.isNotNull(await screen.findByText("やること のときだけ"));
+  });
+
+  it("優先度を選ぶと、ユーザーが決めた優先度として送る", async () => {
+    const { api, sent } = fakeApi(cards);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /請求書を送る/ }));
+    const panel = await screen.findByRole("complementary", { name: "Task の詳細" });
+    fireEvent.click(within(within(panel).getByRole("group", { name: "いつまでに手を付けるか" })).getByRole("button", { name: "今すぐ" }));
+    await waitFor(() => assert.deepStrictEqual(sent.at(-1), { _tag: "SetPriority", id: "t1", level: "今すぐ" }));
+  });
+
+  it("期日を入れると、その日の終わりまでを期日として送る", async () => {
+    const { api, sent } = fakeApi(cards);
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /請求書を送る/ }));
+    fireEvent.change(await screen.findByLabelText("期日"), { target: { value: "2026-12-04" } });
+    await waitFor(() => assert.strictEqual(sent.at(-1)?._tag, "SetDue"));
+    const due = (sent.at(-1) as Extract<Command, { _tag: "SetDue" }>).due;
+    assert.deepStrictEqual({ text: due?.text, precision: due?.precision }, { text: "12 月 4 日まで", precision: "日" });
   });
 });

@@ -1,0 +1,8 @@
+/* デザインの .ui-app は Storybook の窓の枠に合わせて block-size: 100% なので、アプリでは画面の高さに合わせる */
+body {
+  margin: 0;
+}
+
+.ui-app {
+  block-size: 100dvh;
+}
