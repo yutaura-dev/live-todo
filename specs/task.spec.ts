@@ -27,6 +27,8 @@ export type Task = {
   plan: Plan | null;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
+  /** どの Epic に入っているか（入っていなければ null で、未分類）。1 つの Task が入る Epic は 1 つまで。だれが置いたかも持つ（ユーザーが置いた場所は、AI が変えない） */
+  epic: { epicId: string; placedBy: "AI" | "ユーザー" } | null;
   /** 作った日時・最後に変えた日時 */
   createdAt: string;
   updatedAt: string;
@@ -126,9 +128,30 @@ export const initial: Task = {
   brief: null,
   plan: null,
   sourceItemIds: [],
+  epic: null,
   createdAt: "2026-11-28T00:00:00Z",
   updatedAt: "2026-11-28T00:00:00Z",
 };
+
+/** AI が Task を Epic に入れる（新しい Task を既存の Epic に入れる・まとめて Epic を作った）。ユーザーが置いた Task は動かさない */
+export function assignEpic(task: Task, actor: Actor, placed: "未分類" | "AI が置いた" | "ユーザーが置いた"): Task {
+  ensure(actor.kind === "agent", "AI だけ");
+  ensure(placed !== "ユーザーが置いた", "ユーザーが置いていないときだけ（ユーザーが決めた置き場所は変えない）");
+  return { ...task, epic: { epicId: "e1", placedBy: "AI" } };
+}
+
+/** ユーザーが Task を別の Epic に移す・未分類にする（統合で移るときも） */
+export function moveEpic(task: Task, actor: Actor): Task {
+  ensure(actor.kind === "user", "ユーザーだけ");
+  return { ...task, epic: { epicId: "e2", placedBy: "ユーザー" } };
+}
+
+export const links = [
+  { from: complete, to: "epic", action: "finish", label: "入っている Epic の Task がすべて終わったら、Epic を終える" },
+  { from: dismiss, to: "epic", action: "finish", label: "入っている Epic の Task がすべて終わったら、Epic を終える" },
+  { from: reopen, to: "epic", action: "reactivate", label: "入っている Epic が終わっていたら、進行中に戻す" },
+  { from: moveEpic, to: "epic", label: "移した先と元の Epic で、終わったか・名前と概要を見直す" },
+];
 
 export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
@@ -300,6 +323,7 @@ export function detachFact(task: Task, actor: Actor): Task {
 }
 
 export const inputs = {
+  assignEpic: { 未分類: ["未分類"], "AI が置いた": ["AI が置いた"], ユーザーが置いた: ["ユーザーが置いた"] },
   triage: { todo: ["todo"], 要確認: ["needs_review"] },
   move: { 要確認へ: ["needs_review"], todoへ: ["todo"] },
   complete: { 自分で: ["自分で完了にした"], 完了条件を満たした: ["完了条件を満たした"] },
@@ -314,6 +338,14 @@ export const invariants = {
 };
 
 export const scenarios = {
+  "AI が Epic に入れた Task をユーザーが移したら、AI はもう動かさない": [
+    { do: triage, by: "AI", input: "todo" },
+    { do: assignEpic, by: "AI", input: "未分類", expect: { epic: { placedBy: "AI" } } },
+    { do: assignEpic, by: "ユーザー", input: "AI が置いた", denied: "AI だけ" },
+    { do: moveEpic, by: "AI", denied: "ユーザーだけ" },
+    { do: moveEpic, by: "ユーザー", expect: { epic: { placedBy: "ユーザー" } } },
+    { do: assignEpic, by: "AI", input: "ユーザーが置いた", denied: "ユーザーが置いていないときだけ（ユーザーが決めた置き場所は変えない）" },
+  ],
   "完了条件を満たして、todo の Task はやり終え、事実の変化でやり直す": [
     { do: triage, by: "同期", input: "todo", expect: { status: "todo", completion: "未定" } },
     { do: complete, by: "AI", input: "完了条件を満たした", denied: "完了条件で終えるのは、todo で完了条件をすべて満たしたときだけ" },
@@ -411,6 +443,9 @@ export const scenarios = {
 };
 
 export const reviewed = {
+  "anytime:assignEpic": "AI が Epic に入れるのは、どの列の Task でもできる（どの Task をまとめる候補にするかは、Epic の未決事項）",
+  "indistinguishable-example:assignEpic:未分類,AI が置いた": "未分類の Task を入れるのも、AI が置いた Task を別の Epic に入れ直すのも、AI が置いたことになる。止めるのはユーザーが置いたときだけ",
+  "anytime:moveEpic": "Task の置き場所は、どの列の Task でもユーザーが変えられる（終わった Task も、整理のために移せる）",
   "anyone-can:attachFact": "事実を持たせるのは、振り分けた人（同期・AI・ユーザー）の決定の結果。誰が決めても、Task は同じように持つ",
   "same-for-similar-actors:attachFact": "事実を持たせるのは、誰が振り分けたかによらない",
   "anytime:detachFact": "ユーザーは、いつでも Task から事実を外せる（終わった Task でも、記録を直すために外せる）",
