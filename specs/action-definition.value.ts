@@ -57,8 +57,24 @@ export type OptionThen =
 export type DefinitionTree = {
   /** 並べ方 */
   type: Arrangement;
-  /** 並べる中身か、入れ子の並び */
-  items: Array<ActionDefinition | DefinitionTree>;
+  /** 並べる中身か、入れ子の並びか、完了したときにすること */
+  items: Array<ActionDefinition | DefinitionTree | CompletionEffectDefinition>;
+};
+
+/**
+ * 完了したときにすることの中身（Task が完了したら書き込むこと。レビュー依頼のメールをアーカイブする・Slack の To-do を済ませる など）。
+ * やること（Action Item）ではないので、番に入らず、完了条件にもならない。計画の木のどこに置いたかで効くかが決まる（根元ならいつでも、分かれ道の枝の下なら、その枝を選んだときだけ）。
+ */
+export type CompletionEffectDefinition = {
+  type: "completionEffect";
+  /** 何をするか */
+  title: string;
+  /** 何に書き込むか（名指しする。完了のときに事実を探さない） */
+  subject: Subject;
+  /** どの操作か（provider が決めた名前） */
+  operation: string;
+  /** 操作ごとの中身（形は provider が決める） */
+  params: unknown;
 };
 
 export const Arrangement = {
@@ -89,7 +105,8 @@ export const Effort = {
 } as const;
 export type Effort = (typeof Effort)[keyof typeof Effort];
 
-const isTree = (item: ActionDefinition | DefinitionTree): item is DefinitionTree => "items" in item;
+const isTree = (item: ActionDefinition | DefinitionTree | CompletionEffectDefinition): item is DefinitionTree => "items" in item;
+const isEffect = (item: ActionDefinition | DefinitionTree | CompletionEffectDefinition): item is CompletionEffectDefinition => "type" in item && item.type === "completionEffect";
 
 function definitions(definition: ActionDefinition): ActionDefinition[] {
   if (definition.how.type !== "decision") return [definition];
@@ -97,7 +114,7 @@ function definitions(definition: ActionDefinition): ActionDefinition[] {
 }
 
 function treeDefinitions(tree: DefinitionTree): ActionDefinition[] {
-  return tree.items.flatMap((item) => (isTree(item) ? treeDefinitions(item) : definitions(item)));
+  return tree.items.flatMap((item) => (isEffect(item) ? [] : isTree(item) ? treeDefinitions(item) : definitions(item)));
 }
 
 function trees(definition: ActionDefinition): DefinitionTree[] {
@@ -106,12 +123,12 @@ function trees(definition: ActionDefinition): DefinitionTree[] {
 }
 
 function allTrees(tree: DefinitionTree): DefinitionTree[] {
-  return [tree, ...tree.items.flatMap((item) => (isTree(item) ? allTrees(item) : trees(item)))];
+  return [tree, ...tree.items.flatMap((item) => (isEffect(item) ? [] : isTree(item) ? allTrees(item) : trees(item)))];
 }
 
 /** 並びの中に、完了条件があるか（分かれ道があれば、その枝の完了条件がこの並びの完了条件になる） */
 function hasCompletion(tree: DefinitionTree): boolean {
-  return tree.items.some((item) => (isTree(item) ? hasCompletion(item) : item.completes || item.how.type === "decision"));
+  return tree.items.some((item) => (isEffect(item) ? false : isTree(item) ? hasCompletion(item) : item.completes || item.how.type === "decision"));
 }
 
 export const invariants = {
