@@ -30,6 +30,8 @@ export type Task = {
   plan: Plan | null;
   /** 期日（ない・分からなければ null）。事実から Generation が読み取り、ユーザーが直すこともできる。優先度の材料になる */
   due: DueDate | null;
+  /** 自分の返事が他の人を止めているか（PR のレビュー・返信するだけのもの・自分がブロッカーになっているもの）。事実から Generation が読み取る。優先度の材料になる */
+  blocksOthers: boolean;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
   /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す。ユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（反応は links で書く） */
@@ -145,6 +147,7 @@ export const initial: Task = {
   brief: null,
   plan: null,
   due: null,
+  blocksOthers: false,
   sourceItemIds: [],
   history: [{ kind: "できた", by: "同期", occurredAt: "2026-11-28T00:00:00Z", changes: [], cause: null }],
   lastSeenAt: null,
@@ -153,16 +156,16 @@ export const initial: Task = {
 };
 
 export const links = [
-  { from: triage, to: "priority", label: "要確認か todo に仕分けたら、優先度を決め始める（仕分け中の Task は判定しない）" },
-  { from: complete, to: "priority", action: "stop", label: "終わった・完了待ちの Task は、優先度を判定しない" },
-  { from: dismiss, to: "priority", action: "stop", label: "やらないことにした Task は、優先度を判定しない" },
-  { from: receive, to: "priority", action: "basisChanged", label: "期日・事実が変わったら、優先度を決め直す" },
-  { from: revisePlan, to: "priority", action: "basisChanged", label: "計画（Action Item の期日・手間）が変わったら、優先度を決め直す" },
-  { from: noteProgress, to: "priority", action: "basisChanged", label: "Action Item が済んで残りの手間が変わったら、優先度を決め直す" },
-  { from: setDue, to: "priority", action: "basisChanged", label: "期日を直したら、優先度を決め直す" },
-  { from: attachFact, to: "priority", action: "basisChanged", label: "事実が増えたら、優先度を決め直す" },
-  { from: detachFact, to: "priority", action: "basisChanged", label: "事実が外れたら、優先度を決め直す" },
-  { from: reopen, to: "priority", action: "resume", label: "やり直した Task は、優先度を判定し直す（ユーザーが決めたものは、そのまま）" },
+  { from: triage, to: "prioritization", label: "要確認か todo に仕分けたら、優先度を決め始める（仕分け中の Task は判定しない）" },
+  { from: complete, to: "prioritization", action: "stop", label: "終わった・完了待ちの Task は、優先度を判定しない" },
+  { from: dismiss, to: "prioritization", action: "stop", label: "やらないことにした Task は、優先度を判定しない" },
+  { from: receive, to: "prioritization", action: "basisChanged", label: "期日・事実が変わったら、優先度を決め直す" },
+  { from: revisePlan, to: "prioritization", action: "basisChanged", label: "計画（Action Item の期日・手間）が変わったら、優先度を決め直す" },
+  { from: noteProgress, to: "prioritization", action: "basisChanged", label: "Action Item が済んで残りの手間が変わったら、優先度を決め直す" },
+  { from: setDue, to: "prioritization", action: "basisChanged", label: "期日を直したら、優先度を決め直す" },
+  { from: attachFact, to: "prioritization", action: "basisChanged", label: "事実が増えたら、優先度を決め直す" },
+  { from: detachFact, to: "prioritization", action: "basisChanged", label: "事実が外れたら、優先度を決め直す" },
+  { from: reopen, to: "prioritization", action: "resume", label: "やり直した Task は、優先度を判定し直す（ユーザーが決めたものは、そのまま）" },
   { from: complete, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）。自動で終えたとき（完了条件を満たした）も同じで、途中までの報告を残す。追う項目が片付いて判断中の作業も、Task を終えるほうを先にする（ADR-0016 の判断より優先）" },
   { from: finishCompletion, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）" },
   { from: dismiss, to: "action-item", action: "skip", label: "まだの Action Item をすべてやらなくする（その作業は、Action Item の側からやめる）" },
@@ -227,7 +230,7 @@ export function setDue(task: Task, actor: Actor): Task {
 /** 優先度の段階が変わった（Priority から届く。だれが決めたかと一緒に出来事に残す。ユーザーが決めたなら既読） */
 export function notePriority(task: Task, actor: Actor): Task {
   ensure(isOpen(task), "要確認か todo のときだけ（終わった Task の優先度は判定しない）");
-  return noted(task, actor, "変わった", [{ field: "優先度", before: "今週やる", after: "今日やる", target: null }]);
+  return noted(task, actor, "変わった", [{ field: "優先度", before: "10 日以内", after: "今日中", target: null }]);
 }
 
 /** 計画の中の Action Item・完了したときにすることが進んだ（済んだ・やらない・やり直す・書き込んだ など）。だれが進めたかと一緒に出来事に残す */
