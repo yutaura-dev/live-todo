@@ -89,14 +89,12 @@ type Request =
       sameAsDefinition: boolean;
       /** その Action Item に、終わっていない書き込みがもうあるか */
       openWrite: boolean;
-      /** 自動でやってよい範囲（Autonomy Policy）に入るか（入るなら、アプリが確かめずに書き込める） */
-      withinPolicy: boolean;
-      /** 自動で書き込むとき、計画を立てた（Agent が調べた）ときの対象の版が今も同じか */
+      /** 判断表「自動でやってよいか」（Autonomy Policy）の答え。書き込む先が、その Task の事実のどれかと同じアカウントかも含めて決まる */
+      policy: "自動でやる" | "ユーザーが頼む・承認する";
+      /** 自動で書き込むとき、計画を立てた（Agent が調べた）ときの対象の版（Action Item の中身に持つ）が今も同じか。中身も Action Item の中身をそのまま写す */
       planVersion: "計画の版のまま" | "変わった";
-      /** この Action Item から、もう自動で頼んだことがあるか（自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む） */
+      /** この Action Item から、もう自動で頼んだことがあるか（自動の承認で作った書き込みが前にあるか。自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む） */
       autoTried: boolean;
-      /** 書き込む先が、その Task の事実と同じアカウント（origin）か */
-      sameAccount: boolean;
     }
   | {
       way: "完了したときにすること";
@@ -125,14 +123,13 @@ export const actors: Record<string, Actor> = {
  */
 export function initial(actor: Actor, request: Request, ready: Ready): Write {
   ensure(
-    request.way === "Action Item" ? actor.kind === "user" || (actor.kind === "app" && request.withinPolicy) : actor.kind === "app",
+    request.way === "Action Item" ? actor.kind === "user" || (actor.kind === "app" && request.policy === "自動でやる") : actor.kind === "app",
     "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ",
   );
   ensure(ready === "書き込める", "書き込める状態のときだけ");
   if (request.way === "Action Item" && actor.kind === "app") {
     ensure(request.planVersion === "計画の版のまま", "自動で書き込むのは、計画を立てたときの版が今も同じときだけ");
     ensure(!request.autoTried, "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）");
-    ensure(request.sameAccount, "自動で書き込むのは、その Task の事実と同じアカウントにだけ");
   }
   if (request.way === "Action Item") {
     ensure(request.item === "番が来ていて、まだ", "Action Item に番が来ていて、まだ済んでいないときだけ");
@@ -226,16 +223,15 @@ export function settle(write: Write, actor: Actor, result: "書けていた" | "
     : { ...write, stage: "失敗", failure: { kind: "書けていなかった", message: "" }, finishedAt: "2026-11-28T00:05:00Z" };
 }
 
-const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, withinPolicy: false, planVersion: "計画の版のまま", autoTried: false, sameAccount: true };
+const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, policy: "ユーザーが頼む・承認する", planVersion: "計画の版のまま", autoTried: false };
 const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true, openWrite: false, version: "版を持たない" };
 
 export const inputs = {
   initial: {
     "Action Item から": [FROM_ITEM, "書き込める"],
-    自動でやってよい範囲: [{ ...FROM_ITEM, withinPolicy: true }, "書き込める"],
-    "自動だが、計画のあとに版が変わった": [{ ...FROM_ITEM, withinPolicy: true, planVersion: "変わった" }, "書き込める"],
-    "自動で一度頼んで失敗した": [{ ...FROM_ITEM, withinPolicy: true, autoTried: true }, "書き込める"],
-    "自動だが、違うアカウントに書き込む": [{ ...FROM_ITEM, withinPolicy: true, sameAccount: false }, "書き込める"],
+    自動でやってよい範囲: [{ ...FROM_ITEM, policy: "自動でやる" }, "書き込める"],
+    "自動だが、計画のあとに版が変わった": [{ ...FROM_ITEM, policy: "自動でやる", planVersion: "変わった" }, "書き込める"],
+    "自動で一度頼んで失敗した": [{ ...FROM_ITEM, policy: "自動でやる", autoTried: true }, "書き込める"],
     書き込めない: [FROM_ITEM, "書き込めない"],
     番待ち: [{ ...FROM_ITEM, item: "番待ち" }, "書き込める"],
     済んだ: [{ ...FROM_ITEM, item: "済んでいる" }, "書き込める"],
@@ -277,9 +273,6 @@ export const links = [
 export const scenarios = {
   "自動で書き込むのは、計画を立てたときの版が今も同じときだけ": [
     { do: initial, by: "アプリ", input: "自動だが、計画のあとに版が変わった", denied: "自動で書き込むのは、計画を立てたときの版が今も同じときだけ" },
-  ],
-  "自動で書き込むのは、その Task の事実と同じアカウントにだけ（読んだ内容に仕込まれた指示で、別のアカウントに書き出さない）": [
-    { do: initial, by: "アプリ", input: "自動だが、違うアカウントに書き込む", denied: "自動で書き込むのは、その Task の事実と同じアカウントにだけ" },
   ],
   "自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む": [
     { do: initial, by: "アプリ", input: "自動で一度頼んで失敗した", denied: "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）" },
@@ -344,7 +337,7 @@ export const scenarios = {
     { do: approve, by: "ユーザー", input: "見せたとおり", denied: "確認中のときだけ" },
     { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
   ],
-  "Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ" }],
+  "自動でやってよい範囲に入らない Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ" }],
   "完了したときにすることからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "完了したときにすること", denied: "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ" }],
   "書き込みは決まった人と段階でだけ進む": [
     { do: initial, by: "ユーザー", input: "Action Item から" },
