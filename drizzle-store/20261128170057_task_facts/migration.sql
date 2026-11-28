@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `source_item_ids` text DEFAULT '[]' NOT NULL;

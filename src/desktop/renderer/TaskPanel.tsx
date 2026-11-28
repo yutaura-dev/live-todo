@@ -1,4 +1,4 @@
-import { Button, Icon, Pill } from "../../design/components.js";
+import { Button, Icon, Pill, SourceMarks } from "../../design/components.js";
 import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
 import type { DueDate } from "../../domain/values.js";
 import type { TaskView } from "../shared/api.js";
@@ -122,6 +122,26 @@ export function TaskPanel(props: { task: TaskView; problem: string | null; onCom
           <p>{task.completion === "満たした" ? "満たしました" : "やり終えたら、自分で確かめて完了にします"}</p>
         )}
       </section>
+
+      {task.facts.length > 0 && (
+        <section className="ui-section" aria-labelledby="facts-title">
+          <h3 id="facts-title" className="ui-section-title">
+            事実
+          </h3>
+          <ul className="ui-facts">
+            {task.facts.map((fact) => (
+              <li key={fact.id} className="ui-fact">
+                <SourceMarks sources={[fact.source]} />
+                <span className="ui-fact-text">
+                  <span>{fact.title}</span>
+                  <span className="ui-sub">{fact.lines.join("・")}</span>
+                  {!fact.present && <span className="ui-sub">（元の項目は見えなくなりました）</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="ui-section" aria-labelledby="history-title">
         <h3 id="history-title" className="ui-section-title">

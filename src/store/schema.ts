@@ -1,4 +1,4 @@
-import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // 新しいアプリの DB。今のアプリ（src/core/db/schema.ts）とは別のファイル・別のマイグレーション（drizzle-store/）に置く（ADR なし・作り直しの間だけ並べる）
 
@@ -14,6 +14,8 @@ export const tasks = sqliteTable("tasks", {
   /** 期日（JSON） */
   due: text("due"),
   blocksOthers: integer("blocks_others", { mode: "boolean" }).notNull(),
+  /** この Task についての事実の ID（JSON の配列） */
+  sourceItemIds: text("source_item_ids").notNull().default("[]"),
   lastSeenAt: text("last_seen_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
@@ -55,3 +57,32 @@ export const aiSettings = sqliteTable("ai_settings", {
   /** AiSettings（JSON） */
   settings: text("settings").notNull(),
 });
+
+/** 事実（Source Item）。uri で同じ事実かを決め、Adapter が返す外の ID（API の URL など）でも引けるようにする */
+export const sourceItems = sqliteTable(
+  "source_items",
+  {
+    id: text("id").primaryKey(),
+    uri: text("uri").notNull(),
+    accountId: text("account_id").notNull(),
+    externalId: text("external_id").notNull(),
+    /** SourceItem（JSON） */
+    body: text("body").notNull(),
+  },
+  (table) => [uniqueIndex("source_items_uri").on(table.uri), uniqueIndex("source_items_external").on(table.accountId, table.externalId)],
+);
+
+/**
+ * ID で引いて丸ごと保存するだけのもの（提案・アカウント・振り分け・取り込みの記録）。
+ * 種類ごとに表を分けない理由: どれも中身で検索せず、ドメインの Schema で読み書きするだけなので、表を増やすと移行の手間だけが増える
+ */
+export const documents = sqliteTable(
+  "documents",
+  {
+    kind: text("kind").notNull(),
+    id: text("id").notNull(),
+    body: text("body").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.kind, table.id] }), index("documents_kind").on(table.kind)],
+);

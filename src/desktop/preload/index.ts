@@ -9,6 +9,8 @@ const api: LiveTodoApi = {
   task: (id) => ipcRenderer.invoke(CHANNELS.query, { _tag: "Task", id }),
   aiSettings: () => ipcRenderer.invoke(CHANNELS.query, { _tag: "AiSettings" }),
   configureAi: (command) => ipcRenderer.invoke(CHANNELS.ai, command),
+  inbox: () => ipcRenderer.invoke(CHANNELS.inbox, null),
+  inboxCommand: (command) => ipcRenderer.invoke(CHANNELS.inbox, command),
   onChanged: (listener) => {
     const handler = () => listener();
     ipcRenderer.on(CHANNELS.changed, handler);

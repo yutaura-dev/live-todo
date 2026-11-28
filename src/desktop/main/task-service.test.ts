@@ -5,11 +5,12 @@ import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
 import { StoreDatabase } from "../../store/database.js";
 import { AiConnector } from "./ai/connector.js";
+import { SourceGateway } from "./sources/gateway.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { sequentialIds, TaskService } from "./task-service.js";
 
-const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable });
+const layer = desktopLayer({ database: StoreDatabase.layer({ filename: ":memory:" }), calendar: Calendar.fixed({ today: "2026-11-28", timeZone: "Asia/Tokyo" }), ids: sequentialIds("t"), connector: AiConnector.unavailable, gateway: SourceGateway.live({}) });
 const undecided = { status: "未判定", level: null, reason: null } as const;
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
@@ -21,7 +22,7 @@ describe("TaskService（画面からの操作を、ユーザーの操作とし�
       const service = yield* TaskService;
       const created = yield* service.command({ _tag: "CreateTask", title: "請求書を送る", brief: null });
       assert.deepStrictEqual(created.ok ? { id: created.value.id, status: created.value.status, mark: created.value.mark } : created, { id: "t1", status: "やること", mark: "新着" });
-      assert.deepStrictEqual(yield* service.board(), { ok: true, value: [{ id: "t1", title: "請求書を送る", status: "やること", mark: "新着", due: null, blocksOthers: false, priority: undecided }] });
+      assert.deepStrictEqual(yield* service.board(), { ok: true, value: [{ id: "t1", title: "請求書を送る", status: "やること", mark: "新着", due: null, blocksOthers: false, priority: undecided, sources: [] }] });
     }).pipe(Effect.provide(layer)));
 
   it.effect("開くと新着が消え、完了にすると終わった列に移る", () =>
@@ -30,7 +31,7 @@ describe("TaskService（画面からの操作を、ユーザーの操作とし�
       yield* service.command({ _tag: "CreateTask", title: "請求書を送る", brief: null });
       yield* service.command({ _tag: "ViewTask", id: "t1" });
       yield* service.command({ _tag: "CompleteTask", id: "t1" });
-      assert.deepStrictEqual(yield* service.board(), { ok: true, value: [{ id: "t1", title: "請求書を送る", status: "終わった", mark: "なし", due: null, blocksOthers: false, priority: { status: "決めるのをやめた", level: null, reason: null } }] });
+      assert.deepStrictEqual(yield* service.board(), { ok: true, value: [{ id: "t1", title: "請求書を送る", status: "終わった", mark: "なし", due: null, blocksOthers: false, priority: { status: "決めるのをやめた", level: null, reason: null }, sources: [] }] });
     }).pipe(Effect.provide(layer)));
 
   it.effect("やらないことにした Task は、ボードから消える", () =>

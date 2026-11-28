@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ScreenHead } from "../../design/AppShell.js";
 import { Button, Icon, Pill, Problem } from "../../design/components.js";
-import type { AiCommand, AiSettingsView } from "../shared/api.js";
+import type { AccountView, AiCommand, AiSettingsView, InboxCommand } from "../shared/api.js";
+import { Accounts } from "./Accounts.js";
 
 const ROLES = [
   { use: "decisions", name: "Decisions", description: "分類・確率付きの判定" },
@@ -9,8 +10,13 @@ const ROLES = [
   { use: "agent", name: "Agent", description: "調査や修正などの込み入った作業" },
 ] as const;
 
-/** 設定（今は AI だけ）。AI 設定が使えるまでは、この画面だけを出す */
-export function Settings(props: { settings: AiSettingsView; onConfigure: (command: AiCommand) => Promise<string | null> }) {
+/** 設定（AI とアカウント）。AI 設定が使えるまでは、この画面だけを出す */
+export function Settings(props: {
+  settings: AiSettingsView;
+  onConfigure: (command: AiCommand) => Promise<string | null>;
+  accounts: ReadonlyArray<AccountView>;
+  onInbox: (command: InboxCommand) => Promise<string | null>;
+}) {
   const { settings } = props;
   return (
     <>
@@ -36,6 +42,7 @@ export function Settings(props: { settings: AiSettingsView; onConfigure: (comman
           ))}
         </ul>
       </section>
+      {settings.status === "使える" && <Accounts accounts={props.accounts} onCommand={props.onInbox} />}
     </>
   );
 }

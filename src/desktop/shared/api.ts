@@ -9,6 +9,17 @@ import { PriorityLevel } from "../../llm/shared/vocabulary.js";
 
 export const Mark = Schema.Literals(["新着", "更新マーク", "なし"]);
 
+/** 事実の見せ方（本文は出さず、アプリが書いた行だけ） */
+export const FactView = Schema.Struct({
+  id: Schema.String,
+  source: Schema.String,
+  title: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  lines: Schema.Array(Schema.String),
+  present: Schema.Boolean,
+});
+export type FactView = typeof FactView.Type;
+
 /** 見せる優先度（いまのラベルと、どう決まったか。まだ決め始めていなければ status は未判定） */
 export const PriorityView = Schema.Struct({ status: PrioritizationStatus, level: Schema.NullOr(PriorityLevel), reason: Schema.NullOr(Schema.String) });
 export type PriorityView = typeof PriorityView.Type;
@@ -21,6 +32,7 @@ export const BoardCard = Schema.Struct({
   due: Schema.NullOr(Schema.String),
   blocksOthers: Schema.Boolean,
   priority: PriorityView,
+  sources: Schema.Array(Schema.String),
 });
 export type BoardCard = typeof BoardCard.Type;
 
@@ -34,6 +46,7 @@ export const TaskView = Schema.Struct({
   due: Schema.NullOr(DueDate),
   mark: Mark,
   priority: PriorityView,
+  facts: Schema.Array(FactView),
   history: Schema.Array(TaskActivity),
   createdAt: Schema.String,
 });
@@ -57,6 +70,48 @@ export type Command = typeof Command.Type;
 
 export const Query = Schema.Union([Schema.TaggedStruct("Board", {}), Schema.TaggedStruct("Task", { id: Id }), Schema.TaggedStruct("AiSettings", {})]);
 export type Query = typeof Query.Type;
+
+
+
+export const ProposalView = Schema.Struct({
+  id: Schema.String,
+  status: Schema.Literals(["提案中", "見送った"]),
+  kind: Schema.Literals(["新しい Task", "既存の Task に足す", "切り出す"]),
+  title: Schema.String,
+  brief: Schema.String,
+  targetTaskId: Schema.NullOr(Schema.String),
+  targetTitle: Schema.NullOr(Schema.String),
+  facts: Schema.Array(FactView),
+  createdAt: Schema.String,
+});
+export type ProposalView = typeof ProposalView.Type;
+
+export const AccountView = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  origin: Schema.String,
+  status: Schema.Literals(["つないでいない", "つないでいる", "つなぎ直しが要る", "外した"]),
+  problem: Schema.NullOr(Schema.String),
+  secret: Schema.NullOr(Schema.String),
+});
+export type AccountView = typeof AccountView.Type;
+
+/** 提案・事実・アカウントの操作（どれもユーザーが行う） */
+export const InboxCommand = Schema.Union([
+  Schema.TaggedStruct("AcceptProposal", { id: Id }),
+  Schema.TaggedStruct("DeclineProposal", { id: Id }),
+  Schema.TaggedStruct("RouteFact", {
+    id: Id,
+    to: Schema.Union([Schema.TaggedStruct("NewTask", {}), Schema.TaggedStruct("Ignore", {}), Schema.TaggedStruct("AttachTo", { taskId: Id })]),
+  }),
+  Schema.TaggedStruct("AddGitHubAccount", { key: Schema.String, label: Schema.String }),
+  Schema.TaggedStruct("RemoveAccount", { id: Id }),
+  Schema.TaggedStruct("SyncNow", {}),
+]);
+export type InboxCommand = typeof InboxCommand.Type;
+
+export const InboxView = Schema.Struct({ proposals: Schema.Array(ProposalView), undecided: Schema.Array(FactView), accounts: Schema.Array(AccountView) });
+export type InboxView = typeof InboxView.Type;
 
 const AiOptionView = Schema.Struct({ id: Schema.String, label: Schema.String, secret: Schema.NullOr(Schema.String) });
 const AiUseView = Schema.Struct({ selected: Schema.NullOr(Schema.String), options: Schema.Array(AiOptionView) });
@@ -83,6 +138,8 @@ export interface LiveTodoApi {
   task(id: string): Promise<Reply<TaskView>>;
   aiSettings(): Promise<Reply<AiSettingsView>>;
   configureAi(command: AiCommand): Promise<Reply<AiSettingsView>>;
+  inbox(): Promise<Reply<InboxView>>;
+  inboxCommand(command: InboxCommand): Promise<Reply<InboxView>>;
   /** main 側で Task が変わったら呼ばれる。戻り値で購読をやめる */
   onChanged(listener: () => void): () => void;
 }

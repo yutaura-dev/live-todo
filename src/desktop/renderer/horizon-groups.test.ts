@@ -10,6 +10,7 @@ const card = (id: string, priority: BoardCard["priority"], extra: Partial<BoardC
   due: null,
   blocksOthers: false,
   priority,
+  sources: [],
   ...extra,
 });
 const app = (level: NonNullable<BoardCard["priority"]["level"]>) => ({ status: "アプリが決めた", level, reason: "x" }) as const;

@@ -3,7 +3,10 @@ import { Context, Effect, Layer, Option } from "effect";
 import { complete, defineCompletionByHand, dismiss, markOf, reopen, setDue, type Task, create, view } from "../../domain/task/task.js";
 import type { Prioritization } from "../../domain/priority/prioritization.js";
 import { PrioritizationStore } from "../../store/prioritization-store.js";
+import { SourceItemStore } from "../../store/source-item-store.js";
 import { TaskStore } from "../../store/task-store.js";
+import type { SourceItem } from "../../domain/source-item/source-item.js";
+import { factViewOf, sourceOf } from "./materials.js";
 import type { BoardCard, Command, PriorityView, Reply, TaskView } from "../shared/api.js";
 import { Prioritizer } from "./prioritizer.js";
 
@@ -24,7 +27,7 @@ const NOT_FOUND = "Task が見つかりません";
 const priorityOf = (p: Prioritization | undefined): PriorityView =>
   p === undefined ? { status: "未判定", level: null, reason: null } : { status: p.status, level: p.priority?.level ?? null, reason: p.priority?.reason ?? null };
 
-const toView = (task: Task, p: Prioritization | undefined): TaskView => ({
+const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<SourceItem>): TaskView => ({
   id: task.id,
   title: task.title,
   brief: task.brief,
@@ -34,11 +37,12 @@ const toView = (task: Task, p: Prioritization | undefined): TaskView => ({
   due: task.due,
   mark: markOf(task),
   priority: priorityOf(p),
+  facts: facts.map(factViewOf),
   history: task.history,
   createdAt: task.createdAt,
 });
 
-const toCard = (task: Task, p: Prioritization | undefined): BoardCard => ({
+const toCard = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<SourceItem>): BoardCard => ({
   id: task.id,
   title: task.title,
   status: task.status,
@@ -46,6 +50,7 @@ const toCard = (task: Task, p: Prioritization | undefined): BoardCard => ({
   due: task.due?.text ?? null,
   blocksOthers: task.blocksOthers,
   priority: priorityOf(p),
+  sources: [...new Set(facts.map((fact) => sourceOf(fact.uri)))],
 });
 
 const failed = (reason: string): Reply<never> => ({ ok: false, reason });
@@ -63,6 +68,8 @@ export class TaskService extends Context.Service<
     onChanged(listener: (taskId: string) => void): Effect.Effect<void>;
     /** 開いている Task の優先度を、今日の日付で決め直す（日が変わったとき・起動したとき） */
     refreshAll(): Effect.Effect<void>;
+    /** ほかの口（取り込み・提案）で Task が変わったことを、画面に知らせる */
+    notify(taskId: string): Effect.Effect<void>;
   }
 >()("live-todo/desktop/TaskService") {
   static readonly layer = Layer.effect(
@@ -70,10 +77,16 @@ export class TaskService extends Context.Service<
     Effect.gen(function* () {
       const store = yield* TaskStore;
       const priorities = yield* PrioritizationStore;
+      const items = yield* SourceItemStore;
       const prioritizer = yield* Prioritizer;
       const ids = yield* TaskIds;
       const notify = (id: string) => Effect.sync(() => listeners.forEach((listener) => listener(id)));
-      const viewOf = (task: Task) => Effect.map(priorities.find(task.id), (p) => toView(task, Option.getOrUndefined(p)));
+      const viewOf = (task: Task) =>
+        Effect.gen(function* () {
+          const p = yield* priorities.find(task.id);
+          const facts = yield* items.findMany(task.sourceItemIds);
+          return toView(task, Option.getOrUndefined(p), facts);
+        });
       // 優先度を決め直して出来事を足し、Task と一緒に保存する（spec の links: Task の操作 → 優先度）
       const settle = (task: Task) =>
         Effect.gen(function* () {
@@ -146,7 +159,9 @@ export class TaskService extends Context.Service<
         Effect.gen(function* () {
           const tasks = yield* store.listForBoard();
           const byTask = new Map((yield* priorities.all()).map((p) => [p.taskId, p]));
-          return { ok: true, value: tasks.map((task) => toCard(task, byTask.get(task.id))) } as Reply<ReadonlyArray<BoardCard>>;
+          const facts = new Map((yield* items.findMany([...new Set(tasks.flatMap((task) => task.sourceItemIds))])).map((item) => [item.id, item]));
+          const factsOf = (task: Task) => task.sourceItemIds.flatMap((id) => (facts.has(id) ? [facts.get(id)!] : []));
+          return { ok: true, value: tasks.map((task) => toCard(task, byTask.get(task.id), factsOf(task))) } as Reply<ReadonlyArray<BoardCard>>;
         }).pipe(
           Effect.catchTag("StoreCorrupted", () => Effect.succeed(failed("保存した Task を読めませんでした"))),
         );
@@ -170,7 +185,7 @@ export class TaskService extends Context.Service<
           }
         }).pipe(Effect.catchTag("StoreCorrupted", (error) => Effect.logWarning("優先度を決め直せない Task がある").pipe(Effect.annotateLogs({ taskId: error.taskId }))));
 
-      return TaskService.of({ command, board, task, onChanged, refreshAll });
+      return TaskService.of({ command, board, task, onChanged, refreshAll, notify });
     }),
   );
 }
