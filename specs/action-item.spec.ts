@@ -97,8 +97,8 @@ export const inputs = {
   finishByCondition: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   observeCondition: { 成り立った: ["成り立った"], 達成できない: ["達成できない"] },
   completeByWrite: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
-  autoStart: { 番が来ている: ["番が来ている", "範囲に入る"], 番待ち: ["番待ち", "範囲に入る"], 範囲に入らない: ["番が来ている", "範囲に入らない"] },
-  request: { 終わっている: ["終わっていない作業はない"], 終わっていない: ["終わっていない作業がある"] },
+  autoStart: { 番が来ている: ["番が来ている", "範囲に入る", "開いている"], 番待ち: ["番待ち", "範囲に入る", "開いている"], 範囲に入らない: ["番が来ている", "範囲に入らない", "開いている"], 完了待ち: ["番が来ている", "範囲に入る", "開いていない"] },
+  request: { 終わっている: ["終わっていない作業はない", "開いている"], 終わっていない: ["終わっていない作業がある", "開いている"], 完了待ち: ["終わっていない作業はない", "開いていない"] },
   succeed: { 番が来ている: ["番が来ている", "やり遂げた"], 番待ち: ["番待ち", "やり遂げた"], まだやり遂げていない: ["番が来ている", "まだやり遂げていない"] },
   choose: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   rechoose: { 作業なし: ["作業なし"], 作業中: ["作業中"] },
@@ -161,22 +161,24 @@ export function completeByWrite(item: ActionItem, actor: Actor, turn: Turn): Act
  *
  * Agent Thread に作業（Agent Run）を頼み、その ID を持つ。作業がやっているか・止まったか・成果は Agent Run が持ち、Action Item は持たない（同じことを 2 か所で持たないため）。渡す道具（読むだけ・直す）は、Action Item の中身が決める。
  */
-export function request(item: ActionItem, actor: Actor, running: "終わっていない作業はない" | "終わっていない作業がある"): ActionItem {
+export function request(item: ActionItem, actor: Actor, running: "終わっていない作業はない" | "終わっていない作業がある", task: "開いている" | "開いていない"): ActionItem {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(item.definition.how.type === "claude", "Claude Code が果たす Action Item だけ");
   ensure(running === "終わっていない作業はない", "この Action Item の作業が終わっているときだけ（待ち行列も含む）");
+  ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ちの Task では頼まない）");
   return item.progress.type === "claude" ? { ...item, progress: { ...item.progress, agentRunId: "ar1" } } : item;
 }
 
 /** 番が来たので、自動で Claude Code に頼む（自動でやる Action Item で、自動でやってよい範囲に入る作業だけ。一度だけ） */
-export function autoStart(item: ActionItem, actor: Actor, turn: Turn, policy: "範囲に入る" | "範囲に入らない"): ActionItem {
+export function autoStart(item: ActionItem, actor: Actor, turn: Turn, policy: "範囲に入る" | "範囲に入らない", task: "開いている" | "開いていない"): ActionItem {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(turn === "番が来ている", "番が来ているときだけ");
   ensure(item.definition.how.type === "claude" && item.definition.how.trigger === "auto", "自動でやる Action Item だけ");
   ensure(item.progress.type === "claude" && item.progress.agentRunId === null, "一度も頼んでいないときだけ");
   ensure(policy === "範囲に入る", "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）");
+  ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ちの Task では頼まない）");
   return { ...item, progress: { ...item.progress, agentRunId: "ar1" } };
 }
 
@@ -283,14 +285,22 @@ export const links = [
   { from: observeCondition, to: "watch-target", action: "removeWaiter", label: "結果が出たら（成り立った・達成できない）、その対象を待つのをやめる" },
   { from: observeCondition, to: "task", label: "達成できなくなったら、Task が受け取る（AI が計画を立て直すか、ユーザーに知らせる）" },
   { from: complete, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: complete, to: "action-item", action: "autoStart", label: "次の Action Item に番が来て、自動でやる Action Item なら、Claude Code に頼む" },
   { from: complete, to: "action-item", action: "succeed", label: "次の Action Item に番が来て、頼んだ Claude Code の作業がもうやり遂げていれば果たす" },
   { from: succeed, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: succeed, to: "action-item", action: "autoStart", label: "次の Action Item に番が来て、自動でやる Action Item なら、Claude Code に頼む" },
   { from: succeed, to: "action-item", action: "succeed", label: "次の Action Item に番が来て、頼んだ Claude Code の作業がもうやり遂げていれば果たす" },
   { from: completeByWrite, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: completeByWrite, to: "action-item", action: "autoStart", label: "次の Action Item に番が来て、自動でやる Action Item なら、Claude Code に頼む" },
   { from: completeByWrite, to: "action-item", action: "succeed", label: "次の Action Item に番が来て、頼んだ Claude Code の作業がもうやり遂げていれば果たす" },
+  { from: skip, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: skip, to: "action-item", action: "autoStart", label: "次の Action Item に番が来て、自動でやる Action Item なら、Claude Code に頼む" },
+  { from: skip, to: "action-item", action: "succeed", label: "次の Action Item に番が来て、頼んだ Claude Code の作業がもうやり遂げていれば果たす" },
   { from: finishByCondition, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: finishByCondition, to: "action-item", action: "autoStart", label: "次の Action Item に番が来て、自動でやる Action Item なら、Claude Code に頼む" },
   { from: finishByCondition, to: "action-item", action: "succeed", label: "次の Action Item に番が来て、頼んだ Claude Code の作業がもうやり遂げていれば果たす" },
   { from: choose, to: "action-item", action: "finishByCondition", label: "次の Action Item に番が来て、その待つ条件がもう成り立っていれば果たす" },
+  { from: choose, to: "action-item", action: "autoStart", label: "次の Action Item に番が来て、自動でやる Action Item なら、Claude Code に頼む" },
   { from: choose, to: "action-item", action: "succeed", label: "次の Action Item に番が来て、頼んだ Claude Code の作業がもうやり遂げていれば果たす" },
   { from: skip, to: "watch-target", action: "removeWaiter", label: "待つ条件の Action Item をやらなくなったら、その対象を待つのをやめる（まだ待っていたなら）" },
   { from: resetCondition, to: "watch-target", action: "addWaiter", label: "また待つので、その対象を待つ" },
@@ -300,6 +310,11 @@ export const links = [
 ];
 
 export const scenarios = {
+  "完了待ちの Task では、Claude Code に頼まない": [
+    { do: initial, by: "AI", input: "自動でやる" },
+    { do: autoStart, by: "アプリ", input: "完了待ち", denied: "Task が要確認か todo のときだけ（完了待ちの Task では頼まない）" },
+    { do: request, by: "ユーザー", input: "完了待ち", denied: "Task が要確認か todo のときだけ（完了待ちの Task では頼まない）" },
+  ],
   "番が来る前に Claude Code に頼める。やり遂げても、番が来るまでは果たさない": [
     { do: initial, by: "AI", input: "頼めばやる" },
     { do: request, by: "ユーザー", input: "終わっている" },
