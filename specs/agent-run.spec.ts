@@ -19,8 +19,8 @@ export type AgentRun = {
   tools: Tools;
   /** 作業を見分ける ID */
   id: string;
-  /** 何の作業か */
-  kind: Kind;
+  /** 何の作業か（頼んだ言葉。見せるための値で、できることは渡す道具・どう始まったか・追う項目があるかで決まるので、作業の種類そのものは状態に持たない） */
+  request: string;
   /** やる Action Item（Action Item をやる作業のとき。Task は会話が持つ） */
   actionItemId: string | null;
   /** どの会話で動いたか（新しい会話を始めても、前の作業がどの会話だったかを追えるように） */
@@ -92,7 +92,7 @@ export function initial(actor: Actor, kind: Kind, task: "開いている" | "開
     status: "待ち行列",
     tools: FIXES.includes(kind) ? "直す" : "読むだけ",
     id: "ar1",
-    kind,
+    request: "PR #42 を直す",
     actionItemId: FROM_ITEM.includes(kind) ? "a2" : null,
     sessionId: "s1",
     trigger: FROM_ITEM.includes(kind) ? "Action Item から" : "ユーザーが頼んだ",
@@ -104,9 +104,10 @@ export function initial(actor: Actor, kind: Kind, task: "開いている" | "開
 }
 
 /** 順番が来たので、Claude Code を起動する */
-export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "続けられない", task: "開いている" | "開いていない"): AgentRun {
+export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "続けられない", task: "開いている" | "開いていない", others: "ほかに動いている作業はない" | "ほかに動いている作業がある"): AgentRun {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(run.status === "待ち行列", "待ち行列のときだけ");
+  ensure(others === "ほかに動いている作業はない", "この Task で、ほかに動いている作業がないときだけ（同時に動くのは 1 つまで）");
   ensure(thread === "続けられる", "会話を続けられるときだけ（続けられないなら、先に新しい会話を始める）");
   ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ち・終わった Task では始めない）");
   return { ...run, status: "やっている" };
@@ -183,7 +184,7 @@ export const inputs = {
     "Task が閉じた": ["質問に答える", "開いていない"],
   },
   fail: { うまくいかなかった: ["うまくいかなかった"], アプリを閉じた: ["アプリを閉じた"], 作業場所が消えた: ["作業場所が消えた"] },
-  start: { 続けられる: ["続けられる", "開いている"], 続けられない: ["続けられない", "開いている"], "Task が閉じた": ["続けられる", "開いていない"] },
+  start: { 続けられる: ["続けられる", "開いている", "ほかに動いている作業はない"], 続けられない: ["続けられない", "開いている", "ほかに動いている作業はない"], "Task が閉じた": ["続けられる", "開いていない", "ほかに動いている作業はない"] , ほかが動いている: ["続けられる", "開いている", "ほかに動いている作業がある"] },
   withdraw: { やらなくなった: ["やらなくなった"], 済ませた: ["ユーザーが済ませた"] },
   cancel: { ユーザー: ["ユーザーが取り消した"], 片付いた: ["追う項目が片付いたので取り消した"] },
   decide: { やめる: ["やめる"], 続ける: ["続ける"], 答えが返らない: ["答えが返らない"] },
@@ -243,6 +244,10 @@ export const scenarios = {
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
     { do: start, by: "アプリ", input: "続けられる" },
     { do: withdraw, by: "アプリ", input: "済ませた", expect: { status: "止まった", stopReason: "ユーザーが済ませた" } },
+  ],
+  "同じ Task で同時に動く作業は 1 つまで": [
+    { do: initial, by: "ユーザー", input: "質問" },
+    { do: start, by: "アプリ", input: "ほかが動いている", denied: "この Task で、ほかに動いている作業がないときだけ（同時に動くのは 1 つまで）" },
   ],
   "続けられない会話では、作業を始めない": [
     { do: initial, by: "ユーザー", input: "質問" },
