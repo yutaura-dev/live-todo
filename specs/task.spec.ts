@@ -34,9 +34,9 @@ export type Task = {
   blocksOthers: boolean;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
-  /** 定期の Task から作ったなら、どの決まりの何回目の分か（作っていなければ null）。同じ決まりの同じ回の分は、Task が 1 つまで */
+  /** 定期の Task から作ったなら、どの決まりのどの回か（回は予定日 "YYYY-MM-DD"。作っていなければ null）。同じ決まりの同じ回は、Task が 1 つまで */
   /** @ref recurring-task */
-  recurrence: { recurringTaskId: string; period: string } | null;
+  recurrence: { recurringTaskId: string; occurrence: string } | null;
   /** AI が「定期の Task にしませんか」と置いた下書き（なければ null）。決まりを作るのは、ユーザーが承認してから */
   recurringDraft: { title: string; schedule: string } | null;
   /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す。ユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（反応は links で書く） */
