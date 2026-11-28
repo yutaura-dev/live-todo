@@ -1,10 +1,11 @@
 import { ensure } from "@yutaura/live-spec";
+import type { Level } from "./autonomy-policy.spec.ts";
 import type { Subject } from "./condition.value.ts";
 
 /**
  * Write（外への書き込み 1 回。PR を merge する・修正を push する・メールをアーカイブする・Slack の To-do を済ませる など）。
  * 承認がなければ書き込まない（charter）。承認のしかたは、何から頼まれたかで決まる。
- * - Action Item から頼まれた: ユーザーが中身を確かめて承認する
+ * - Action Item から頼まれた: ユーザーが中身を確かめて承認する。自動でやってよい範囲（Autonomy Policy）に入る書き込みは、ユーザーが範囲を決めたことを承認とみなし、アプリが確かめずに書き込む（ADR-0023）
  * - 完了したときにすることから頼まれた: ユーザーが完了待ちのチェックリストを確かめて、完了のボタン（書き込めなかったものは、もう一度頼むボタン）を押したことが承認になる
  * ルールでの書き込み（ルールを決めたことを承認とみなす）は、Rule を捉え直すときに決め直す。
  * 何を書き込めるか・どう書き込むかは、Source ごとの provider（Adapter）が決めて実装する。
@@ -13,12 +14,16 @@ import type { Subject } from "./condition.value.ts";
 export type Write = {
   /** 書き込みの段階 */
   stage: Stage;
-  /** 承認（まだなければ null）。承認のしかたは、何から頼まれたかで決まる */
-  approval: { at: string } | null;
+  /** 承認（まだなければ null）。承認のしかたは、何から頼まれたかで決まる 。自動でやってよい範囲による承認なら、そのときの操作と上限も残す（あとで範囲を変えても、なぜ書き込んだかを追えるように） */
+  approval: { by: "ユーザーが確かめた" | "自動でやってよい範囲" | "完了のボタン"; at: string; policy: { operation: string; limit: Level } | null } | null;
   /** Write を見分ける ID */
   id: string;
-  /** 何に書き込むか */
+  /** 何に書き込むか。作る操作（draft の PR を作る・返信の下書きを作る など）では、作る元の事実（issue #12 を直す PR なら issue #12、返信の下書きならそのスレッド）。下書きは同期で戻ってこないので、元の事実への書き込みのまま扱う */
   subject: Subject;
+  /** 作る操作で、作る場所（PR を作るリポジトリ・下書きを置くスレッド）。作らない操作では null。自動で書き込めるのは、作る元の事実と同じ場所（同じリポジトリ・同じスレッド）のときだけ（判断表「自動でやってよいか」の書き込む先で「元の事実と違う場所に作る」になり、ユーザーの承認に回る） */
+  place: Subject | null;
+  /** 作る操作で書き込めたとき、書き込み先が返した作ったもの（PR・issue など、同期で戻ってくるもの）。書き込み先が返した URI が作る場所の中にあるときだけ持つ（外なら持たず、ふつうの振り分けに任せる）。書けたか分からず、あとで書けていたと分かったときは持たない（作ったものは見張りや同期の取り込みで届き、ふつうに振り分ける）。同期で届いたとき、これと URI が一致すれば、この Write の Task に振り分ける */
+  created: Subject | null;
   /** どの操作か。provider が決めた名前（github.merge・github.push・gmail.archive・slack.complete_todo など） */
   operation: string;
   /** 操作ごとの中身（merge の方法・返信の本文・アーカイブするメールの一覧 など）。形は provider が操作ごとに決め、デコードして確かめる。ドメインは中身を読まず、書き込み先にそのまま渡す */
@@ -89,6 +94,14 @@ type Request =
       sameAsDefinition: boolean;
       /** その Action Item に、終わっていない書き込みがもうあるか */
       openWrite: boolean;
+      /** 判断表「自動でやってよいか」（Autonomy Policy）の答え。書き込む先が、その Task が追っている事実そのものかも含めて決まる */
+      policy: "自動でやる" | "ユーザーが頼む・承認する";
+      /** 自動で書き込むとき、計画を立てた（Agent が調べた）ときの対象の版（Action Item の中身に持つ）が今も同じか。中身も Action Item の中身をそのまま写す */
+      planVersion: "計画の版のまま" | "変わった";
+      /** その Action Item が、番が来たら自動でやるものか（ボタンで頼むものは、範囲に入っていても自動では書き込まない） */
+      trigger: "auto" | "on_request";
+      /** この Action Item から、もう自動で頼んだことがあるか（自動の承認で作った書き込みが前にあるか。自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む） */
+      autoTried: boolean;
     }
   | {
       way: "完了したときにすること";
@@ -116,23 +129,37 @@ export const actors: Record<string, Actor> = {
  * Action Item から頼むもの（merge のボタンなど）は、ユーザーが頼み、中身を見せて確認中になる。完了したときにすることから頼むものは、ユーザーが完了待ちのチェックリストを確かめて完了のボタンを押したことが承認なので、すぐ書き込む。
  */
 export function initial(actor: Actor, request: Request, ready: Ready): Write {
-  ensure(request.way === "Action Item" ? actor.kind === "user" : actor.kind === "app", "Action Item からはユーザー、完了したときにすることからはアプリだけ");
+  ensure(
+    request.way === "Action Item" ? actor.kind === "user" || (actor.kind === "app" && request.policy === "自動でやる") : actor.kind === "app",
+    "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ",
+  );
   ensure(ready === "書き込める", "書き込める状態のときだけ");
+  if (request.way === "Action Item" && actor.kind === "app") {
+    ensure(request.trigger === "auto", "自動で書き込むのは、番が来たら自動でやる Action Item だけ（ボタンで頼むものは、ユーザーが頼む）");
+    ensure(request.planVersion === "計画の版のまま", "自動で書き込むのは、計画を立てたときの版が今も同じときだけ");
+    ensure(!request.autoTried, "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）");
+  }
   if (request.way === "Action Item") {
     ensure(request.item === "番が来ていて、まだ", "Action Item に番が来ていて、まだ済んでいないときだけ");
-    ensure(request.sameAsDefinition, "Action Item の定義と同じ対象と操作だけ");
+    ensure(request.sameAsDefinition, "Action Item の定義と同じ対象・操作・作る場所だけ");
     ensure(!request.openWrite, "その Action Item に、終わっていない書き込みがないときだけ");
   } else if (request.way === "完了したときにすること") {
     ensure(request.confirmed, "ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したときだけ");
     ensure(!request.openWrite, "その完了したときにすることに、終わっていない書き込みがないときだけ");
     ensure(request.version !== "変わった", "版を持つ操作なら、見せたときの版が今も同じときだけ");
   }
-  const byEffect = request.way === "完了したときにすること";
+  const byEffect = request.way === "完了したときにすること" || actor.kind === "app";
   return {
     stage: byEffect ? "書き込み中" : "確認中",
-    approval: byEffect ? { at: "2026-11-28T00:00:00Z" } : null,
+    approval: byEffect
+      ? request.way === "完了したときにすること"
+        ? { by: "完了のボタン", at: "2026-11-28T00:00:00Z", policy: null }
+        : { by: "自動でやってよい範囲", at: "2026-11-28T00:00:00Z", policy: { operation: "github.merge", limit: "外への書き込み（本番）" } }
+      : null,
     id: "w1",
     subject: { uri: "github://yutaura@github.com/acme/app/pull/42" },
+    place: null,
+    created: null,
     operation: "github.merge",
     params: { method: "squash", title: "axios を 1.8 に上げる (#42)" },
     version: "abc1234",
@@ -155,7 +182,7 @@ export function approve(write: Write, actor: Actor, version: "見せた版のま
   ensure(write.stage === "確認中", "確認中のときだけ");
   ensure(version === "見せた版のまま", "見せた版が今も同じときだけ");
   ensure(ready === "書き込める", "書き込める状態のときだけ");
-  return { ...write, stage: "書き込み中", approval: { at: "2026-11-28T00:00:00Z" } };
+  return { ...write, stage: "書き込み中", approval: { by: "ユーザーが確かめた", at: "2026-11-28T00:00:00Z", policy: null } };
 }
 
 /** 確認をやめる */
@@ -210,12 +237,16 @@ export function settle(write: Write, actor: Actor, result: "書けていた" | "
     : { ...write, stage: "失敗", failure: { kind: "書けていなかった", message: "" }, finishedAt: "2026-11-28T00:05:00Z" };
 }
 
-const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false };
+const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, policy: "ユーザーが頼む・承認する", trigger: "on_request", planVersion: "計画の版のまま", autoTried: false };
 const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true, openWrite: false, version: "版を持たない" };
 
 export const inputs = {
   initial: {
     "Action Item から": [FROM_ITEM, "書き込める"],
+    自動でやってよい範囲: [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる" }, "書き込める"],
+    "自動だが、計画のあとに版が変わった": [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる", planVersion: "変わった" }, "書き込める"],
+    "自動で一度頼んで失敗した": [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる", autoTried: true }, "書き込める"],
+    "範囲に入るが、ボタンで頼む Action Item": [{ ...FROM_ITEM, policy: "自動でやる" }, "書き込める"],
     書き込めない: [FROM_ITEM, "書き込めない"],
     番待ち: [{ ...FROM_ITEM, item: "番待ち" }, "書き込める"],
     済んだ: [{ ...FROM_ITEM, item: "済んでいる" }, "書き込める"],
@@ -237,6 +268,10 @@ const FINISHED: Stage[] = ["書き込んだ", "失敗", "取りやめた"];
 
 export const invariants = {
   "書き込むのは、承認があるときだけ": (write: Write) => APPROVED.includes(write.stage) === (write.approval !== null),
+  "作ったものを持つのは、作る場所がある書き込みで、書き込んだときだけ": (write: Write) => write.created === null || (write.place !== null && write.stage === "書き込んだ"),
+  "作る場所は、作ったあと変わらない": (before: Write, after: Write) => before.place?.uri === after.place?.uri,
+  "自動でやってよい範囲による承認にだけ、そのときの操作と上限がある": (write: Write) =>
+    write.approval === null || (write.approval.by === "自動でやってよい範囲") === (write.approval.policy !== null),
   "終わった書き込みは、もう変わらない": (before: Write, after: Write) => !FINISHED.includes(before.stage) || before.stage === after.stage,
   "承認の対象（何に・どの操作で・どの中身を・どの版に）は、作ったあと変わらない": (before: Write, after: Write) =>
     before.subject.uri === after.subject.uri &&
@@ -251,10 +286,24 @@ export const links = [
   { from: settle, to: "task", label: "完了したときにすることから頼まれたなら、書けていたら書き込んだ、書けていなかったら書き込めなかったにする" },
   { from: succeed, to: "task", label: "Action Item から頼まれたなら、その Action Item を果たす（書き込みで果たされる）" },
   { from: settle, to: "task", label: "書けていたなら、Action Item から頼まれたものは、その Action Item を果たす" },
+  { from: succeed, to: "routing", action: "route", label: "作る操作で作ったもの（PR・issue など）が同期で届いたら、この Write の Task に振り分ける（Decisions を通さず、作ったものの URI との一致で決める。URI が作る場所の中にあるときだけ）。作ったものへのそのあとの書き込みも、その操作の上限で決まる" },,
   { from: fail, to: "task", action: "receive", label: "Action Item から頼まれたなら、その Task に、書き込めなかったこと（理由つき）が届く" },
 ];
 
 export const scenarios = {
+  "自動で書き込むのは、計画を立てたときの版が今も同じときだけ": [
+    { do: initial, by: "アプリ", input: "自動だが、計画のあとに版が変わった", denied: "自動で書き込むのは、計画を立てたときの版が今も同じときだけ" },
+  ],
+  "ボタンで頼む Action Item は、範囲に入っていても自動では書き込まない": [
+    { do: initial, by: "アプリ", input: "範囲に入るが、ボタンで頼む Action Item", denied: "自動で書き込むのは、番が来たら自動でやる Action Item だけ（ボタンで頼むものは、ユーザーが頼む）" },
+  ],
+  "自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む": [
+    { do: initial, by: "アプリ", input: "自動で一度頼んで失敗した", denied: "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）" },
+  ],
+  "自動でやってよい範囲の書き込みは、アプリが確かめずに書き込む（draft の PR を作る など）": [
+    { do: initial, by: "アプリ", input: "自動でやってよい範囲", expect: { stage: "書き込み中", requestedBy: { type: "actionItem" }, approval: { by: "自動でやってよい範囲" } } },
+    { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
+  ],
   "完了のボタンを押したら、完了したときにすることを確かめずに書き込む": [
     { do: initial, by: "アプリ", input: "完了したときにすること", expect: { stage: "書き込み中", requestedBy: { type: "completionEffect" } } },
   ],
@@ -271,7 +320,7 @@ export const scenarios = {
   ],
   "番が来ていない Action Item からは頼めない": [{ do: initial, by: "ユーザー", input: "番待ち", denied: "Action Item に番が来ていて、まだ済んでいないときだけ" }],
   "済んだ Action Item からは頼めない": [{ do: initial, by: "ユーザー", input: "済んだ", denied: "Action Item に番が来ていて、まだ済んでいないときだけ" }],
-  "Action Item の定義と違う書き込みは頼めない": [{ do: initial, by: "ユーザー", input: "定義と違う", denied: "Action Item の定義と同じ対象と操作だけ" }],
+  "Action Item の定義と違う書き込みは頼めない": [{ do: initial, by: "ユーザー", input: "定義と違う", denied: "Action Item の定義と同じ対象・操作・作る場所だけ" }],
   "同じ Action Item から二重には頼めない": [{ do: initial, by: "ユーザー", input: "書き込みがもうある", denied: "その Action Item に、終わっていない書き込みがないときだけ" }],
   "CI が通っていなければ、merge を頼めない": [{ do: initial, by: "ユーザー", input: "書き込めない", denied: "書き込める状態のときだけ" }],
   "見せたあとに PR が変わった・CI が落ちたら、merge しない": [
@@ -311,8 +360,8 @@ export const scenarios = {
     { do: approve, by: "ユーザー", input: "見せたとおり", denied: "確認中のときだけ" },
     { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
   ],
-  "Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー、完了したときにすることからはアプリだけ" }],
-  "完了したときにすることからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "完了したときにすること", denied: "Action Item からはユーザー、完了したときにすることからはアプリだけ" }],
+  "自動でやってよい範囲に入らない Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ" }],
+  "完了したときにすることからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "完了したときにすること", denied: "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ" }],
   "書き込みは決まった人と段階でだけ進む": [
     { do: initial, by: "ユーザー", input: "Action Item から" },
     { do: succeed, by: "書き込み先", denied: "書き込み中のときだけ" },

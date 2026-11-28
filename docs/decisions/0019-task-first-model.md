@@ -19,8 +19,8 @@ ADR-0007 で Task・Source Item・Link を分け、1 つの Task に複数の So
 
 ### Task が主、Source Item は事実
 
-- Task は自分がやること。Source Item は外の世界の写し（事実）、Activity はそれに起きた出来事。Task は事実を 0 件以上持つ（Link: tracks / context）
-- 1 つの Source Item が属せる Task は 1 つまで（ADR-0007 のまま）
+- Task は自分がやること。Source Item は外の世界の写し（事実）、Activity はそれに起きた出来事。Task は事実を 0 件以上持つ（Link。役割の区別は持たない）
+- 1 つの Source Item は複数の Task の事実になれる。AI が振り分けるのは 1 つ目だけで、2 つ目以降は識別子で決まるときかユーザーが足したときだけ（specs/routing.spec.ts）
 
 ### 届いた事実を、Task に振り分ける（Source に依らない）
 
@@ -28,7 +28,7 @@ ADR-0007 で Task・Source Item・Link を分け、1 つの Task に複数の So
 
 1. **取り込み**（Source ごと）: 取得して Source Item と Activity にする。今の Source Adapter・SnapshotDiffer のまま。Slack の会話・Gmail のスレッドのように、何件かをまとめて 1 つの事実として扱う単位も、Source ごとにここで決める
 2. **振り分け**（共通）: 新しい事実ごとに、次のどれかを決める
-   - 開いている既存の Task の事実にする（どの Task か、tracks か context か）
+   - 開いている既存の Task の事実にする（どの Task か）
    - どの Task のものでもなく、新しい Task を生む
    - 自分には関係がない（対象外）
    - 決め方は、確かなものから順に当てる。(a) 同じ URL・同じスレッドなど、識別子で決まるもの（AI を使わない）、(b) 候補の Task を絞ったうえで AI に選ばせる、(c) どれにも当たらなければ、新しい Task を生むかを判定する（今の todo 判定を「この事実は自分に新しい行動を求めるか」に読み替える）
