@@ -22,7 +22,7 @@ export type Write = {
   subject: Subject;
   /** 作る操作で、作る場所（PR を作るリポジトリ・下書きを置くスレッド）。作らない操作では null。自動で書き込めるのは、作る元の事実と同じ場所（同じリポジトリ・同じスレッド）のときだけ（判断表「自動でやってよいか」の書き込む先で「元の事実と違う場所に作る」になり、ユーザーの承認に回る） */
   place: Subject | null;
-  /** 作る操作で書き込めたとき、書き込み先が返した作ったもの（PR・issue など、同期で戻ってくるもの）。書き込み先が返した URI が作る場所の中にあるときだけ持つ（外なら持たず、ふつうの振り分けに任せる）。同期で届いたとき、これと URI が一致すれば、この Write の Task に振り分ける */
+  /** 作る操作で書き込めたとき、書き込み先が返した作ったもの（PR・issue など、同期で戻ってくるもの）。書き込み先が返した URI が作る場所の中にあるときだけ持つ（外なら持たず、ふつうの振り分けに任せる）。書けたか分からず、あとで書けていたと分かったときは持たない（作ったものは見張りや同期の取り込みで届き、ふつうに振り分ける）。同期で届いたとき、これと URI が一致すれば、この Write の Task に振り分ける */
   created: Subject | null;
   /** どの操作か。provider が決めた名前（github.merge・github.push・gmail.archive・slack.complete_todo など） */
   operation: string;
@@ -286,8 +286,7 @@ export const links = [
   { from: settle, to: "task", label: "完了したときにすることから頼まれたなら、書けていたら書き込んだ、書けていなかったら書き込めなかったにする" },
   { from: succeed, to: "task", label: "Action Item から頼まれたなら、その Action Item を果たす（書き込みで果たされる）" },
   { from: settle, to: "task", label: "書けていたなら、Action Item から頼まれたものは、その Action Item を果たす" },
-  { from: succeed, to: "routing", action: "route", label: "作る操作で作ったもの（PR・issue など）が同期で届いたら、この Write の Task に振り分ける（Decisions を通さず、作ったものの URI との一致で決める。URI が作る場所の中にあるときだけ）。作ったものへのそのあとの書き込みも、その操作の上限で決まる" },
-  { from: settle, to: "routing", action: "route", label: "書けていたなら、作る操作で作ったものを、同期で届いたときにこの Write の Task に振り分ける（succeed と同じ）" },
+  { from: succeed, to: "routing", action: "route", label: "作る操作で作ったもの（PR・issue など）が同期で届いたら、この Write の Task に振り分ける（Decisions を通さず、作ったものの URI との一致で決める。URI が作る場所の中にあるときだけ）。作ったものへのそのあとの書き込みも、その操作の上限で決まる" },,
   { from: fail, to: "task", action: "receive", label: "Action Item から頼まれたなら、その Task に、書き込めなかったこと（理由つき）が届く" },
 ];
 
