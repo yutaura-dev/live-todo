@@ -29,4 +29,6 @@ export const invariants = {
   "仕分け中の Task には、優先度がない": (task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) =>
     task.status !== "triaging" || prioritizations.length === 0,
   "Task の優先度の決まり方は 1 つまで": (_task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) => prioritizations.length <= 1,
+  "完了条件が決まっていて、完了条件の Action Item がすべて果たされていれば、完了条件は満たした": (task: Task, items: ReadonlyArray<ActionItem>) =>
+    task.completion === "未定" || !items.some((item) => item.definition.completes) || items.filter((item) => item.definition.completes).some((item) => item.status !== "done") || task.completion === "満たした",
 };
