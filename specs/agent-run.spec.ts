@@ -3,8 +3,8 @@ import { ensure } from "@yutaura/live-spec";
 /**
  * Agent Run（AI に任せた作業 1 回）。Agent Thread の中にあり、Agent Thread を通してだけ扱う。
  * Agent（AI Settings で選んだ Claude Code・Codex など）が、複雑な作業・調査をする（ADR-0022）。作業: 質問に答える・Action Item をやる・依存の更新を調べる・PR を直す・コンフリクトを直す。計画を考えるのは Agent ではなく Generation（Agent の作業にしない）。
- * 始め方は 2 つ: ユーザーが直接頼む（質問・PR を直す など）か、計画の Action Item（Claude Code が果たす）から始める（番が来たら自動で・ボタンで。どちらにするかは計画の中で決める。先回り（Pre-work）はこれで表す）。AI が自分で作業を始めることはしない。
- * Agent は Task を直接変えない。成果（回答・報告・差分）は、Task に「AI の作業の成果」として届き、Generation が Task の言葉に置き換える。外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足し、ユーザーが確かめて承認する（Write）。
+ * 始め方は 2 つ: ユーザーが直接頼む（質問・PR を直す など）か、計画の Action Item（Claude Code が果たす）から始める（番が来たら自動で・ボタンで。どちらにするかは計画の中で決める。自動で始めるのは、渡す道具の段が自動でやってよい範囲に入るときだけ（読むだけ = 調べる、直す = ローカルの書き込み。ADR-0023）。先回り（Pre-work）はこれで表す）。AI が自分で作業を始めることはしない。
+ * Agent は Task を直接変えない。成果（回答・報告・差分）は、Task に「AI の作業の成果」として届き、Generation が Task の言葉に置き換える。外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足し、ユーザーが確かめて承認する（Write。自動でやってよい範囲に入る書き込みは、確かめずに書き込む）。
  * Agent は外に書き込まない（ADR-0012・0013）。書き込みは、許可しないコマンド・渡さない認証情報・sandbox の 3 つを重ねて止める。
  * merge を承認して走る処理は、merge 自体が目的なので Agent Run ではない（追う項目が片付いても知らせない。ADR-0016）。
  */
@@ -264,12 +264,4 @@ export const reviewed = {
 };
 
 export const questions = [
-  {
-    ask: "Generation が計画に足す「Claude Code で調べる・直す」の Action Item を、番が来たら自動でやる（先回り）にしてよい作業はどこまでか？（PR を直す・コンフリクトを直すは、外には書き込まないが、作業場所と費用を使い、作業場所の中ではパッケージのインストールスクリプトが動く）",
-    about: initial,
-  },
-  {
-    ask: "Action Item の進み具合（progress.claude.run）と、Agent Run の段階が、同じことを 2 か所で持っている。案: Action Item には Agent Run の参照だけを持たせ、段階は Agent Run を正本にする（Task 集約の不変条件「Claude Code がやっている Action Item があれば作業中」は、Agent Run を見て確かめる）",
-    about: start,
-  },
 ];

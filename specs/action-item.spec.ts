@@ -32,21 +32,12 @@ export type Progress =
   /** 進み具合を持たない（人・書き込みで果たされる） */
   | { type: "none" }
   /** Claude Code にやらせた進み具合 */
-  | { type: "claude"; run: Run; report: string | null }
+  | { type: "claude"; agentRunId: string | null; report: string | null }
   /** 待つ条件を確かめた結果と、待ち始めた時刻 */
   | { type: "condition"; observed: "まだ" | "成り立った" | "達成できない"; waitingSince: string }
   /** 分かれ道で選んだか（何を選んだか・選び直した履歴は、Task の計画の枝に残る） */
   | { type: "decision"; chosen: "まだ" | "選んだ" };
 
-export const Run = {
-  /** まだやらせていない */
-  none: "なし",
-  /** Claude Code がやっている */
-  running: "やっている",
-  /** 一度やらせた。やり遂げたら報告を残して済ませる。できなかった・作業を止めた・アプリを閉じて止まったときは、報告だけ残して済ませない */
-  ran: "動かした",
-} as const;
-export type Run = (typeof Run)[keyof typeof Run];
 
 type Actor = { kind: "user" } | { kind: "sync" } | { kind: "agent" } | { kind: "scheduler" } | { kind: "app" };
 /** 番が来ているか（Task の計画の中の位置で決まる） */
@@ -63,7 +54,7 @@ export const actors: Record<string, Actor> = {
 };
 
 function progressFor(definition: ActionDefinition): Progress {
-  if (definition.how.type === "claude") return { type: "claude", run: "なし", report: null };
+  if (definition.how.type === "claude") return { type: "claude", agentRunId: null, report: null };
   if (definition.how.type === "decision") return { type: "decision", chosen: "まだ" };
   if (definition.how.type === "condition") return { type: "condition", observed: "まだ", waitingSince: "2026-11-28T00:00:00Z" };
   return { type: "none" };
@@ -106,12 +97,11 @@ export const inputs = {
   finishByCondition: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   observeCondition: { 成り立った: ["成り立った"], 達成できない: ["達成できない"] },
   completeByWrite: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
-  autoStart: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
+  autoStart: { 番が来ている: ["番が来ている", "範囲に入る"], 番待ち: ["番待ち", "範囲に入る"], 範囲に入らない: ["番が来ている", "範囲に入らない"] },
+  request: { 動いていない: ["動いている作業はない"], 動いている: ["動いている作業がある"] },
   choose: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   rechoose: { 作業なし: ["作業なし"], 作業中: ["作業中"] },
 };
-
-const isRunning = (item: ActionItem) => item.progress.type === "claude" && item.progress.run === "やっている";
 
 /** ユーザーが「済んだ」を押す（Claude Code が果たす Action Item も、自分で済ませてよい） */
 export function complete(item: ActionItem, actor: Actor, turn: Turn): ActionItem {
@@ -119,7 +109,6 @@ export function complete(item: ActionItem, actor: Actor, turn: Turn): ActionItem
   ensure(item.status === "todo", "まだのときだけ");
   ensure(turn === "番が来ている", "番が来ているときだけ");
   ensure(item.definition.how.type === "human" || item.definition.how.type === "claude", "人か Claude Code が果たす Action Item だけ");
-  ensure(!isRunning(item), "Claude Code がやっている途中でないときだけ");
   return { ...item, status: "done" };
 }
 
@@ -166,53 +155,36 @@ export function completeByWrite(item: ActionItem, actor: Actor, turn: Turn): Act
   return { ...item, status: "done" };
 }
 
-function withRun(item: ActionItem, run: Run, status: ItemStatus = item.status): ActionItem {
-  if (item.progress.type !== "claude") return item;
-  return { ...item, status, progress: { ...item.progress, run } };
-}
-
-/** Claude Code に頼む（Claude Code を使わない設定なら頼めない） */
-export function request(item: ActionItem, actor: Actor): ActionItem {
+/**
+ * Claude Code に頼む（ボタンで）
+ *
+ * Agent Thread に作業（Agent Run）を頼み、その ID を持つ。作業がやっているか・止まったかは Agent Run が持ち、Action Item は持たない（同じことを 2 か所で持たないため）。
+ */
+export function request(item: ActionItem, actor: Actor, running: "動いている作業はない" | "動いている作業がある"): ActionItem {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(item.definition.how.type === "claude", "Claude Code が果たす Action Item だけ");
-  ensure(!isRunning(item), "やっている途中でないときだけ");
-  return withRun(item, "やっている");
+  ensure(running === "動いている作業はない", "この Action Item の作業が動いていないときだけ");
+  return item.progress.type === "claude" ? { ...item, progress: { ...item.progress, agentRunId: "ar1" } } : item;
 }
 
-/** Claude Code が自動で始める（1 分ごとに、1 回 3 件まで） */
-export function autoStart(item: ActionItem, actor: Actor, turn: Turn): ActionItem {
-  ensure(actor.kind === "agent", "AI だけ");
+/** 番が来たので、自動で Claude Code に頼む（自動でやる Action Item で、自動でやってよい範囲に入る作業だけ。一度だけ） */
+export function autoStart(item: ActionItem, actor: Actor, turn: Turn, policy: "範囲に入る" | "範囲に入らない"): ActionItem {
+  ensure(actor.kind === "app", "アプリだけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(turn === "番が来ている", "番が来ているときだけ");
   ensure(item.definition.how.type === "claude" && item.definition.how.trigger === "auto", "自動でやる Action Item だけ");
-  ensure(item.progress.type === "claude" && item.progress.run === "なし", "一度も動かしていないときだけ");
-  return withRun(item, "やっている");
+  ensure(item.progress.type === "claude" && item.progress.agentRunId === null, "一度も頼んでいないときだけ");
+  ensure(policy === "範囲に入る", "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）");
+  return { ...item, progress: { ...item.progress, agentRunId: "ar1" } };
 }
 
-/** Claude Code がやり遂げる */
+/** Claude Code がやり遂げた（Agent Run がやり遂げたことを受け取る） */
 export function succeed(item: ActionItem, actor: Actor): ActionItem {
   ensure(actor.kind === "agent", "AI だけ");
-  ensure(isRunning(item), "やっているときだけ");
-  return withRun(item, "動かした", "done");
-}
-
-/**
- * Claude Code の作業が終わる（済ませずに）
- *
- * できなかった・作業を止めた（画面で確かめてから止める）・追う Source Item が片付いて作業をやめた。
- */
-export function stop(item: ActionItem, actor: Actor): ActionItem {
-  ensure(actor.kind === "agent" || actor.kind === "user", "AI かユーザーだけ");
-  ensure(isRunning(item), "やっているときだけ");
-  return withRun(item, "動かした");
-}
-
-/** アプリを閉じて止まった作業を、起動したときにできなかったにする */
-export function recover(item: ActionItem, actor: Actor): ActionItem {
-  ensure(actor.kind === "app", "アプリだけ");
-  ensure(isRunning(item), "やっているときだけ");
-  return withRun(item, "動かした");
+  ensure(item.status === "todo", "まだのときだけ");
+  ensure(item.progress.type === "claude" && item.progress.agentRunId !== null, "Claude Code に頼んだ Action Item だけ");
+  return { ...item, status: "done", progress: { ...item.progress, report: "調べた結果" } };
 }
 
 /**
@@ -262,7 +234,6 @@ export function rechoose(item: ActionItem, actor: Actor, branchWork: BranchWork)
 export function skip(item: ActionItem, actor: Actor): ActionItem {
   ensure(actor.kind === "user" || actor.kind === "sync" || actor.kind === "agent", "ユーザーか同期か AI だけ");
   ensure(item.status === "todo", "まだのときだけ");
-  ensure(!isRunning(item), "Claude Code がやっている途中でないときだけ");
   return { ...item, status: "skipped" };
 }
 
@@ -270,16 +241,16 @@ export const invariants = {
   "中身は、作ったあと変わらない": (before: ActionItem, after: ActionItem) => JSON.stringify(before.definition) === JSON.stringify(after.definition),
   "進み具合の種類は、果たされ方と合っている": (item: ActionItem) =>
     item.progress.type === (item.definition.how.type === "claude" || item.definition.how.type === "decision" || item.definition.how.type === "condition" ? item.definition.how.type : "none"),
-  "Claude Code がやっている途中の Action Item は、まだ": (item: ActionItem) => !isRunning(item) || item.status === "todo",
   "やらなくなった Action Item は、もう動かない": (before: ActionItem, after: ActionItem) => before.status !== "skipped" || JSON.stringify(before) === JSON.stringify(after),
 };
 
 export const reviewed = {
-  "same-for-similar-actors:stop": "作業は、ユーザーが（画面で確かめてから）止めることも、AI ができなかった・追う Source Item が片付いてやめることもある",
   "same-for-similar-actors:skip": "やらなくなるのは、ユーザー（分かれ道の選び直し・Task を片付けた）、同期（Task を絞り込みの外にした）、AI（計画の立て直し）の、どの出来事からでも起きる",
 };
 
 export const links = [
+  { from: complete, to: "agent-thread", label: "この Action Item の作業が動いていれば、止める（ユーザーが自分で済ませたので）" },
+  { from: skip, to: "agent-thread", label: "この Action Item の作業が動いていれば、止める（やらなくなったので）" },
   { from: complete, to: "task", action: "noteProgress", label: "Action Item が済んだことを、Task の出来事に残す" },
   { from: succeed, to: "task", action: "noteProgress", label: "Claude Code が Action Item を果たしたことを、Task の出来事に残す" },
   { from: finishByCondition, to: "task", action: "noteProgress", label: "待つ条件で Action Item が果たされたことを、Task の出来事に残す" },
@@ -324,7 +295,7 @@ export const scenarios = {
     { do: choose, by: "ユーザー", input: "番が来ている", denied: "分かれ道だけ" },
     { do: completeByWrite, by: "アプリ", input: "番が来ている", denied: "書き込みで果たされる Action Item だけ" },
     { do: finishByCondition, by: "同期", input: "番が来ている", denied: "待つ条件が成り立ったときだけ" },
-    { do: request, by: "ユーザー", denied: "Claude Code が果たす Action Item だけ" },
+    { do: request, by: "ユーザー", input: "動いていない", denied: "Claude Code が果たす Action Item だけ" },
     { do: complete, by: "ユーザー", input: "番が来ている", expect: { status: "done" } },
     { do: reopen, by: "ユーザー", expect: { status: "todo" } },
   ],
@@ -370,28 +341,25 @@ export const scenarios = {
     { do: completeByWrite, by: "アプリ", input: "番待ち", denied: "番が来ているときだけ" },
     { do: completeByWrite, by: "アプリ", input: "番が来ている", expect: { status: "done" } },
   ],
-  "自動でやる Action Item を、番が来たら一度だけ動かしてやり遂げる": [
+  "自動でやる Action Item を、番が来たら一度だけ頼んでやり遂げる": [
     { do: initial, by: "AI", input: "自動でやる" },
-    { do: autoStart, by: "AI", input: "番待ち", denied: "番が来ているときだけ" },
-    { do: autoStart, by: "AI", input: "番が来ている" },
-    { do: autoStart, by: "AI", input: "番が来ている", denied: "一度も動かしていないときだけ" },
-    { do: request, by: "ユーザー", denied: "やっている途中でないときだけ" },
-    { do: complete, by: "ユーザー", input: "番が来ている", denied: "Claude Code がやっている途中でないときだけ" },
-    { do: skip, by: "ユーザー", denied: "Claude Code がやっている途中でないときだけ" },
+    { do: autoStart, by: "アプリ", input: "番待ち", denied: "番が来ているときだけ" },
+    { do: autoStart, by: "アプリ", input: "範囲に入らない", denied: "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）" },
+    { do: succeed, by: "AI", denied: "Claude Code に頼んだ Action Item だけ" },
+    { do: autoStart, by: "アプリ", input: "番が来ている" },
+    { do: autoStart, by: "アプリ", input: "番が来ている", denied: "一度も頼んでいないときだけ" },
+    { do: request, by: "ユーザー", input: "動いている", denied: "この Action Item の作業が動いていないときだけ" },
     { do: succeed, by: "ユーザー", denied: "AI だけ" },
     { do: succeed, by: "AI", expect: { status: "done" } },
     { do: reopen, by: "ユーザー", expect: { status: "todo" } },
-    { do: autoStart, by: "AI", input: "番が来ている", denied: "一度も動かしていないときだけ" },
+    { do: autoStart, by: "アプリ", input: "番が来ている", denied: "一度も頼んでいないときだけ" },
   ],
-  "頼めばやる Action Item は自動では動かず、止めたら頼み直せる": [
+  "頼めばやる Action Item は自動では動かず、作業が止まったら頼み直せる": [
     { do: initial, by: "AI", input: "頼めばやる" },
-    { do: autoStart, by: "AI", input: "番が来ている", denied: "自動でやる Action Item だけ" },
-    { do: request, by: "ユーザー" },
-    { do: stop, by: "同期", denied: "AI かユーザーだけ" },
-    { do: stop, by: "ユーザー", expect: { status: "todo" } },
-    { do: request, by: "ユーザー" },
-    { do: recover, by: "ユーザー", denied: "アプリだけ" },
-    { do: recover, by: "アプリ", expect: { status: "todo" } },
+    { do: autoStart, by: "アプリ", input: "番が来ている", denied: "自動でやる Action Item だけ" },
+    { do: request, by: "ユーザー", input: "動いていない" },
+    { do: request, by: "ユーザー", input: "動いている", denied: "この Action Item の作業が動いていないときだけ" },
+    { do: request, by: "ユーザー", input: "動いていない" },
   ],
   "やらなくなった Action Item は、もう動かない": [
     { do: initial, by: "AI", input: "人がやる" },
@@ -403,23 +371,21 @@ export const scenarios = {
   ],
   "操作は決まった人と段階でだけ起きる": [
     { do: initial, by: "AI", input: "人がやる" },
-    { do: succeed, by: "AI", denied: "やっているときだけ" },
-    { do: stop, by: "AI", denied: "やっているときだけ" },
-    { do: recover, by: "アプリ", denied: "やっているときだけ" },
+    { do: succeed, by: "AI", denied: "Claude Code に頼んだ Action Item だけ" },
     { do: reopen, by: "ユーザー", denied: "済んだときだけ" },
     { do: complete, by: "AI", input: "番が来ている", denied: "ユーザーだけ" },
     { do: choose, by: "AI", input: "番が来ている", denied: "ユーザーだけ" },
     { do: rechoose, by: "AI", input: "作業なし", denied: "ユーザーだけ" },
     { do: finishByCondition, by: "AI", input: "番が来ている", denied: "同期だけ" },
-    { do: request, by: "AI", denied: "ユーザーだけ" },
-    { do: autoStart, by: "ユーザー", input: "番が来ている", denied: "AI だけ" },
+    { do: request, by: "AI", input: "動いていない", denied: "ユーザーだけ" },
+    { do: autoStart, by: "ユーザー", input: "番が来ている", denied: "アプリだけ" },
     { do: complete, by: "ユーザー", input: "番が来ている" },
     { do: complete, by: "ユーザー", input: "番が来ている", denied: "まだのときだけ" },
     { do: choose, by: "ユーザー", input: "番が来ている", denied: "まだのときだけ" },
     { do: completeByWrite, by: "アプリ", input: "番が来ている", denied: "まだのときだけ" },
     { do: finishByCondition, by: "同期", input: "番が来ている", denied: "まだのときだけ" },
-    { do: request, by: "ユーザー", denied: "まだのときだけ" },
-    { do: autoStart, by: "AI", input: "番が来ている", denied: "まだのときだけ" },
+    { do: request, by: "ユーザー", input: "動いていない", denied: "まだのときだけ" },
+    { do: autoStart, by: "アプリ", input: "番が来ている", denied: "まだのときだけ" },
     { do: reopen, by: "AI", denied: "ユーザーだけ" },
   ],
 };
