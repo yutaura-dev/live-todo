@@ -46,6 +46,7 @@ Source Item ──（Task の事実。つながりに役割の区別はない）
 | AI が作業中かは Agent Run（Agent Thread）の段階で決まる | Task の `agent_running` |
 | 優先度は「いつまでに手を付けるとよいか」の 6 ラベルで、期日・手間・待つ見込みから決める | 優先度はまだない |
 | Epic は保留（ADR-0024） | ADR-0004 の Epic・未分類のまとまりの判定 |
+| 届いた事実は既存の Task の計画に足す方に倒し、迷ったら提案にする。Task に要確認・仕分け中の列はない（ADR-0025） | 同期の triage が Item ごとに Task を作り、todo か要確認に仕分ける |
 | 自動でやってよい範囲（ADR-0023）・Completion Effect・定期の Task の回（予定日） | まだない（定期の Task は毎月だけで、最後に作った月で数える） |
 
 同期の流れ（`src/core/sync/sync-source.ts`。今の実装）:

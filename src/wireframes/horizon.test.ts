@@ -54,9 +54,9 @@ describe("groupByHorizon（優先度ごとのまとまり）", () => {
     );
   });
 
-  it("開いていない Task（仕分け中・完了待ち・終わった）と優先度のない Task は入れない", () => {
+  it("開いていない Task（完了待ち・終わった）と優先度のない Task は入れない", () => {
     const groups = groupByHorizon([
-      task({ id: 1, status: "triaging", priority: null }),
+      task({ id: 1, priority: null }),
       task({ id: 2, status: "完了待ち" }),
       task({ id: 3, status: "closed" }),
       task({ id: 4 }),
@@ -128,7 +128,7 @@ describe("attentionOf（更新マークと新着）", () => {
   });
 
   it("最後に見る前の変化は数えない", () => {
-    const result = attentionOf(task({ lastSeenAt: "2026-11-28T01:00:00Z", history: [{ by: "同期", field: "列", occurredAt: "2026-11-28T00:30:00Z", summary: "要確認から todo へ" }] }));
+    const result = attentionOf(task({ lastSeenAt: "2026-11-28T01:00:00Z", history: [{ by: "同期", field: "列", occurredAt: "2026-11-28T00:30:00Z", summary: "完了待ちから todo へ" }] }));
     assert.deepStrictEqual(result, { kind: "なし" });
   });
 });

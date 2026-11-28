@@ -104,6 +104,20 @@ function Tags({ item }: { item: PlanItem }) {
   return item.due ? <span className="wf-pill wf-pill--quiet">{item.due}</span> : null;
 }
 
+/**
+ * 事実から計画に足した項目には、もとの事実と「切り出す」を添える（寄せすぎて、この Task が終わっても残る項目だったら、1 回の操作で別の Task にできる）
+ */
+function AddedFrom({ item, ctx }: { item: PlanItem; ctx: Ctx }) {
+  if (!item.addedFrom) return null;
+  return (
+    <p className="wf-task-top">
+      <span className="wf-sub">「{item.addedFrom}」から足した</span>
+      <Button tone="quiet">別の Task に切り出す</Button>
+      {ctx.markOnce(9)}
+    </p>
+  );
+}
+
 /** 待つ条件は、待つ見込みが分かるときだけ添える */
 function ConditionLine({ item }: { item: PlanItem }) {
   if (!item.condition?.expectedWait) return null;
@@ -133,6 +147,7 @@ function Item({ item, turn, ctx }: { item: PlanItem; turn: Turn; ctx: Ctx }) {
           <Tags item={item} />
         </div>
         <ConditionLine item={item} />
+        <AddedFrom item={item} ctx={ctx} />
         <Waiting turn={turn} ctx={ctx} />
         {item.how === "claude" && item.run && <p className="wf-sub">Claude Code に先に頼んであります</p>}
       </div>
@@ -148,6 +163,7 @@ function Item({ item, turn, ctx }: { item: PlanItem; turn: Turn; ctx: Ctx }) {
         <Tags item={item} />
       </div>
       <ConditionLine item={item} />
+      <AddedFrom item={item} ctx={ctx} />
       <ItemActions item={item} ctx={ctx} />
     </div>
   );
@@ -440,4 +456,5 @@ export const PLAN_NOTES = [
   { n: 6, text: "選んだ枝は字下げして続け、選び直したら前の枝は「取りやめた枝」として閉じて残す（済んだことは消さない）" },
   { n: 7, text: "並列の中の直列の枝は、それぞれのペースで進む。枝の頭に枝ごとの進み具合を出し、並列の後ろの項目は、枝それぞれの最後のまだの項目を待つ" },
   { n: 8, text: "書き込みの項目には書き込む中身の要約を出しておき、「承認して〇〇する」の 1 回で頼んで承認する（中身を見てから承認する決まりは守れるので、確認の画面を挟まない）" },
+  { n: 9, text: "事実から計画に足した項目には、もとの事実を添え、「別の Task に切り出す」を出す。届いた事実は新しい Task より既存の Task の計画に足す方に倒す（ADR-0025）ので、寄せすぎを 1 回の操作で直せるように" },
 ];

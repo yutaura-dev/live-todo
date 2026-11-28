@@ -259,7 +259,8 @@ const NEXT_ACTION_LABELS = { human: "済んだ", claude: "Claude Code に頼む"
 type ItemResult = "済んだ" | "頼んだ";
 
 /**
- * Task の 1 件。出すのは「何を（題）」「なぜ今か（理由）」「次に何をするか（次の一手と操作）」と、見る必要がある印（新着・更新・要確認・AI 作業中）だけ。
+ * Task の 1 件。出すのは「何を（題）」「なぜ今か（理由）」「次に何をするか（次の一手と操作）」と、見る必要がある印（新着・更新・AI 作業中）だけ。
+ * 事実から計画に足した項目で優先度が上がったときは、その項目を「今すぐ: 〇〇」と出す（寄せたことに気づけるように。ADR-0025）。
  * 取得元・AI の書いた状況・手間は、詳細を開けば見えるので一覧には出さない。
  */
 function TaskItem(props: {
@@ -284,7 +285,6 @@ function TaskItem(props: {
   const marks = (
     <>
       <AttentionMark attention={attentionOf(task)} />
-      {task.status === "needs_review" && <span className="wf-pill">要確認</span>}
       {working && <WorkingMark />}
     </>
   );
@@ -385,6 +385,14 @@ function TaskItem(props: {
         </Button>
       </div>
       {reason && <p className="wf-sub">{reason}</p>}
+      {task.drivenBy && task.priority && "level" in task.priority && (
+        <p className="wf-task-top">
+          <span className="wf-pill wf-pill--mine">
+            {task.priority.level}: {task.drivenBy}
+          </span>
+          {props.firstFull && <Mark n={8} />}
+        </p>
+      )}
       {task.now.length > 0 && (
         <ul className="wf-now-list" aria-label="今できること">
           {task.now.map((item, index) => {
@@ -455,6 +463,7 @@ export const HORIZON_NOTES = [
   { n: 5, text: "10 日以内より先は題だけにして閉じておく。並びはアプリが決め、ドラッグでは動かさない（変えたいときは詳細で優先度を決めるか、期日を直す）" },
   { n: 6, text: "手で足した Task は Todo に入り、AI が計画と優先度を考える" },
   { n: 7, text: "やらないことにした Task は、お知らせを閉じたあとでも戻せるように、一覧の下に閉じて残す" },
+  { n: 8, text: "事実から計画に足した項目の期日で優先度が上がったら、その項目を出す（Task の題は前のままなので、なぜ上がったかが分かるように。specs/prioritization.spec.ts の drivenByItemId）" },
 ];
 
 export const HORIZON_QUESTIONS = [

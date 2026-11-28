@@ -7,7 +7,8 @@ import type { Priority, RuleResult } from "./priority.value.ts";
  * Decisions の答えは呼ぶたびに費用がかかるので、決まったラベルと材料をとっておき、材料が変わったとき・日が変わったときだけ決め直す。決め直す間は、前のラベルのまま並べる。
  * 答えが返らない・閾値の間・断られた・形に合わないなら「ラベル未定」に倒し、低い優先度とは扱わない（fail closed）。ラベル未定の Task は、ボードで「今すぐ」の上に印を付けて出し、ユーザーに決めてもらう。
  * ユーザーが決めたラベルは、ユーザーが外すまでアプリが変えない（理由は入力しない）。
- * 決めるのは、要確認と todo の Task だけ（仕分け中・終わった Task では決めない。やり直した Task では決め直す）。
+ * 決めるのは、todo の Task だけ（終わった・完了待ちの Task では決めない。やり直した Task では決め直す）。
+ * 事実から計画に Action Item が足され、その期日で段階が上がったときは、どの Action Item で上がったかを持ち、見通しのカードの行にその項目を出す（寄せたことに気づけるように。ADR-0025）。
  */
 export type Prioritization = {
   /** ラベルがどう決まったか */
@@ -18,14 +19,16 @@ export type Prioritization = {
   priority: Priority | null;
   /** 決めるのに使った材料（Task の期日・事実・計画）。変わったら決め直す */
   basisFingerprint: string;
+  /** 段階を決めたもとの Action Item（まだの Action Item の期日で段階が決まったとき。なければ null）。見通しのカードの行に「今日: 〇〇」と出す */
+  drivenByItemId: string | null;
 };
 
 export const Status = {
-  /** まだ決めていない（Task を仕分けた・材料が変わった・日が変わった・ユーザーが外した） */
+  /** まだ決めていない（Task ができた・材料が変わった・日が変わった・ユーザーが外した） */
   pending: "未判定",
   /** 規則か Decisions で決まった */
   byApp: "アプリが決めた",
-  /** Decisions の答えが返らない・閾値の間・断られた・形に合わない。ユーザーに決めてもらう（Task の「要確認」の列とは別） */
+  /** Decisions の答えが返らない・閾値の間・断られた・形に合わない。ユーザーに決めてもらう */
   undecided: "ラベル未定",
   /** ユーザーが決めた（アプリは変えない） */
   byUser: "ユーザーが決めた",
@@ -43,10 +46,10 @@ export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
 };
 
-/** Task を要確認か todo に仕分けたので、優先度を決め始める */
+/** Task ができたので、優先度を決め始める */
 export function initial(actor: Actor): Prioritization {
   ensure(actor.kind === "sync", "同期だけ");
-  return { status: "未判定", taskId: "t1", priority: null, basisFingerprint: "b1" };
+  return { status: "未判定", taskId: "t1", priority: null, basisFingerprint: "b1", drivenByItemId: null };
 }
 
 const canDecide = (p: Prioritization) => p.status === "未判定" || p.status === "ラベル未定";

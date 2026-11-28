@@ -41,12 +41,12 @@ export function HorizonDirections() {
             ))}
           </div>
         </Thumb>
-        <Thumb name="C. 自分が動くものを 1 件ずつ片付けるキュー" tradeoff="承認・仕分け・今すぐを 1 列に混ぜ、上から片付けるので朝の処理は速い。3 日以内より先の見通しが見えない">
+        <Thumb name="C. 自分が動くものを 1 件ずつ片付けるキュー" tradeoff="承認・提案・今すぐを 1 列に混ぜ、上から片付けるので朝の処理は速い。3 日以内より先の見通しが見えない">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 4, blockSize: "100%" }}>
             <div style={{ display: "grid", gap: 4, alignContent: "start" }}>
               <span>次に片付けるもの</span>
               <Zone label="承認" />
-              <Zone label="仕分け" />
+              <Zone label="提案" />
               <Zone label="ラベル未定" />
               <Zone label="今すぐ" />
             </div>
@@ -58,7 +58,7 @@ export function HorizonDirections() {
           </div>
         </Thumb>
       </div>
-      <p>推奨: A。毎朝の問い「今日やることは何か」に上から答えられ、仕分け・承認は別の画面に分けても件数を最上段で知らせられる。C の「1 件ずつ片付ける」は、仕分けの画面に取り入れている。</p>
+      <p>推奨: A。毎朝の問い「今日やることは何か」に上から答えられ、提案・承認は別の画面に分けても件数を最上段で知らせられる。C の「1 件ずつ片付ける」は、提案の画面に取り入れている。</p>
     </div>
   );
 }
@@ -100,7 +100,8 @@ const PLACES: Array<{ name: string; items: string[] }> = [
     items: [
       "完了にする → 完了したときにすることがあれば完了待ち、なければ終わる",
       "やらないことにする（作業中なら［作業を止めますか］）",
-      "要確認に戻す／Todo に移す（作業中はできない）",
+      "別の Task にまとめる（作業中はできない）",
+      "計画の項目: 事実から足した項目を別の Task に切り出す → 新しい Task ができる",
       "優先度を自分で決める／アプリに任せる・期日を直す",
       "計画の項目: 済んだ・Claude Code に頼む・書き込みを頼む → ［承認］・選ぶ・選び直す・戻す",
       "事実: 開く（元のツール）・外す・別の Task に移す",
@@ -109,10 +110,11 @@ const PLACES: Array<{ name: string; items: string[] }> = [
     ],
   },
   {
-    name: "［仕分け］",
+    name: "［提案］",
     items: [
-      "振り分けを待っている事実: 新しい Task にする・既存の Task に入れる・対象外にする → 次の 1 件",
-      "要確認の Task: Todo に移す・やらないことにする・完了にする → 次の 1 件",
+      "提案（新しい Task・既存の Task に足す・切り出す）: 受け入れる・別の形で受け入れる・見送る → 次の 1 件",
+      "AI が判断できなかった事実: 新しい Task にする・既存の Task に入れる・対象外にする → 次の 1 件",
+      "見送った提案・AI が自動でしたこと（閉じた一覧）",
       "元のツールで開く",
       "0 件 → 見通しに戻る",
     ],
@@ -137,7 +139,7 @@ export function Breadboard() {
   return (
     <div className="wf" style={{ padding: 24, display: "grid", gap: 24 }}>
       <h1 className="wf-title">画面のつながり</h1>
-      <p>左のレールの行き先は［見通し］［仕分け］［承認］［カンバン］［設定］の 5 つで、どの画面からも行ける。</p>
+      <p>左のレールの行き先は［見通し］［提案］［承認］［カンバン］［設定］の 5 つで、どの画面からも行ける。</p>
       <div className="wf-breadboard">
         {PLACES.map((place) => (
           <section key={place.name} className="wf-place">

@@ -1,0 +1,1986 @@
+
+.ui-window {
+  position: relative;
+  block-size: 100vh;
+  overflow: hidden;
+}
+
+.ui-traffic {
+  position: absolute;
+  z-index: 20;
+  inset-block-start: 18px;
+  inset-inline-start: 18px;
+  display: flex;
+  gap: 8px;
+}
+
+.ui-traffic span {
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.15);
+}
+
+.ui-traffic span:nth-child(2) {
+  background: #febc2e;
+}
+
+.ui-traffic span:nth-child(3) {
+  background: #28c840;
+}
+
+.ui-panel-stage {
+  display: grid;
+  justify-content: center;
+  min-block-size: 100vh;
+  padding: var(--sp-8) 0;
+}
+
+.ui-panel {
+  inline-size: 480px;
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-card);
+}
+
+.ui-app {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  block-size: 100%;
+}
+
+.ui-app--inspector {
+  grid-template-columns: 216px minmax(0, 1fr) minmax(400px, 480px);
+}
+
+.ui-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: 52px var(--sp-3) var(--sp-4);
+  background: var(--c-sunken);
+  border-inline-end: 1px solid var(--c-rule);
+  -webkit-app-region: drag;
+}
+
+.ui-rail button {
+  -webkit-app-region: no-drag;
+}
+
+.ui-wordmark {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2) var(--sp-4);
+  color: var(--c-ink);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.01em;
+}
+
+.ui-wordmark .ui-logo {
+  color: var(--c-ruri);
+}
+
+.ui-rail-list {
+  display: grid;
+  gap: 2px;
+}
+
+.ui-rail-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  inline-size: 100%;
+  min-block-size: 34px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-ink-sub);
+  font-weight: var(--fw-bold);
+  text-align: start;
+  cursor: pointer;
+}
+
+.ui-rail-item:hover:not(:disabled) {
+  background: var(--c-hover);
+  color: var(--c-ink);
+}
+
+.ui-rail-item[aria-current="page"] {
+  background: var(--c-sheet);
+  color: var(--c-ink);
+  box-shadow: 0 0 0 1px var(--c-rule);
+}
+
+.ui-rail-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ui-rail-count {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 22px;
+  block-size: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--c-ruri);
+  color: var(--c-on-ruri);
+  font-size: var(--fs-12);
+  line-height: 1;
+}
+
+.ui-rail-foot {
+  margin-block-start: auto;
+  padding: 0 var(--sp-2);
+}
+
+.ui-rail-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  line-height: var(--lh-tight);
+}
+
+.ui-rail-status--problem {
+  color: var(--c-bengara);
+  font-weight: var(--fw-bold);
+}
+
+.ui-rail-status--stopped {
+  color: var(--c-ink);
+  font-weight: var(--fw-bold);
+}
+
+.ui-main {
+  min-inline-size: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.ui-main-inner {
+  display: grid;
+  gap: var(--sp-6);
+  align-content: start;
+  padding: 44px var(--sp-10) 96px;
+}
+
+.ui-inspector {
+  min-inline-size: 0;
+  overflow-y: auto;
+  border-inline-start: 1px solid var(--c-rule);
+  background: var(--c-sheet);
+  box-shadow: var(--shadow-float);
+}
+
+.ui-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.ui-head-text {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.ui-title {
+  font-size: var(--fs-26);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: 0.01em;
+}
+
+.ui-seiji {
+  color: var(--c-seiji);
+}
+
+.ui-stack-4 {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.ui-stack-8 {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-row--split {
+  justify-content: space-between;
+}
+
+.ui-plain-list {
+  display: grid;
+  padding: var(--sp-2) 0 0 var(--sp-6);
+}
+
+.ui-plain-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-block: 4px;
+  border-block-end: 1px solid var(--c-rule);
+}
+
+.ui-notices {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-notices:empty {
+  display: none;
+}
+
+.ui-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  border: 1px solid var(--c-ruri-line);
+  border-radius: var(--r-card);
+  background: var(--c-ruri-wash);
+}
+
+/*
+ * 左の列が物差し。段ごとに縦の線を引き、つなげて 1 本に見せる。
+ * --depth（0: 今すぐ 〜 5: それより先）が大きいほど、目盛りの文字を小さく、線を細く淡くする。
+ * 本文の色まで淡くしない理由: 遠い段の題も読めないと困るので、淡くするのは物差しだけにする。
+ */
+.ui-horizon {
+  display: grid;
+}
+
+.ui-band {
+  --ruler-width: 112px;
+  --tick-size: calc(11px - var(--depth) * 1px);
+  --ruler-ink: color-mix(in oklab, var(--c-ink-sub) calc(var(--depth) * 20%), var(--c-ink));
+  --ruler-line: color-mix(in oklab, var(--c-rule) calc(var(--depth) * 20%), var(--c-rule-strong));
+  display: grid;
+  grid-template-columns: var(--ruler-width) minmax(0, 1fr);
+  column-gap: var(--sp-6);
+  padding-block-end: calc(var(--sp-8) - var(--depth) * 3px);
+  position: relative;
+}
+
+.ui-band::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(var(--ruler-width) - 1px);
+  border-inline-start: max(1px, calc(2px - var(--depth) * 0.25px)) solid var(--ruler-line);
+}
+
+.ui-band:first-child::before {
+  inset-block-start: 14px;
+}
+
+.ui-band:last-child::before {
+  inset-block-end: auto;
+  block-size: 20px;
+}
+
+.ui-band--pending::before {
+  border-inline-start-style: dashed;
+}
+
+.ui-band--decide::before {
+  border-inline-start-color: var(--c-ruri-line);
+}
+
+.ui-ruler {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-inline-end: var(--sp-4);
+  padding-block-start: 2px;
+  text-align: end;
+}
+
+.ui-ruler::after {
+  content: "";
+  position: absolute;
+  inset-block-start: calc(0.85em - var(--tick-size) / 2 + 2px);
+  inset-inline-end: calc(var(--tick-size) / -2);
+  inline-size: var(--tick-size);
+  block-size: var(--tick-size);
+  border-radius: 50%;
+  background: var(--c-paper);
+  box-shadow: 0 0 0 max(1.5px, calc(2px - var(--depth) * 0.1px)) var(--ruler-ink);
+  font-size: var(--ruler-size);
+}
+
+.ui-band {
+  --ruler-size: max(var(--fs-13), calc(20px - var(--depth) * 1.5px));
+}
+
+.ui-ruler-label {
+  color: var(--ruler-ink);
+  font-size: var(--ruler-size);
+  font-weight: var(--fw-bold);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.ui-ruler-count {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+}
+
+.ui-band--decide .ui-ruler-label {
+  color: var(--c-ruri);
+}
+
+.ui-band--decide .ui-ruler::after {
+  background: var(--c-ruri);
+  box-shadow: 0 0 0 2px var(--c-paper), 0 0 0 3.5px var(--c-ruri);
+}
+
+/* いちばん近い段だけ、目盛りを塗りつぶす（今がここ） */
+.ui-band--full .ui-ruler::after {
+  background: var(--c-ink);
+}
+
+.ui-band--pending .ui-ruler::after {
+  box-shadow: 0 0 0 1.5px var(--c-ink-sub);
+}
+
+.ui-band-body {
+  display: grid;
+  gap: var(--sp-3);
+  min-inline-size: 0;
+}
+
+.ui-band-title {
+  font-weight: var(--fw-bold);
+}
+
+.ui-band--decide .ui-band-title {
+  color: var(--c-ruri);
+}
+
+.ui-band-empty {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--c-rule-strong);
+  border-radius: var(--r-card);
+  color: var(--c-ink-sub);
+}
+
+.ui-band-fold {
+  padding-block-start: 2px;
+}
+
+.ui-band-fold > summary {
+  inline-size: fit-content;
+  padding: 2px 6px 2px 2px;
+  border-radius: 6px;
+}
+
+.ui-band-fold > summary:hover {
+  background: var(--c-hover);
+}
+
+.ui-task-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: var(--fw-bold);
+  text-align: start;
+  cursor: pointer;
+  text-wrap: pretty;
+}
+
+.ui-task-open:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.ui-cards {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ui-card {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5) var(--sp-4);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-card);
+  background: var(--c-sheet);
+}
+
+.ui-card[aria-current="true"],
+.ui-row-item[aria-current="true"],
+.ui-title-item[aria-current="true"] {
+  border-color: var(--c-ruri);
+  box-shadow: inset 0 0 0 1px var(--c-ruri);
+}
+
+.ui-card--working {
+  border-color: var(--c-seiji-line);
+}
+
+.ui-card--decide {
+  border-color: var(--c-ruri-line);
+  gap: var(--sp-3);
+}
+
+.ui-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ui-card-head .ui-task-open {
+  font-size: var(--fs-16);
+  line-height: var(--lh-tight);
+}
+
+.ui-card-dismiss {
+  margin-inline-start: auto;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+/* やらないことにする はめったに使わないので、カードに触れたときだけ見せる */
+.ui-card:hover .ui-card-dismiss,
+.ui-card:focus-within .ui-card-dismiss {
+  opacity: 1;
+}
+
+.ui-reason {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+  line-height: var(--lh-tight);
+}
+
+.ui-now {
+  display: grid;
+  margin-block-start: var(--sp-1);
+  border-block-start: 1px solid var(--c-rule);
+}
+
+.ui-now-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  min-block-size: 48px;
+  padding-block: var(--sp-2);
+  border-block-end: 1px solid var(--c-rule);
+}
+
+.ui-now-item:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.ui-now-title {
+  position: relative;
+  padding-inline-start: 18px;
+}
+
+.ui-now-title::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: 0.6em;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--c-ruri);
+}
+
+.ui-now-item--done .ui-now-title {
+  color: var(--c-ink-sub);
+  text-decoration: line-through;
+  text-decoration-color: var(--c-rule-strong);
+}
+
+.ui-now-item--done .ui-now-title::before {
+  background: var(--c-rule-strong);
+}
+
+.ui-result {
+  white-space: nowrap;
+  font-size: var(--fs-13);
+}
+
+.ui-result-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-ink-sub);
+  font-weight: var(--fw-bold);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-result-done .ui-icon path {
+    stroke-dasharray: 14;
+    animation: ui-draw 280ms var(--ease-out) both;
+  }
+}
+
+@keyframes ui-draw {
+  from {
+    stroke-dashoffset: 14;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.ui-rows {
+  display: grid;
+  border-block-start: 1px solid var(--c-rule);
+}
+
+.ui-row-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-2);
+  border-block-end: 1px solid var(--c-rule);
+  border-radius: 0;
+}
+
+.ui-row-item[aria-current="true"] {
+  border-radius: var(--r-control);
+  background: var(--c-ruri-wash);
+}
+
+.ui-row-item-text {
+  display: grid;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.ui-row-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ui-row-item-action {
+  flex: none;
+}
+
+.ui-titles {
+  display: grid;
+  gap: 2px;
+  padding: var(--sp-2) 0 0 var(--sp-6);
+}
+
+.ui-title-item {
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--c-ink);
+}
+
+.ui-title-item .ui-task-open {
+  font-weight: var(--fw-regular);
+}
+
+/* 6 つの段が 1 本に並ぶのを基本にし、狭いときは 3 列 × 2 行にする（5 と 1 に分かれて 1 つだけ余らないように） */
+.ui-card,
+.ui-decide-box {
+  container-type: inline-size;
+}
+
+.ui-segmented {
+  display: grid;
+  grid-template-columns: repeat(6, auto);
+  gap: 1px;
+  max-inline-size: 560px;
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--r-control);
+  background: var(--c-rule);
+  overflow: hidden;
+}
+
+.ui-segmented button {
+  min-block-size: 34px;
+  padding: 0 10px;
+  border: 0;
+  background: var(--c-sheet);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ui-segmented button:hover {
+  background: var(--c-ruri-wash);
+  color: var(--c-ruri);
+}
+
+.ui-segmented button[aria-pressed="true"] {
+  background: var(--c-ruri);
+  color: var(--c-on-ruri);
+}
+
+/* 6 列の指定より後ろに置く（同じ詳細度なので、前に置くと 6 列に上書きされる） */
+@container (inline-size < 620px) {
+  .ui-segmented {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.ui-dismissed > summary {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+}
+
+.ui-detail {
+  display: grid;
+  gap: var(--sp-6);
+  padding: var(--sp-5) var(--sp-6) var(--sp-10);
+}
+
+.ui-detail-head {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ui-detail-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-block-size: 28px;
+}
+
+.ui-detail-title {
+  font-size: var(--fs-20);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.ui-priority {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.ui-priority-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.ui-level {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+}
+
+.ui-priority-toggle {
+  margin-inline-start: auto;
+}
+
+.ui-priority-edit {
+  display: grid;
+  gap: var(--sp-3);
+  justify-items: start;
+  margin-block-start: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-control);
+  background: var(--c-sunken);
+}
+
+.ui-priority-edit .ui-field {
+  inline-size: 100%;
+}
+
+.ui-due {
+  color: var(--c-ink);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+
+.ui-decide-box {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--c-ruri-line);
+  border-radius: var(--r-card);
+  background: var(--c-ruri-wash);
+}
+
+.ui-decide-title {
+  color: var(--c-ruri);
+  font-weight: var(--fw-bold);
+}
+
+.ui-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--c-seiji-line);
+  border-radius: var(--r-control);
+}
+
+.ui-section {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ui-section-title {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-bold);
+  color: var(--c-ink);
+}
+
+details.ui-section > summary.ui-section-title {
+  color: var(--c-ink-sub);
+}
+
+.ui-thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--c-seiji);
+  font-size: var(--fs-13);
+}
+
+.ui-thinking::before {
+  content: "";
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-thinking::before {
+    animation: ui-pulse 1.6s var(--ease-out) infinite;
+  }
+}
+
+.ui-facts {
+  display: grid;
+  border-block-start: 1px solid var(--c-rule);
+}
+
+.ui-fact {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-block: var(--sp-2);
+  border-block-end: 1px solid var(--c-rule);
+}
+
+.ui-fact-text {
+  display: grid;
+  line-height: var(--lh-tight);
+  gap: 2px;
+}
+
+.ui-history {
+  display: grid;
+  gap: var(--sp-1);
+  padding-inline-start: var(--sp-6);
+}
+
+.ui-history li {
+  display: grid;
+  grid-template-columns: 3.5em 3.5em minmax(0, 1fr);
+  gap: var(--sp-2);
+  font-size: var(--fs-13);
+}
+
+.ui-history-by {
+  color: var(--c-ink-sub);
+}
+
+.ui-thread {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.ui-thread-pair {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-thread-question {
+  justify-self: end;
+  max-inline-size: 85%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-card) var(--r-card) 4px var(--r-card);
+  background: var(--c-sunken);
+}
+
+.ui-ask {
+  display: grid;
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--r-card);
+  background: var(--c-sheet);
+}
+
+.ui-ask:focus-within {
+  border-color: var(--c-ruri);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--c-ruri) 15%, transparent);
+}
+
+.ui-ask-input {
+  min-block-size: 64px;
+  padding: var(--sp-3) var(--sp-3) 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  field-sizing: content;
+  outline: none;
+}
+
+.ui-ask-input:focus-visible {
+  outline: none;
+}
+
+.ui-ask-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+}
+
+.ui-checklist {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-check {
+  display: flex;
+  align-items: start;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-control);
+}
+
+.ui-check input {
+  inline-size: 16px;
+  block-size: 16px;
+  margin-block-start: 4px;
+}
+
+.ui-check-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.ui-check--done .ui-check-title {
+  color: var(--c-ink-sub);
+  text-decoration: line-through;
+}
+
+.ui-check--failed {
+  border-color: var(--c-bengara-line);
+  background: var(--c-bengara-wash);
+}
+
+.ui-check-failure {
+  color: var(--c-bengara);
+  font-size: var(--fs-13);
+}
+
+.ui-complete {
+  justify-self: stretch;
+}
+
+.ui-plan {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.ui-plan-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.ui-plan-now {
+  color: var(--c-ruri);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.ui-plan-meter {
+  flex: 1;
+  block-size: 4px;
+  border-radius: var(--r-pill);
+  background: var(--c-sunken);
+  overflow: hidden;
+}
+
+.ui-plan-meter span {
+  display: block;
+  block-size: 100%;
+  background: var(--c-ink-sub);
+}
+
+.ui-track {
+  display: grid;
+}
+
+/*
+ * 駅。左に 20px の線路の列を取り、駅の印と、次の駅までの線を描く。
+ * 線は印の下から次の駅の印までつなぐので、最後の駅だけ線を描かない。
+ */
+.ui-station {
+  --mark: 14px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: var(--sp-3);
+  padding-block-end: var(--sp-4);
+}
+
+.ui-station::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 9px;
+  inset-block: calc(var(--mark) + 8px) 0;
+  border-inline-start: 2px solid var(--c-rule);
+}
+
+.ui-station:last-child {
+  padding-block-end: 0;
+}
+
+.ui-station:last-child::before {
+  display: none;
+}
+
+.ui-station--done::before {
+  border-inline-start-color: var(--c-rule-strong);
+}
+
+.ui-station-mark {
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  inline-size: var(--mark);
+  block-size: var(--mark);
+  margin-block-start: 5px;
+  border: 2px solid var(--c-rule-strong);
+  border-radius: 50%;
+  background: var(--c-sheet);
+  color: var(--c-sheet);
+}
+
+.ui-station--done > .ui-station-mark {
+  border-color: var(--c-ink-sub);
+  background: var(--c-ink-sub);
+}
+
+.ui-station--now > .ui-station-mark {
+  --mark: 16px;
+  border: 0;
+  background: var(--c-ruri);
+  box-shadow: 0 0 0 4px var(--c-ruri-wash);
+}
+
+.ui-station--skipped > .ui-station-mark {
+  border-style: dashed;
+}
+
+.ui-station--decision > .ui-station-mark {
+  border-radius: 3px;
+  rotate: 45deg;
+  scale: 0.85;
+}
+
+.ui-station--decision > .ui-station-mark .ui-icon {
+  rotate: -45deg;
+}
+
+.ui-station--effect > .ui-station-mark {
+  border-radius: 3px;
+  border-style: dotted;
+  background: var(--c-sheet);
+}
+
+.ui-station--parallel > .ui-station-mark {
+  border-radius: 4px;
+  inline-size: 14px;
+  block-size: 10px;
+  margin-block-start: 7px;
+}
+
+.ui-station-body {
+  min-inline-size: 0;
+}
+
+.ui-station-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-block-size: 24px;
+  line-height: var(--lh-tight);
+}
+
+.ui-station-done {
+  color: var(--c-ink-sub);
+}
+
+.ui-reopen {
+  opacity: 0;
+}
+
+.ui-station-line:hover .ui-reopen,
+.ui-station-line:focus-within .ui-reopen {
+  opacity: 1;
+}
+
+.ui-station-later {
+  display: grid;
+  gap: 2px;
+  color: var(--c-ink-sub);
+}
+
+.ui-waiting {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  line-height: var(--lh-tight);
+}
+
+.ui-waiting::before {
+  content: "待ち　";
+  font-weight: var(--fw-bold);
+}
+
+.ui-stop {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-ruri-line);
+  border-radius: 10px;
+  background: var(--c-sheet);
+}
+
+.ui-stop--busy {
+  border-color: var(--c-seiji-line);
+  background: var(--c-seiji-wash);
+}
+
+.ui-stop-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.ui-working-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.ui-write-summary {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: 6px;
+  background: var(--c-sunken);
+  font-size: var(--fs-13);
+}
+
+.ui-effect {
+  min-block-size: 24px;
+  line-height: var(--lh-tight);
+  font-size: var(--fs-13);
+}
+
+.ui-parallel {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-parallel-head {
+  min-block-size: 24px;
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  line-height: 24px;
+}
+
+.ui-lanes {
+  display: grid;
+  gap: var(--sp-2);
+  padding-inline-start: var(--sp-3);
+  border-inline-start: 2px solid var(--c-rule);
+}
+
+.ui-parallel:not(.ui-parallel--later) > .ui-lanes {
+  border-inline-start-color: var(--c-ruri-line);
+}
+
+.ui-lane {
+  min-inline-size: 0;
+}
+
+.ui-decision {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-decision--now {
+  padding: var(--sp-4);
+  border: 1px solid var(--c-ruri-line);
+  border-radius: 10px;
+  background: var(--c-sheet);
+  gap: var(--sp-3);
+}
+
+.ui-decision--later {
+  color: var(--c-ink-sub);
+}
+
+.ui-decision-body {
+  display: grid;
+  gap: var(--sp-3);
+  color: var(--c-ink);
+}
+
+.ui-decision--later .ui-decision-body {
+  padding-block-start: var(--sp-2);
+}
+
+.ui-decision-question {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+}
+
+.ui-howto {
+  display: grid;
+  gap: 2px;
+  padding: var(--sp-3);
+  border-radius: var(--r-control);
+  background: var(--c-sunken);
+}
+
+.ui-howto-label {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+}
+
+.ui-aspects {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-aspect {
+  padding: 1px 8px;
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+}
+
+.ui-options {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-option {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+  padding: var(--sp-3);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-control);
+}
+
+.ui-option--recommended {
+  border-color: var(--c-seiji-line);
+}
+
+.ui-option-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ui-tradeoffs {
+  display: grid;
+  gap: 4px;
+  inline-size: 100%;
+}
+
+.ui-tradeoff {
+  display: grid;
+  grid-template-columns: 18px 4.5em minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: baseline;
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
+.ui-tradeoff-sign {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+}
+
+.ui-tradeoff--gain .ui-tradeoff-sign {
+  background: var(--c-ruri-wash);
+  color: var(--c-ruri);
+}
+
+.ui-tradeoff--cost .ui-tradeoff-sign {
+  background: var(--c-sunken);
+  color: var(--c-ink-sub);
+}
+
+.ui-tradeoff-aspect {
+  color: var(--c-ink-sub);
+  font-weight: var(--fw-bold);
+}
+
+.ui-option-then {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.ui-chosen {
+  padding: 1px 10px;
+  border-radius: var(--r-pill);
+  background: var(--c-ink);
+  color: var(--c-sheet);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  line-height: 1.7;
+}
+
+.ui-branch {
+  padding: var(--sp-3) 0 0 var(--sp-3);
+  border-inline-start: 2px solid var(--c-rule-strong);
+  margin-inline-start: 2px;
+}
+
+.ui-branch--abandoned {
+  opacity: 0.7;
+  border-inline-start-style: dashed;
+}
+
+.ui-fold > summary {
+  inline-size: fit-content;
+  padding-block: 2px;
+}
+
+.ui-split {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: var(--sp-8);
+  align-items: start;
+}
+
+.ui-queue-nav {
+  position: sticky;
+  inset-block-start: 0;
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.ui-queue {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-queue-title {
+  display: flex;
+  justify-content: space-between;
+  padding-inline: var(--sp-2);
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+}
+
+.ui-queue ul {
+  display: grid;
+  gap: 2px;
+}
+
+.ui-queue-item {
+  display: flex;
+  align-items: start;
+  gap: var(--sp-2);
+  inline-size: 100%;
+  padding: var(--sp-2);
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  text-align: start;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.ui-queue-item .ui-sources {
+  margin-block-start: 2px;
+}
+
+.ui-queue-item:hover {
+  background: var(--c-hover);
+}
+
+.ui-queue-item[aria-current="true"] {
+  background: var(--c-sheet);
+  box-shadow: inset 0 0 0 1px var(--c-ruri);
+}
+
+.ui-queue-text {
+  display: grid;
+  gap: 2px;
+}
+
+.ui-queue-problem {
+  color: var(--c-bengara);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.ui-focus {
+  display: grid;
+  gap: var(--sp-5);
+  max-inline-size: 680px;
+  padding: var(--sp-6) var(--sp-8) var(--sp-8);
+  border: 1px solid var(--c-rule);
+  border-radius: 16px;
+  background: var(--c-sheet);
+}
+
+.ui-focus-from {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+}
+
+.ui-focus-title {
+  margin-block-start: calc(var(--sp-3) * -1);
+  font-size: var(--fs-20);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.ui-decide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding-block-start: var(--sp-1);
+}
+
+.ui-push-end {
+  margin-inline-start: auto;
+}
+
+.ui-self-start {
+  justify-self: start;
+}
+
+.ui-candidates {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.ui-candidate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  inline-size: 100%;
+  padding: var(--sp-3);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-control);
+  background: var(--c-sheet);
+  text-align: start;
+  cursor: pointer;
+}
+
+.ui-candidate:hover {
+  border-color: var(--c-ruri-line);
+  background: var(--c-ruri-wash);
+}
+
+.ui-candidate-verb {
+  color: var(--c-ruri);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.ui-last {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+  border-radius: var(--r-control);
+  background: var(--c-sunken);
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+}
+
+.ui-last > span {
+  flex: 1;
+}
+
+.ui-empty {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+  max-inline-size: 520px;
+  padding: var(--sp-8);
+  border: 1px dashed var(--c-rule-strong);
+  border-radius: 16px;
+}
+
+.ui-empty-title {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+}
+
+.ui-empty .ui-button {
+  margin-block-start: var(--sp-2);
+}
+
+.ui-write-meta {
+  display: grid;
+  grid-template-columns: 6em minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+}
+
+.ui-write-meta dt {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+}
+
+.ui-outgoing {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.ui-outgoing figcaption {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+}
+
+/* 書き込む中身は、外に出るそのままの姿なので、紙のように白い板に罫で囲む */
+.ui-outgoing-body {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--r-control);
+  background: var(--c-paper);
+  font-size: var(--fs-14);
+  line-height: 1.8;
+  box-shadow: inset 3px 0 0 var(--c-rule-strong);
+}
+
+.ui-unsure {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--c-rule-strong);
+  border-radius: var(--r-control);
+}
+
+.ui-auto-writes > summary {
+  padding-inline: var(--sp-2);
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.ui-auto-list {
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-2) 0;
+}
+
+.ui-auto-list li {
+  display: grid;
+  grid-template-columns: 3em minmax(0, 1fr);
+  gap: var(--sp-2);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
+.ui-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.ui-column {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-card);
+  background: var(--c-sunken);
+}
+
+.ui-column-head {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.ui-column-cards {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-kcard {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-rule);
+  border-radius: 10px;
+  background: var(--c-sheet);
+  cursor: grab;
+}
+
+.ui-kcard:hover {
+  border-color: var(--c-rule-strong);
+}
+
+.ui-kcard--working {
+  border-color: var(--c-seiji-line);
+}
+
+.ui-kcard--done {
+  cursor: default;
+}
+
+.ui-kcard--done .ui-kcard-title {
+  color: var(--c-ink-sub);
+}
+
+/* 予告は本当の Task ではないので、面を塗らず破線にする（動かせない・消せない） */
+.ui-kcard--preview {
+  border-style: dashed;
+  border-color: var(--c-rule-strong);
+  background: transparent;
+  cursor: default;
+}
+
+.ui-kcard-title {
+  font-weight: var(--fw-bold);
+  line-height: 1.5;
+}
+
+.ui-kcard-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.ui-settings {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: var(--sp-8);
+  align-items: start;
+}
+
+.ui-settings-nav {
+  position: sticky;
+  inset-block-start: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ui-settings-nav a {
+  padding: 6px var(--sp-2);
+  border-radius: 6px;
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+  text-decoration: none;
+}
+
+.ui-settings-nav a:hover {
+  background: var(--c-hover);
+  color: var(--c-ink);
+}
+
+.ui-settings-body {
+  display: grid;
+  gap: var(--sp-10);
+}
+
+.ui-settings-section {
+  display: grid;
+  gap: var(--sp-3);
+  scroll-margin-block-start: var(--sp-6);
+}
+
+.ui-settings-title {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+}
+
+.ui-roles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.ui-role {
+  display: grid;
+  gap: var(--sp-2);
+  align-content: start;
+  padding: var(--sp-4);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-card);
+  background: var(--c-sheet);
+}
+
+.ui-role--missing {
+  border-color: var(--c-ruri-line);
+}
+
+.ui-role--broken {
+  border-color: var(--c-bengara-line);
+}
+
+.ui-role-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.ui-role-head h3 {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-bold);
+}
+
+.ui-role-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+}
+
+.ui-role-problem {
+  color: var(--c-bengara);
+  font-size: var(--fs-13);
+}
+
+.ui-select select {
+  inline-size: 100%;
+  min-block-size: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--r-control);
+  background: var(--c-sheet);
+  font-size: var(--fs-13);
+}
+
+.ui-visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ui-policy {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-card);
+  background: var(--c-sheet);
+  overflow: hidden;
+  font-size: var(--fs-13);
+}
+
+.ui-policy th,
+.ui-policy td {
+  padding: 10px var(--sp-3);
+  border-block-end: 1px solid var(--c-rule);
+  text-align: center;
+}
+
+.ui-policy tbody tr:last-child > * {
+  border-block-end: 0;
+}
+
+.ui-policy thead th {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+
+.ui-policy th[scope="row"],
+.ui-policy thead th:first-child {
+  text-align: start;
+  font-weight: var(--fw-regular);
+}
+
+.ui-policy td.ui-policy-in {
+  background: var(--c-ruri-wash);
+}
+
+.ui-policy input {
+  inline-size: 16px;
+  block-size: 16px;
+  margin: 0;
+}
+
+.ui-list {
+  display: grid;
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-card);
+  background: var(--c-sheet);
+}
+
+.ui-list-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-block-end: 1px solid var(--c-rule);
+}
+
+.ui-list-item:last-child {
+  border-block-end: 0;
+}
+
+.ui-list-item--off .ui-list-title {
+  color: var(--c-ink-sub);
+}
+
+.ui-list-title {
+  font-weight: var(--fw-bold);
+}
+
+.ui-recurring-rule {
+  min-inline-size: 6.5em;
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.ui-policy td.ui-policy-in--default {
+  background: color-mix(in oklab, var(--c-ruri-wash) 45%, var(--c-sheet));
+}
+
+.ui-focus-from .ui-push-end {
+  margin-inline-start: auto;
+}
+
+.ui-app--doc {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ui-doc {
+  display: grid;
+  gap: var(--sp-10);
+  max-inline-size: 760px;
+  padding: 56px var(--sp-10) 96px;
+  margin-inline: auto;
+}
+
+.ui-doc-head {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ui-doc-lead {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-16);
+}
+
+.ui-doc-section {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ui-doc-list {
+  display: grid;
+  gap: var(--sp-1);
+  padding-inline-start: 1.2em;
+  list-style: disc;
+}
+
+.ui-doc-ruler {
+  display: grid;
+  padding: var(--sp-4) 0;
+}
+
+.ui-band--doc {
+  padding-block-end: calc(18px - var(--depth) * 2px);
+}
+
+.ui-swatches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3) var(--sp-6);
+}
+
+.ui-swatches li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.ui-swatch {
+  flex: none;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c-ink) 12%, transparent);
+}
+
+.ui-doc-grid {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ui-type-scale {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--r-card);
+  background: var(--c-sheet);
+  line-height: 1.4;
+}
+
+/* 並列の中の枝どうしの境目。枝は別々のペースで進むので、1 本ずつ区切って見せる */
+.ui-lanes {
+  gap: 0;
+}
+
+.ui-lane + .ui-lane {
+  margin-block-start: var(--sp-3);
+  padding-block-start: var(--sp-3);
+  border-block-start: 1px dashed var(--c-rule-strong);
+}
+
+.ui-target {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+}
+
+.ui-target strong {
+  color: var(--c-ink);
+}
+
+/* 受け入れたらできるもの（計画の案・足す項目）。線路と同じ印で、まだ Task ではないことを破線で示す */
+.ui-draft {
+  display: grid;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--c-rule-strong);
+  border-radius: var(--r-control);
+  counter-reset: draft;
+}
+
+.ui-draft li {
+  position: relative;
+  padding-inline-start: 20px;
+}
+
+.ui-draft li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 2px;
+  inset-block-start: 0.65em;
+  inline-size: 8px;
+  block-size: 8px;
+  border: 1.5px solid var(--c-rule-strong);
+  border-radius: 50%;
+}
+
+.ui-declined {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.ui-driven {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  inline-size: fit-content;
+  padding: 4px 10px 4px 4px;
+  border-radius: var(--r-pill);
+  background: var(--c-ruri-wash);
+  color: var(--c-ink);
+  font-size: var(--fs-13);
+  line-height: var(--lh-tight);
+}
+
+.ui-driven-level {
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--c-ruri);
+  color: var(--c-on-ruri);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+}
+
+.ui-added {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  line-height: var(--lh-tight);
+}
+
+.ui-added > span::before {
+  content: "＋ ";
+  color: var(--c-ruri);
+  font-weight: var(--fw-bold);
+}

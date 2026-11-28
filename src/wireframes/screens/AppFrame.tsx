@@ -1,16 +1,16 @@
 import type { ReactNode } from "react";
-import { routingItems, tasks, writeRequests, writeTroubles } from "../fixtures.js";
+import { proposals, undecidedFacts, writeRequests, writeTroubles } from "../fixtures.js";
 import "../wireframe.css";
 
-export type View = "見通し" | "仕分け" | "承認" | "カンバン" | "設定";
+export type View = "見通し" | "提案" | "承認" | "カンバン" | "設定";
 
-const VIEWS: View[] = ["見通し", "仕分け", "承認", "カンバン", "設定"];
+const VIEWS: View[] = ["見通し", "提案", "承認", "カンバン", "設定"];
 
 export type Counts = Partial<Record<View, number>>;
 
 /** 件数はサンプルデータから 1 か所で数える（画面ごとに持つと、画面によって数が食い違うため） */
 const DEFAULT_COUNTS: Counts = {
-  仕分け: routingItems.length + tasks.filter((task) => task.status === "needs_review").length,
+  提案: proposals.filter((proposal) => proposal.status === "提案中").length + undecidedFacts.length,
   承認: writeRequests.length + writeTroubles.length,
 };
 

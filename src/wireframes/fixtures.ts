@@ -30,7 +30,11 @@ export const tasks: WireTask[] = [
     priority: { status: "アプリが決めた", level: "今すぐ", reason: "PR のレビューを待たれていて、相手は今日リリースしたい" },
     blocksOthers: true,
     sources: ["github", "slack"],
-    now: [{ title: "AI の指摘を見て、レビューを書く", how: "human" }],
+    drivenBy: "リリースに入れられるか返事をする（Slack から足した）",
+    now: [
+      { title: "AI の指摘を見て、レビューを書く", how: "human" },
+      { title: "リリースに入れられるか返事をする", how: "write" },
+    ],
     lastSeenAt: null,
     history: [],
   },
@@ -156,19 +160,6 @@ export const tasks: WireTask[] = [
     history: [],
   },
   {
-    id: 113,
-    title: "契約更新のお知らせを確かめる",
-    brief: "AI は自分の対応が要るか決めきれなかった",
-    status: "needs_review",
-    work: "なし",
-    priority: { status: "アプリが決めた", level: "3 日以内", reason: "期日まで 6 日" },
-    blocksOthers: false,
-    sources: ["gmail"],
-    now: [{ title: "更新するか決める", how: "decision" }],
-    lastSeenAt: null,
-    history: [],
-  },
-  {
     id: 112,
     title: "来年の目標を書く",
     brief: null,
@@ -183,54 +174,111 @@ export const tasks: WireTask[] = [
   },
 ];
 
+/** 提案のもとになった事実（元の文面の抜粋つき） */
+export type ProposalFact = { source: string; title: string; from: string; excerpt: string };
+
 /**
- * 振り分けを待っている事実（specs/routing.spec.ts の「ユーザー待ち」）。AI が迷った（確率が中間・refusal）ので、どの Task にも入れていない。
- * ユーザーは、新しい Task にする・既存の Task の事実にする・対象外にする、のどれかを選ぶ。
+ * Task の提案（specs/task-proposal.spec.ts）。AI が決めきれなかった（確率が中間）ので、自動では Task にも計画にもしていないもの。提案は Task ではない。
+ * 受け入れる・別の形で受け入れる・見送るのどれかをユーザーが選ぶ。関係する事実が続けて届くと同じ提案に足され、確信が上がれば AI が自動で受け入れる。
  */
-export type RoutingItem = {
+export type ProposalView = {
+  id: number;
+  kind: "新しい Task" | "既存の Task に足す" | "切り出す";
+  status: "提案中" | "見送った";
+  /** 作る Task の題・足す（切り出す）Action Item の題 */
+  title: string;
+  /** なぜ提案するか（Generation が書く） */
+  brief: string;
+  /** 作る Task の計画の案・足す（切り出す）Action Item の並び */
+  plan: string[];
+  /** 寄せ先の Task（足す・切り出す提案のとき） */
+  target?: { taskId: number; title: string };
+  facts: ProposalFact[];
+};
+
+export const proposals: ProposalView[] = [
+  {
+    id: 401,
+    kind: "既存の Task に足す",
+    status: "提案中",
+    title: "影響を受けたユーザーに連絡する",
+    brief: "障害対応と一緒に終わる作業に見えるが、連絡は障害が直ったあとになるかもしれず、AI は決めきれなかった",
+    plan: ["影響を受けたユーザーの一覧を出す", "お詫びと経緯の連絡文を書く", "連絡を送る"],
+    target: { taskId: 105, title: "本番の障害の原因を調べる" },
+    facts: [{ source: "gmail", title: "【CS】決済エラーの影響ユーザーへの連絡について", from: "Gmail の受信箱", excerpt: "影響のあったお客様への連絡はどうしましょうか。今日中に方針だけでも決めたいです" }],
+  },
+  {
+    id: 402,
+    kind: "新しい Task",
+    status: "提案中",
+    title: "監視の仕組みを見直す",
+    brief: "障害の振り返りで、来月までに見直すことになった。障害対応が終わっても残る作業なので、別の Task にするとよさそう",
+    plan: ["今のアラートを書き出す", "見直し案をまとめる", "#infra で合意を取る"],
+    facts: [{ source: "slack", title: "#incident のスレッド", from: "Slack のスレッド", excerpt: "今回アラートが鳴るのが遅かったので、来月までに監視を見直しましょう。@yutaura 案をお願いできますか" }],
+  },
+  {
+    id: 403,
+    kind: "新しい Task",
+    status: "提案中",
+    title: "契約を更新するか決める",
+    brief: "契約は 12 月 31 日に自動で更新される。変えるなら 12 月 10 日までに連絡が要る。自分の対応が要るか、AI は決めきれなかった",
+    plan: ["今の契約の使い方を確かめる", "更新するか決める", "変えるなら先方に連絡する"],
+    facts: [
+      { source: "gmail", title: "【ご確認】契約更新のお知らせ", from: "Gmail の受信箱", excerpt: "契約は 12 月 31 日で自動更新されます。変更がある場合は 12 月 10 日までにご連絡ください" },
+      { source: "gmail", title: "【ご確認】契約更新のお知らせ（2 通目）", from: "Gmail の受信箱", excerpt: "先日ご案内した契約更新の件、改めてご連絡いたします" },
+    ],
+  },
+  {
+    id: 404,
+    kind: "切り出す",
+    status: "提案中",
+    title: "README の古い手順を直す",
+    brief: "PR は merge できる状態で完了条件を満たしたが、レビューのコメントから足した「README の古い手順を直す」がまだ残っている。PR とは別に終わる作業なので、切り出すとよさそう",
+    plan: ["README の古い手順を直す"],
+    target: { taskId: 103, title: "依存更新の PR を確かめて merge する" },
+    facts: [{ source: "github", title: "acme/web#482 のレビューコメント", from: "GitHub の PR", excerpt: "README の古い手順は別の PR で直してください" }],
+  },
+  {
+    id: 405,
+    kind: "新しい Task",
+    status: "見送った",
+    title: "勉強会の告知に返信する",
+    brief: "勉強会の告知に「参加します」と返信するとよさそう",
+    plan: ["参加の返信をする"],
+    facts: [{ source: "slack", title: "#general の勉強会の告知", from: "Slack のチャンネル", excerpt: "来週の勉強会、参加できる人はスレッドに一言お願いします" }],
+  },
+];
+
+/**
+ * AI が見たのに決められなかった事実（specs/routing.spec.ts の「ユーザー待ち」。refusal・答えが形に合わない）。
+ * どの Task にも入れておらず、提案にもできなかった。新しい Task にする・既存の Task に入れる・対象外にするを、ユーザーが選ぶ。
+ */
+export type UndecidedFact = {
   id: number;
   source: string;
   title: string;
   from: string;
-  lines: string[];
-  /** 元の文面の抜粋 */
   excerpt: string;
-  judgment: { kind: "確率"; probability: number } | { kind: "判定できなかった" };
-  /** 候補の Task（AI が絞ったもの） */
+  /** 候補の Task（AI が絞ったもの。判定はできなかった） */
   candidates: Array<{ taskId: number; title: string }>;
 };
 
-export const routingItems: RoutingItem[] = [
-  {
-    id: 201,
-    source: "slack",
-    title: "#dev-infra でメンションされた: 来週のメンテ時間について",
-    from: "Slack のメンション",
-    lines: ["種類: スレッド", "あなたへのメンション: あり"],
-    excerpt: "@yutaura 来週のメンテ、火曜の夜で大丈夫そうですか？ 障害対応の続きと重なるなら水曜にずらします",
-    judgment: { kind: "確率", probability: 0.62 },
-    candidates: [{ taskId: 105, title: "本番の障害の原因を調べる" }],
-  },
+export const undecidedFacts: UndecidedFact[] = [
   {
     id: 202,
     source: "gmail",
-    title: "【ご確認】契約更新のお知らせ（2 通目）",
+    title: "健康診断の再検査のご案内",
     from: "Gmail の受信箱",
-    lines: ["種類: スレッド", "未読: あり"],
-    excerpt: "契約は 12 月 31 日で自動更新されます。変更がある場合は 12 月 10 日までにご連絡ください",
-    judgment: { kind: "判定できなかった" },
-    candidates: [{ taskId: 113, title: "契約更新のお知らせを確かめる" }],
-  },
-  {
-    id: 203,
-    source: "github",
-    title: "issue #318 に自分がアサインされた",
-    from: "GitHub の通知",
-    lines: ["種類: Issue", "状態: 開いている", "あなたへのアサイン: あり"],
-    excerpt: "ログイン画面で、パスワードの表示切り替えがキーボードで操作できない",
-    judgment: { kind: "確率", probability: 0.48 },
+    excerpt: "先日の健康診断の結果、再検査の対象となりました。12 月中に指定の医療機関で受診してください",
     candidates: [],
   },
+];
+
+/** AI が自動でしたこと（確信が高く、自動で Task を作った・計画に足した）。寄せたことに気づけるように、提案の画面に閉じて残す */
+export const autoActions = [
+  { at: "8:40", kind: "計画に足した" as const, what: "「CI が落ちた」から、Task「依存更新の PR を確かめて merge する」の計画に「CI を直す」を足した" },
+  { at: "8:15", kind: "計画に足した" as const, what: "Slack の「リリースに入れられる？」から、Task「認証まわりの PR をレビューする」の計画に「リリースに入れられるか返事をする」を足した" },
+  { at: "8:02", kind: "Task を作った" as const, what: "issue #318 から、Task「パスワードの表示切り替えをキーボードで操作できるようにする」を作った" },
 ];
 
 /**

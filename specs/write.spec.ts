@@ -100,8 +100,8 @@ type Request =
       policy: "自動でやる" | "ユーザーが頼む・承認する";
       /** 自動で書き込むとき、計画を立てた（Agent が調べた）ときの対象の版（Action Item の中身に持つ）が今も同じか。中身も Action Item の中身をそのまま写す */
       planVersion: "計画の版のまま" | "変わった";
-      /** その Task の列（自動で書き込むのは todo のときだけ。要確認は AI の判定が割れたので、完了待ちはもう終えるので、自動では書き込まない） */
-      taskColumn: "やること" | "要確認・完了待ち";
+      /** その Task の列（自動で書き込むのは、やることのときだけ。完了待ちはもう終えるので、自動では書き込まない） */
+      taskColumn: "やること" | "完了待ち";
       /** その Action Item が、番が来たら自動でやるものか（ボタンで頼むものは、範囲に入っていても自動では書き込まない） */
       trigger: "auto" | "on_request";
       /** この Action Item から、もう自動で頼んだことがあるか（自動の承認で作った書き込みが前にあるか。自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む） */
@@ -140,7 +140,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
   ensure(ready === "書き込める", "書き込める状態のときだけ");
   if (request.way === "Action Item" && actor.kind === "app") {
     ensure(request.trigger === "auto", "自動で書き込むのは、番が来たら自動でやる Action Item だけ（ボタンで頼むものは、ユーザーが頼む）");
-    ensure(request.taskColumn === "やること", "自動で書き込むのは、Task がやることのときだけ（要確認・完了待ちでは、ユーザーが頼む）");
+    ensure(request.taskColumn === "やること", "自動で書き込むのは、Task がやることのときだけ（完了待ちでは、ユーザーが頼む）");
     ensure(request.planVersion === "計画の版のまま", "自動で書き込むのは、計画を立てたときの版が今も同じときだけ");
     ensure(!request.autoTried, "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）");
   }
@@ -264,7 +264,7 @@ export const inputs = {
     "Action Item から": [FROM_ITEM, "書き込める"],
     自動でやってよい範囲: [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる" }, "書き込める"],
     "自動だが、計画のあとに版が変わった": [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる", planVersion: "変わった" }, "書き込める"],
-    "自動だが、Task が要確認": [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる", taskColumn: "要確認・完了待ち" }, "書き込める"],
+    "自動だが、Task が完了待ち": [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる", taskColumn: "完了待ち" }, "書き込める"],
     "自動で一度頼んで失敗した": [{ ...FROM_ITEM, trigger: "auto", policy: "自動でやる", autoTried: true }, "書き込める"],
     "範囲に入るが、ボタンで頼む Action Item": [{ ...FROM_ITEM, policy: "自動でやる" }, "書き込める"],
     書き込めない: [FROM_ITEM, "書き込めない"],
@@ -333,8 +333,8 @@ export const scenarios = {
   "ボタンで頼む Action Item は、範囲に入っていても自動では書き込まない": [
     { do: initial, by: "アプリ", input: "範囲に入るが、ボタンで頼む Action Item", denied: "自動で書き込むのは、番が来たら自動でやる Action Item だけ（ボタンで頼むものは、ユーザーが頼む）" },
   ],
-  "要確認・完了待ちの Task では、自動で書き込まない": [
-    { do: initial, by: "アプリ", input: "自動だが、Task が要確認", denied: "自動で書き込むのは、Task がやることのときだけ（要確認・完了待ちでは、ユーザーが頼む）" },
+  "完了待ちの Task では、自動で書き込まない": [
+    { do: initial, by: "アプリ", input: "自動だが、Task が完了待ち", denied: "自動で書き込むのは、Task がやることのときだけ（完了待ちでは、ユーザーが頼む）" },
   ],
   "自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む": [
     { do: initial, by: "アプリ", input: "自動で一度頼んで失敗した", denied: "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）" },

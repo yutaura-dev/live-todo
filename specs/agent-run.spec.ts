@@ -86,7 +86,7 @@ export const actors: Record<string, Actor> = {
 export function initial(actor: Actor, kind: Kind, task: "開いている" | "開いていない"): AgentRun {
   ensure(actor.kind === "user" || actor.kind === "app", "ユーザーか、Action Item から始めるアプリだけ");
   ensure(actor.kind === "user" || FROM_ITEM.includes(kind), "アプリが始めるのは、Action Item をやる作業だけ");
-  ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ち・終わった Task には頼まない）");
+  ensure(task === "開いている", "Task がやること のときだけ（完了待ち・終わった Task には頼まない）");
   return {
     status: "待ち行列",
     tools: FIXES.includes(kind) ? "直す" : "読むだけ",
@@ -107,7 +107,7 @@ export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "
   ensure(run.status === "待ち行列", "待ち行列のときだけ");
   ensure(others === "ほかに動いている作業はない", "この Task で、ほかに動いている作業がないときだけ（同時に動くのは 1 つまで）");
   ensure(thread === "続けられる", "会話を続けられるときだけ（続けられないなら、先に新しい会話を始める）");
-  ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ち・終わった Task では始めない）");
+  ensure(task === "開いている", "Task がやること のときだけ（完了待ち・終わった Task では始めない）");
   return { ...run, status: "やっている" };
 }
 
@@ -239,11 +239,11 @@ export const scenarios = {
   "Action Item から始める（番が来たら自動で・ボタンで）": [{ do: initial, by: "アプリ", input: "Action Item（読むだけ）", expect: { trigger: "Action Item から", tools: "読むだけ" } }],
   "直す Action Item には、直す道具を渡す": [{ do: initial, by: "アプリ", input: "Action Item（直す）", expect: { tools: "直す" } }],
   "完了待ち・終わった Task には、作業を頼まない": [
-    { do: initial, by: "ユーザー", input: "Task が閉じた", denied: "Task が要確認か todo のときだけ（完了待ち・終わった Task には頼まない）" },
+    { do: initial, by: "ユーザー", input: "Task が閉じた", denied: "Task がやること のときだけ（完了待ち・終わった Task には頼まない）" },
   ],
   "Task が終わったあとは、作業を始めない": [
     { do: initial, by: "ユーザー", input: "質問" },
-    { do: start, by: "アプリ", input: "Task が閉じた", denied: "Task が要確認か todo のときだけ（完了待ち・終わった Task では始めない）" },
+    { do: start, by: "アプリ", input: "Task が閉じた", denied: "Task がやること のときだけ（完了待ち・終わった Task では始めない）" },
   ],
   "ユーザーが自分で済ませたら、アプリが作業をやめる": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },

@@ -1,0 +1,544 @@
+
+.ui-icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ui-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ui-row--end {
+  justify-content: flex-end;
+}
+
+.ui-sub {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-13);
+  line-height: var(--lh-tight);
+}
+
+/* ボタン。主要操作は瑠璃で塗り、ほかは線か文字だけにして、1 つの塊に塗りのボタンが 1 つになるようにする */
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  user-select: none;
+}
+
+.ui-button--sm {
+  min-block-size: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-13);
+}
+
+.ui-button--md {
+  min-block-size: 32px;
+  padding: 0 14px;
+  font-size: var(--fs-13);
+}
+
+.ui-button--lg {
+  min-block-size: 40px;
+  padding: 0 18px;
+  font-size: var(--fs-14);
+}
+
+.ui-button--icon {
+  padding: 0;
+  inline-size: 32px;
+}
+
+.ui-button--primary {
+  background: var(--c-ruri);
+  color: var(--c-on-ruri);
+}
+
+.ui-button--primary:hover {
+  background: color-mix(in oklab, var(--c-ruri) 88%, var(--c-ink));
+}
+
+.ui-button--secondary {
+  background: var(--c-sheet);
+  border-color: var(--c-rule-strong);
+  color: var(--c-ink);
+}
+
+.ui-button--secondary:hover {
+  background: color-mix(in oklab, var(--c-sheet) 94%, var(--c-ink));
+}
+
+.ui-button--quiet {
+  background: transparent;
+  color: var(--c-ink-sub);
+}
+
+.ui-button--quiet:hover {
+  background: var(--c-hover);
+  color: var(--c-ink);
+}
+
+.ui-button--danger {
+  background: var(--c-bengara);
+  color: light-dark(#fff, #2a0e08);
+}
+
+.ui-button:active {
+  translate: 0 0.5px;
+}
+
+.ui-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ui-pill--neutral {
+  background: var(--c-sunken);
+  color: var(--c-ink-sub);
+}
+
+.ui-pill--outline {
+  border: 1px solid var(--c-rule-strong);
+  color: var(--c-ink-sub);
+}
+
+.ui-pill--ruri {
+  background: var(--c-ruri-wash);
+  color: var(--c-ruri);
+}
+
+.ui-pill--seiji {
+  background: var(--c-seiji-wash);
+  color: var(--c-seiji);
+}
+
+.ui-pill--bengara {
+  background: var(--c-bengara-wash);
+  color: var(--c-bengara);
+}
+
+/* AI が作業中であることだけは、動きで知らせる（いま動いていることそのものが知らせたい中身なので） */
+.ui-pill-pulse {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-pill-pulse {
+    animation: ui-pulse 1.6s var(--ease-out) infinite;
+  }
+}
+
+@keyframes ui-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.ui-attention {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c-ruri);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ui-attention-dot {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 取得元のアイコン。文字より一段淡くし、題より目立たせない */
+.ui-sources {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.ui-source {
+  display: inline-grid;
+  place-items: center;
+  color: var(--c-ink-sub);
+  line-height: 1;
+}
+
+.ui-source-icon {
+  display: block;
+}
+
+.ui-source--text {
+  block-size: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--c-rule-strong);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+
+.ui-kbd {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 20px;
+  block-size: 20px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in oklab, currentColor 35%, transparent);
+  border-block-end-width: 2px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.ui-ai {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-control);
+  background: var(--c-seiji-wash);
+}
+
+.ui-ai-label {
+  color: var(--c-seiji);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.ui-ai-body {
+  color: var(--c-ink);
+}
+
+.ui-quote {
+  position: relative;
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5) var(--sp-4) 44px;
+  border-radius: var(--r-control);
+  background: var(--c-sunken);
+}
+
+.ui-quote::before {
+  content: "「";
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-start: 10px;
+  color: var(--c-rule-strong);
+  font-size: 28px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+}
+
+.ui-quote blockquote {
+  margin: 0;
+  font-size: var(--fs-16);
+  line-height: 1.8;
+}
+
+.ui-quote figcaption {
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+}
+
+.ui-problem {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--c-bengara-line);
+  border-radius: var(--r-control);
+  background: var(--c-bengara-wash);
+}
+
+.ui-problem-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-bengara);
+  font-weight: var(--fw-bold);
+}
+
+.ui-toasts {
+  position: fixed;
+  inset-block-end: var(--sp-6);
+  inset-inline-start: 50%;
+}
+
+.ui-toast {
+  position: fixed;
+  inset: auto auto var(--sp-6) 50%;
+  translate: -50% 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-inline-size: min(560px, calc(100vw - 32px));
+  padding: 6px 6px 6px var(--sp-4);
+  border: 0;
+  border-radius: var(--r-card);
+  background: light-dark(#23292c, #e7e9e6);
+  color: light-dark(#f2f3f1, #1a1e20);
+  box-shadow: var(--shadow-dialog);
+  font-size: var(--fs-13);
+  opacity: 0;
+  transition-property: opacity, translate, display, overlay;
+  transition-duration: var(--dur-base);
+  transition-timing-function: var(--ease-out);
+  transition-behavior: allow-discrete;
+}
+
+.ui-toast:popover-open {
+  opacity: 1;
+
+  @starting-style {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    translate: -50% 0;
+
+    @starting-style {
+      translate: -50% 8px;
+    }
+  }
+}
+
+.ui-toast .ui-button--quiet {
+  color: inherit;
+}
+
+.ui-toast .ui-button--quiet:hover {
+  background: color-mix(in oklab, currentColor 14%, transparent);
+}
+
+.ui-toast-message {
+  flex: 1;
+}
+
+.ui-dialog {
+  inline-size: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--c-sheet);
+  color: var(--c-ink);
+  box-shadow: var(--shadow-dialog);
+  opacity: 0;
+  transition-property: opacity, scale, display, overlay;
+  transition-duration: var(--dur-base);
+  transition-timing-function: var(--ease-out);
+  transition-behavior: allow-discrete;
+}
+
+.ui-dialog[open] {
+  opacity: 1;
+
+  @starting-style {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    scale: 1;
+
+    @starting-style {
+      scale: 0.97;
+    }
+  }
+}
+
+.ui-dialog::backdrop {
+  background: rgb(10 14 16 / 0);
+  transition-property: background-color, display, overlay;
+  transition-duration: var(--dur-base);
+  transition-behavior: allow-discrete;
+}
+
+.ui-dialog[open]::backdrop {
+  background: rgb(10 14 16 / 0.32);
+
+  @starting-style {
+    background: rgb(10 14 16 / 0);
+  }
+}
+
+.ui-dialog-body {
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+}
+
+.ui-dialog-title {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.ui-menu {
+  position: relative;
+}
+
+.ui-menu > summary {
+  list-style: none;
+}
+
+.ui-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ui-menu[open] > summary {
+  background: var(--c-press);
+  color: var(--c-ink);
+}
+
+.ui-menu-list {
+  position: absolute;
+  z-index: 10;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-end: 0;
+  display: grid;
+  min-inline-size: 220px;
+  padding: var(--sp-1);
+  border: 1px solid var(--c-rule);
+  border-radius: 10px;
+  background: var(--c-sheet);
+  box-shadow: var(--shadow-float);
+}
+
+.ui-menu-item {
+  inline-size: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: start;
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+
+.ui-menu-item:hover:not(:disabled) {
+  background: var(--c-hover);
+}
+
+.ui-menu-item:disabled {
+  color: var(--c-ink-sub);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ui-menu-item--danger {
+  color: var(--c-bengara);
+}
+
+.ui-menu-note {
+  padding: 6px 10px 4px;
+  border-block-start: 1px solid var(--c-rule);
+  margin-block-start: var(--sp-1);
+  color: var(--c-ink-sub);
+  font-size: var(--fs-12);
+  line-height: var(--lh-tight);
+}
+
+.ui-logo {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.ui-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  list-style: none;
+  cursor: pointer;
+}
+
+.ui-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ui-disclosure > summary .ui-icon {
+  color: var(--c-ink-sub);
+  transition: rotate var(--dur-fast) var(--ease-out);
+}
+
+.ui-disclosure[open] > summary .ui-icon {
+  rotate: 90deg;
+}
+
+.ui-field {
+  display: grid;
+  gap: 6px;
+}
+
+.ui-field label {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.ui-input,
+.ui-textarea {
+  inline-size: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--r-control);
+  background: var(--c-sheet);
+}
+
+.ui-textarea {
+  min-block-size: 72px;
+  resize: vertical;
+  field-sizing: content;
+}
+
+.ui-input::placeholder,
+.ui-textarea::placeholder {
+  color: color-mix(in oklab, var(--c-ink-sub) 80%, transparent);
+}
+
+.ui-input:focus-visible,
+.ui-textarea:focus-visible {
+  outline-offset: 0;
+  border-color: var(--c-ruri);
+}

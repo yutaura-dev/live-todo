@@ -3,7 +3,7 @@
  * Source Item の Activity が「外の世界に起きたこと」なのに対し、Task Activity は「自分の仕事が、自分の言葉でどう変わったか」。届いたもの（Task Input）を Task の言葉に置き換えて、項目が変わったときだけ残る。
  * 更新マークは、ユーザーが最後に Task を見た時刻より後に、ユーザー以外が変えた項目があれば付く（例外なし）。既読は出来事ごとには持たない。見たのは開いた時刻で、開いている間に入った出来事は見たことにしない（次に開くまで更新マークが残る）。
  * 同じ項目の変化は、見せるときに項目ごとにまとめる（最初の前と最後の後を見せる。元に戻っていても、出来事があったことは見せる）。
- * 新しく出た Task の仕分け（仕分け中から列が決まった）は、更新マークにしない（新着で見せる）。
+ * 新しくできた Task は、更新マークではなく新着で見せる。事実から計画に Action Item を足した・切り出した・まとめたことは出来事として残り、ユーザー以外が起こしたものは更新マークになる（寄せたことに気づけるように。ADR-0025）。
  * 履歴はユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（集約どうしの反応は links で書く）。
  * 「Source の出来事」（Source Item の Activity）と「Task の出来事」（これ）と言い分ける。
  */
@@ -68,7 +68,7 @@ export const examples = {
       changes: [{ field: "今の状況と次の一手", before: "レビュー待ち", after: "レビューで指摘が 2 件。直す", target: null }],
       cause: null,
     },
-    "自分で列を動かした": { kind: "変わった", by: "ユーザー", occurredAt: "2026-11-28T01:10:00Z", changes: [{ field: "列", before: "要確認", after: "todo", target: null }], cause: null },
+    "自分で完了にした": { kind: "変わった", by: "ユーザー", occurredAt: "2026-11-28T01:10:00Z", changes: [{ field: "列", before: "やること", after: "終わった", target: null }], cause: null },
     "PR が merge されたので AI が作業をやめた": {
       kind: "変わった",
       by: "AI",
@@ -89,7 +89,7 @@ export const examples = {
   },
   invalid: {
     "変わったのに、変わった項目がない": { kind: "変わった", by: "AI", occurredAt: "2026-11-28T01:00:00Z", changes: [], cause: null },
-    "前と後が同じ": { kind: "変わった", by: "AI", occurredAt: "2026-11-28T01:00:00Z", changes: [{ field: "列", before: "todo", after: "todo", target: null }], cause: null },
-    "できた出来事が、変わった項目を持つ": { kind: "できた", by: "同期", occurredAt: "2026-11-28T00:00:00Z", changes: [{ field: "列", before: null, after: "todo", target: null }], cause: null },
+    "前と後が同じ": { kind: "変わった", by: "AI", occurredAt: "2026-11-28T01:00:00Z", changes: [{ field: "列", before: "やること", after: "やること", target: null }], cause: null },
+    "できた出来事が、変わった項目を持つ": { kind: "できた", by: "同期", occurredAt: "2026-11-28T00:00:00Z", changes: [{ field: "列", before: null, after: "やること", target: null }], cause: null },
   },
 };
