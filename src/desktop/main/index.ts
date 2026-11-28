@@ -2,13 +2,15 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { Duration, Schedule } from "effect";
 import { StoreDatabase } from "../../store/database.js";
 import { CHANNELS } from "../shared/api.js";
 import { liveConnector } from "./ai/connector-live.js";
 import { handleAiCommand, handleCommand, handleInbox, handleQuery, syncOnce } from "./ipc.js";
 import { SourceGateway } from "./sources/gateway.js";
+import { WriteProvider } from "./writes/write-provider.js";
+import { WriteService } from "./writes/write-service.js";
 import { desktopLayer } from "./layer.js";
 import { Calendar } from "./prioritizer.js";
 import { TaskIds, TaskService } from "./task-service.js";
@@ -36,6 +38,7 @@ const runtime = ManagedRuntime.make(
     ids: TaskIds.random,
     connector: liveConnector({ env: process.env, commandSucceeds }),
     gateway: SourceGateway.live(process.env),
+    writer: (stores) => WriteProvider.live(process.env).pipe(Layer.provide(stores)),
   }),
 );
 
@@ -73,6 +76,12 @@ app.whenReady().then(async () => {
       const service = yield* TaskService;
       yield* service.onChanged(() => BrowserWindow.getAllWindows().forEach((window) => window.webContents.send(CHANNELS.changed)));
     }),
+  );
+  // 書き込み中のまま止まっていた書き込みを、やり直さずに確かめる（二重に書き込まないため。write.spec）
+  await runtime.runPromise(
+    Effect.gen(function* () {
+      yield* (yield* WriteService).recover();
+    }).pipe(Effect.catchCause((cause) => Effect.logWarning("書き込みの後始末ができなかった", cause))),
   );
   runtime.runFork(
     Effect.gen(function* () {

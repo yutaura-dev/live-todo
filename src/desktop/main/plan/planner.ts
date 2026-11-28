@@ -9,6 +9,7 @@ import {
   fromDrafts,
   type How,
   itemsOf,
+  type PlanGroup,
   reopenItem,
   skipItem,
 } from "../../../domain/plan/plan.js";
@@ -23,6 +24,7 @@ import { AiServices } from "../ai/ai-services.js";
 import { factMaterialOf, taskMaterialOf } from "../materials.js";
 import { Prioritizer } from "../prioritizer.js";
 import { TaskIds } from "../task-service.js";
+import { WRITE_OPERATIONS } from "../writes/write-provider.js";
 
 export type PlanAction =
   | { readonly _tag: "CompleteItem"; readonly itemId: string }
@@ -94,6 +96,8 @@ export class Planner extends Context.Service<
   {
     revise(task: Task): Effect.Effect<Reply<null>, StoreCorrupted>;
     act(taskId: string, action: PlanAction): Effect.Effect<Reply<null>, StoreCorrupted>;
+    /** ほかの口（書き込み・Claude Code）が計画を進めたのを反映し、完了条件を満たしたら終える */
+    progressed(task: Task, plan: PlanGroup, actor: { readonly kind: "user" } | { readonly kind: "app" } | { readonly kind: "agent" }, target: string): Effect.Effect<Reply<null>, StoreCorrupted>;
   }
 >()("live-todo/desktop/Planner") {
   static readonly layer = Layer.effect(
@@ -115,7 +119,8 @@ export class Planner extends Context.Service<
           const written = yield* generation.value.write(planWriting, {
             task: taskMaterialOf(task, facts),
             facts: facts.map(factMaterialOf),
-            catalog: { operations: [], conditions: [] },
+            // 書き込めるのは、つないでいる Source の操作だけ（ないものは、人がやる Action Item にさせる）
+            catalog: { operations: facts.some((fact) => fact.uri.startsWith("github://")) ? [...WRITE_OPERATIONS] : [], conditions: [] },
             direction,
           });
           if (written.answer._tag === "Unanswered") return null;
@@ -193,7 +198,15 @@ export class Planner extends Context.Service<
           return { ok: true, value: null } as const;
         });
 
-      return Planner.of({ revise, act });
+      const progressed = (task: Task, plan: PlanGroup, actor: { readonly kind: "user" } | { readonly kind: "app" } | { readonly kind: "agent" }, target: string) =>
+        Effect.gen(function* () {
+          const next = yield* noteProgress(task, actor, plan, target).pipe(Effect.option);
+          if (Option.isNone(next)) return { ok: false, reason: "やること のときだけ" } as const;
+          yield* saveAndPrioritize(yield* finishIfSatisfied(next.value));
+          return { ok: true, value: null } as const;
+        });
+
+      return Planner.of({ revise, act, progressed });
     }),
   );
 }

@@ -187,6 +187,17 @@ export const completeItem = Effect.fn("Plan.completeItem")(function* (plan: Plan
   return setStatus(plan, id, "済んだ");
 });
 
+/** 書き込みが承認されて成功したので、その Action Item を果たす（書き込みの結果を受けたアプリだけ） */
+export const completeByWrite = Effect.fn("Plan.completeByWrite")(function* (plan: PlanGroup, id: string, actor: PlanActor) {
+  const ensure = guard("action-item", "completeByWrite");
+  const item = findItem(plan, id);
+  yield* ensure(actor.kind === "app", "アプリだけ");
+  yield* ensure(item?.status === "まだ", "まだのときだけ");
+  yield* ensure(turnOf(plan, id) === "番が来ている", "番が来ているときだけ");
+  yield* ensure(item?.definition.how.type === "write", "書き込みで果たされる Action Item だけ");
+  return setStatus(plan, id, "済んだ");
+});
+
 export const reopenItem = Effect.fn("Plan.reopenItem")(function* (plan: PlanGroup, id: string, actor: PlanActor) {
   const ensure = guard("action-item", "reopen");
   const item = findItem(plan, id);
