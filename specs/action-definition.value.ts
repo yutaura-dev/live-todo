@@ -142,7 +142,7 @@ export const invariants = {
     definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => o.then.type !== "planLater" || o.then.direction.trim() !== "")),
 };
 
-const merge: ActionDefinition = { title: "merge する", effort: "easy", completes: true, how: { type: "write", subject: { accountId: "github-work", uri: "github:acme/app/pull/42" }, operation: "github.merge" } };
+const merge: ActionDefinition = { title: "merge する", effort: "easy", completes: true, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge" } };
 
 export const examples = {
   valid: {

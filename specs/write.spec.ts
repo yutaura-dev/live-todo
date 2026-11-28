@@ -132,7 +132,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
     stage: byEffect ? "書き込み中" : "確認中",
     approval: byEffect ? { at: "2026-11-28T00:00:00Z" } : null,
     id: "w1",
-    subject: { accountId: "github-work", uri: "github:acme/app/pull/42" },
+    subject: { uri: "github://yutaura@github.com/acme/app/pull/42" },
     operation: "github.merge",
     params: { method: "squash", title: "axios を 1.8 に上げる (#42)" },
     version: "abc1234",
@@ -239,7 +239,6 @@ export const invariants = {
   "書き込むのは、承認があるときだけ": (write: Write) => APPROVED.includes(write.stage) === (write.approval !== null),
   "終わった書き込みは、もう変わらない": (before: Write, after: Write) => !FINISHED.includes(before.stage) || before.stage === after.stage,
   "承認の対象（何に・どの操作で・どの中身を・どの版に）は、作ったあと変わらない": (before: Write, after: Write) =>
-    before.subject.accountId === after.subject.accountId &&
     before.subject.uri === after.subject.uri &&
     before.operation === after.operation &&
     JSON.stringify(before.params) === JSON.stringify(after.params) &&
