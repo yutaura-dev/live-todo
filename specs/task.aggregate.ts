@@ -3,12 +3,12 @@ import type { CompletionEffect } from "./completion-effect.spec.ts";
 import type { Task } from "./task.spec.ts";
 
 /**
- * Task と、その計画の中の Action Item・完了したときにすること。どちらも Task を通してだけ扱い、Task と一緒に変わる。
+ * Task と、その計画の中の Action Item・完了したときにすること・優先度の決まり方。どれも Task を通してだけ扱い、Task と一緒に変わる。
  * Task がいつ終わるか・Action Item に番が来たかは、Task の計画と Action Item の状態を一緒に見て決まる。AI が作業中かは、Action Item が持つ Agent Run の ID の先（Agent Thread 集約の Agent Run）で決まる。
  */
 export const displayName = "Task";
 export const root = "task";
-export const entities = ["action-item", "completion-effect"];
+export const entities = ["action-item", "completion-effect", "priority"];
 
 export const invariants = {
   "書き込みを頼んで結果を待っている完了したときにすることは、完了待ちの Task にだけある": (task: Task, _items: ReadonlyArray<ActionItem>, effects: ReadonlyArray<CompletionEffect>) =>

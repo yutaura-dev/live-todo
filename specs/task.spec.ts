@@ -3,6 +3,7 @@ import type { ActionItem } from "./action-item.spec.ts";
 import type { CompletionEffect } from "./completion-effect.spec.ts";
 import type { TaskActivity } from "./task-activity.value.ts";
 import type { Arrangement } from "./action-definition.value.ts";
+import type { DueDate } from "./due-date.value.ts";
 
 /**
  * Task（自分がやること）。カンバンのどの列に出るかを status で持つ。
@@ -27,6 +28,8 @@ export type Task = {
   brief: string | null;
   /** 次にやることの計画 */
   plan: Plan | null;
+  /** 期日（ない・分からなければ null）。事実から Generation が読み取り、ユーザーが直すこともできる。優先度の材料になる */
+  due: DueDate | null;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
   /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す。ユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（反応は links で書く） */
@@ -141,6 +144,7 @@ export const initial: Task = {
   title: "依存更新の PR を確かめて merge する",
   brief: null,
   plan: null,
+  due: null,
   sourceItemIds: [],
   history: [{ kind: "できた", by: "同期", occurredAt: "2026-11-28T00:00:00Z", changes: [], cause: null }],
   lastSeenAt: null,
@@ -152,6 +156,9 @@ export const links = [
   { from: triage, to: "priority", label: "要確認か todo に仕分けたら、優先度を決め始める（仕分け中の Task は判定しない）" },
   { from: complete, to: "priority", action: "stop", label: "終わった・完了待ちの Task は、優先度を判定しない" },
   { from: dismiss, to: "priority", action: "stop", label: "やらないことにした Task は、優先度を判定しない" },
+  { from: receive, to: "priority", action: "basisChanged", label: "期日・事実が変わったら、優先度を決め直す" },
+  { from: revisePlan, to: "priority", action: "basisChanged", label: "計画（Action Item の期日・手間）が変わったら、優先度を決め直す" },
+  { from: noteProgress, to: "priority", action: "basisChanged", label: "Action Item が済んで残りの手間が変わったら、優先度を決め直す" },
   { from: reopen, to: "priority", action: "resume", label: "やり直した Task は、優先度を判定し直す" },
   { from: complete, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）。自動で終えたとき（完了条件を満たした）も同じで、途中までの報告を残す。追う項目が片付いて判断中の作業も、Task を終えるほうを先にする（ADR-0016 の判断より優先）" },
   { from: finishCompletion, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）" },
