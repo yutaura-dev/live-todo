@@ -36,8 +36,8 @@ export const Status = {
   confirming: "確かめている",
   /** アカウントのつなぎ直しが要るので止めている（つなぎ直したら再開する） */
   paused: "止めている",
-  /** アカウントを外したので、もう取り込まない */
-  ended: "やめた",
+  /** アカウントを外したので、取り込まない（カーソルは残し、戻してつないだら続きから取り込む） */
+  removed: "外した",
 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
 
@@ -138,11 +138,25 @@ export function resume(sync: Sync, actor: Actor): Sync {
   return { ...sync, status: "待っている", nextRunAt: NOW };
 }
 
-/** アカウントを外したので、取り込みをやめる（Account の「外す」からの反応） */
+/** アカウントを外したので、取り込みを止める（Account の「外す」からの反応。カーソルは残す） */
 export function end(sync: Sync, actor: Actor): Sync {
   ensure(actor.kind === "app", "アプリだけ");
-  ensure(sync.status !== "やめた", "やめていないときだけ");
-  return { ...sync, status: "やめた" };
+  ensure(sync.status !== "外した", "外していないときだけ");
+  return { ...sync, status: "外した" };
+}
+
+/** 外したアカウントを戻してつないだので、続きから取り込む（Account の「つなぐ」からの反応） */
+export function restart(sync: Sync, actor: Actor): Sync {
+  ensure(actor.kind === "app", "アプリだけ");
+  ensure(sync.status === "外した", "外したときだけ");
+  return { ...sync, status: "待っている", nextRunAt: NOW };
+}
+
+/** 取り込む範囲が変わった（広げた）ので、カーソルを捨てて初めの取り込みからやり直す（新しい範囲の、前から開いているものを取り込むため。Account の「範囲を変える」からの反応） */
+export function rescope(sync: Sync, actor: Actor): Sync {
+  ensure(actor.kind === "app", "アプリだけ");
+  ensure(sync.status === "待っている" || sync.status === "止めている", "待っている・止めているときだけ");
+  return { ...sync, cursor: null, nextRunAt: NOW };
 }
 
 export const inputs = {
@@ -152,7 +166,6 @@ export const inputs = {
 };
 
 export const invariants = {
-  "やめた取り込みは、もう変わらない": (before: Sync, after: Sync) => before.status !== "やめた" || after.status === "やめた",
   "見分ける値（アカウント・種類）は、作ったあと変わらない": (before: Sync, after: Sync) => before.accountId === after.accountId && before.stream === after.stream,
 };
 
@@ -269,11 +282,29 @@ export const scenarios = {
     { do: interrupt, by: "アプリ", expect: { status: "待っている" } },
     { do: interrupt, by: "アプリ", denied: "取り込んでいるときだけ" },
   ],
-  "アカウントを外したら、取り込みをやめる": [
+  "外したアカウントを戻したら、続きから取り込む": [
+    { do: initial, by: "アプリ" },
+    { do: start, by: "アプリ", input: "時刻を過ぎた" },
+    { do: succeed, by: "Source", input: "ふつう" },
+    { do: restart, by: "アプリ", denied: "外したときだけ" },
+    { do: end, by: "アプリ", expect: { status: "外した", cursor: { historyId: "12345" } } },
+    { do: rescope, by: "アプリ", denied: "待っている・止めているときだけ" },
+    { do: restart, by: "Source", denied: "アプリだけ" },
+    { do: restart, by: "アプリ", expect: { status: "待っている", cursor: { historyId: "12345" } } },
+  ],
+  "取り込む範囲を広げたら、初めの取り込みからやり直す": [
+    { do: initial, by: "アプリ" },
+    { do: start, by: "アプリ", input: "時刻を過ぎた" },
+    { do: rescope, by: "アプリ", denied: "待っている・止めているときだけ" },
+    { do: succeed, by: "Source", input: "ふつう" },
+    { do: rescope, by: "Source", denied: "アプリだけ" },
+    { do: rescope, by: "アプリ", expect: { cursor: null } },
+  ],
+  "アカウントを外したら、取り込みを止める": [
     { do: initial, by: "アプリ" },
     { do: end, by: "Source", denied: "アプリだけ" },
-    { do: end, by: "アプリ", expect: { status: "やめた" } },
-    { do: end, by: "アプリ", denied: "やめていないときだけ" },
+    { do: end, by: "アプリ", expect: { status: "外した" } },
+    { do: end, by: "アプリ", denied: "外していないときだけ" },
     { do: resume, by: "アプリ", denied: "止めているときだけ" },
   ],
   "取り込みを始めるのはアプリだけ": [{ do: initial, by: "Source", denied: "アプリだけ" }],

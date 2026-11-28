@@ -10,6 +10,8 @@ import type { Snapshot } from "./snapshot.value.ts";
 export type SourceItem = {
   /** Source にまだあるか */
   presence: Presence;
+  /** 今見えている取り込みの種類（Gmail の受信箱・ラベル など）。種類から外れても、ほかの種類に見えていれば消えない。どの種類にも見えなくなったときだけ消える */
+  streams: string[];
   /** 今の姿。振り分けと判定はこれを見る */
   latest: Snapshot;
   /** 起きた出来事の履歴（起きた順）。取り込む・変わる・消える・また現れる のたびに、変わった項目の前と後を持つ出来事を 1 つ足す */
@@ -51,6 +53,7 @@ export function initial(actor: Actor): SourceItem {
   ensure(actor.kind === "sync", "同期だけ");
   return {
     presence: "あり",
+    streams: ["受信箱"],
     latest: {
       title: "axios を 1.8 に上げる",
       author: "dependabot[bot]",
@@ -103,12 +106,13 @@ export function update(item: SourceItem, actor: Actor): SourceItem {
  * Source から消える
  *
  * 削除されたのか、見張る範囲・一覧の条件から外れただけなのか（閉じた PR が一覧から抜けた など）を、消えた理由として残す。
+ * 同じアカウントのどの種類にも見えなくなったときだけ消える（受信箱から外れてもラベルに残っていれば、見えている種類が減るだけ）。
  * 範囲の外になったときは、取れるなら最後の姿を取り直して、事実を変えてから消す（マージ済みだったことを、Task が「もう要らない」と取り違えないため）。
  */
 export function remove(item: SourceItem, actor: Actor, removal: Removal): SourceItem {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(item.presence === "あり", "Source にあるときだけ");
-  return { ...item, presence: "消えた", history: [...item.history, { kind: "removed", observedAt: "2026-11-28T02:00:00Z", sourceAt: null, removal, changes: [] }] };
+  return { ...item, presence: "消えた", streams: [], history: [...item.history, { kind: "removed", observedAt: "2026-11-28T02:00:00Z", sourceAt: null, removal, changes: [] }] };
 }
 
 /**
@@ -122,6 +126,7 @@ export function restore(item: SourceItem, actor: Actor): SourceItem {
   return {
     ...item,
     presence: "あり",
+    streams: ["受信箱"],
     latest: { ...item.latest, capturedAt: "2026-11-28T03:00:00Z" },
     history: [...item.history, { kind: "restored", observedAt: "2026-11-28T03:00:00Z", sourceAt: null, removal: null, changes: [] }],
   };
@@ -163,11 +168,13 @@ export const scenarios = {
 
 
 export const invariants = {
+  "Source にあるときだけ、見えている種類がある": (item: SourceItem) => (item.presence === "あり") === (item.streams.length > 0),
   "見分けるための値（ID・uri・初めて届いた日時）は、変わらない": (before: SourceItem, after: SourceItem) =>
     before.id === after.id && before.uri === after.uri && before.firstSeenAt === after.firstSeenAt,
 };
 
 export const reviewed = {
+  "unused-field:streams": "見えている種類は、どの種類から外れたかを同期が書き換える記録。消えるかは同期が決める（どの種類にも見えなくなったときだけ消す）。Source にあるかとそろっていることを、不変条件で確かめるために読んでいる",
   "ignores-input:remove": "削除されたか範囲の外になったかで、Source Item の振る舞いは変わらない。消えた理由は出来事に残り、Task が受け取って判定するときの材料になる",
   "unused-field:id": "見分けるための値で、振る舞いは変えない。作ったあと変わらないことを、不変条件で確かめるために読んでいる",
   "unused-field:uri": "見分けるための値で、振る舞いは変えない。作ったあと変わらないことを、不変条件で確かめるために読んでいる",

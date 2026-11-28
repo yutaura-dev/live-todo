@@ -123,8 +123,9 @@ export const invariants = {
 };
 
 export const links = [
-  { from: connect, to: "sync", label: "つないだら、取り込む種類ごとに取り込みを始める（初めて）・止めていた取り込みを再開する" },
-  { from: remove, to: "sync", action: "end", label: "このアカウントの取り込みをやめる" },
+  { from: connect, to: "sync", label: "つないだら、取り込む種類ごとに取り込みを始める（初めて）・止めていた取り込みを再開する（resume）・外していた取り込みを続きから始める（restart）" },
+  { from: remove, to: "sync", action: "end", label: "このアカウントの取り込みを止める（カーソルは残す）" },
+  { from: changeScope, to: "sync", action: "rescope", label: "取り込む範囲を広げたら、初めの取り込みからやり直す（新しい範囲の、前から開いているものを取り込む）" },
   { from: remove, to: "watch-target", label: "このアカウントの見張りをやめる" },
   { from: restore, to: "watch-target", label: "つなぎ直したら、このアカウントの見張りを続きから始める" },
   { from: reject, to: "watch-target", label: "つなぎ直すまで、このアカウントの見張りを止める" },
