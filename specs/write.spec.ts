@@ -18,7 +18,7 @@ export type Write = {
   approval: { by: "ユーザーが確かめた" | "自動でやってよい範囲" | "完了のボタン"; at: string; policy: { operation: string; limit: Level } | null } | null;
   /** Write を見分ける ID */
   id: string;
-  /** 何に書き込むか */
+  /** 何に書き込むか。作る操作（draft の PR を作る・返信の下書きを作る など）では、作る元の事実（issue #12 を直す PR なら issue #12、返信の下書きならそのスレッド） */
   subject: Subject;
   /** どの操作か。provider が決めた名前（github.merge・github.push・gmail.archive・slack.complete_todo など） */
   operation: string;
@@ -278,6 +278,7 @@ export const links = [
   { from: settle, to: "task", label: "完了したときにすることから頼まれたなら、書けていたら書き込んだ、書けていなかったら書き込めなかったにする" },
   { from: succeed, to: "task", label: "Action Item から頼まれたなら、その Action Item を果たす（書き込みで果たされる）" },
   { from: settle, to: "task", label: "書けていたなら、Action Item から頼まれたものは、その Action Item を果たす" },
+  { from: succeed, to: "routing", action: "addTask", label: "作る操作なら、作ったもの（draft の PR など）を、元の事実と同じ Task の関連に加える（同期で届いたときに、別の Task に振り分けないように）" },
   { from: fail, to: "task", action: "receive", label: "Action Item から頼まれたなら、その Task に、書き込めなかったこと（理由つき）が届く" },
 ];
 
