@@ -10,7 +10,7 @@ import type { WaitEstimate } from "./wait-estimate.value.ts";
 export type ActionDefinition = {
   /** 何をするか */
   title: string;
-  /** 手間。Task の難易度は、いま着手できる Action Item のうち一番手間の少ないもので決まる。wait と分かれ道は手間を数えない */
+  /** 手間。Generation が計画を書いたあと、Action Item ごとに Decisions が判定する（4 択で文章が要らないため）。Task の難易度は、いま着手できる Action Item のうち一番手間の少ないもので決まる。wait と分かれ道は手間を数えない */
   effort: Effort;
   /** 期日（ない・分からなければ null）。計画を立てるときに Generation が入れる。Task の優先度の材料になる */
   due: DueDate | null;
