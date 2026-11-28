@@ -1,7 +1,9 @@
 import { ensure } from "@yutaura/live-spec";
 
 /**
- * Sync（Source の取り込み 1 つ。アカウントごと・取り込む種類ごとに 1 つ）。決まった間隔でカーソルより後の変化を取り込み、Source Item に反映する（ADR-0003）。
+ * Sync
+ *
+ * Source の取り込み 1 つ。アカウントごと・取り込む種類ごとに 1 つ）。決まった間隔でカーソルより後の変化を取り込み、Source Item に反映する（ADR-0003）。
  * 差分を返せる Source（Gmail の historyId など）はそれを使い、返せない Source は全件を取って、前回の fingerprint と比べて変化にする（SnapshotDiffer）。どちらも「カーソルより後の変化」にそろえる。
  * 取り込みは読むだけなので、失敗しても次の回にやり直せばよい（二重に取り込んでも、同じ事実はアカウントと uri で 1 つにまとまる）。
  * アカウント×種類ごとに 1 つだけで、見分ける値（アカウント・種類）は作ったあと変わらない。
@@ -33,7 +35,7 @@ export const Status = {
   /** 取り込んでいる */
   running: "取り込んでいる",
   /** 一度に大量に消えたので、反映を止めてユーザーに確かめている（権限の範囲が変わって空の一覧が返った などで、まとめて消さないため） */
-  confirming: "確かめている",
+  confirming: "ユーザー待ち",
   /** アカウントのつなぎ直しが要るので止めている（つなぎ直したら再開する） */
   paused: "止めている",
   /** アカウントを外したので、取り込まない（カーソルは残し、戻してつないだら続きから取り込む） */
@@ -77,7 +79,7 @@ export function start(sync: Sync, actor: Actor, timing: "時刻を過ぎた" | "
 export function succeed(sync: Sync, actor: Actor, removal: "ふつう" | "一度に大量に消えた"): Sync {
   ensure(actor.kind === "source", "Source だけ");
   ensure(sync.status === "取り込んでいる", "取り込んでいるときだけ");
-  if (removal === "一度に大量に消えた") return { ...sync, status: "確かめている" };
+  if (removal === "一度に大量に消えた") return { ...sync, status: "ユーザー待ち" };
   return { ...sync, status: "待っている", cursor: { historyId: "12345" }, nextRunAt: "2026-11-28T00:01:00Z", lastError: null };
 }
 
@@ -106,14 +108,18 @@ export function resetCursor(sync: Sync, actor: Actor): Sync {
 /** ユーザーが、大量に消えたのを確かめて反映する（本当に消えた）。カーソルを進める */
 export function confirmRemoval(sync: Sync, actor: Actor): Sync {
   ensure(actor.kind === "user", "ユーザーだけ");
-  ensure(sync.status === "確かめている", "確かめているときだけ");
+  ensure(sync.status === "ユーザー待ち", "ユーザー待ちのときだけ");
   return { ...sync, status: "待っている", cursor: { historyId: "12345" }, nextRunAt: "2026-11-28T00:01:00Z", lastError: null };
 }
 
-/** ユーザーが、大量に消えたのは間違いだとする（反映せず、カーソルも進めず、取り込みを止める。範囲や権限を直してつなぎ直したら再開する。そのまま次の回にやり直すと、同じ消え方を確かめ続けるだけになるため） */
+/**
+ * ユーザーが、大量に消えたのは間違いだとする
+ *
+ * 反映せず、カーソルも進めず、取り込みを止める。範囲や権限を直してつなぎ直したら再開する。そのまま次の回にやり直すと、同じ消え方を確かめ続けるだけになるため
+ */
 export function rejectRemoval(sync: Sync, actor: Actor): Sync {
   ensure(actor.kind === "user", "ユーザーだけ");
-  ensure(sync.status === "確かめている", "確かめているときだけ");
+  ensure(sync.status === "ユーザー待ち", "ユーザー待ちのときだけ");
   return { ...sync, status: "止めている", lastError: "想定外の応答" };
 }
 
@@ -131,14 +137,22 @@ export function interrupt(sync: Sync, actor: Actor): Sync {
   return { ...sync, status: "待っている", nextRunAt: NOW };
 }
 
-/** アカウントをつなぎ直したので、再開する（すぐ取りに行く。Account の「つなぐ」からの反応） */
+/**
+ * アカウントをつなぎ直したので、再開する
+ *
+ * すぐ取りに行く。Account の「つなぐ」からの反応
+ */
 export function resume(sync: Sync, actor: Actor): Sync {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(sync.status === "止めている", "止めているときだけ");
   return { ...sync, status: "待っている", nextRunAt: NOW };
 }
 
-/** アカウントを外したので、取り込みを止める（Account の「外す」からの反応。カーソルは残す） */
+/**
+ * アカウントを外したので、取り込みを止める
+ *
+ * Account の「外す」からの反応。カーソルは残す
+ */
 export function end(sync: Sync, actor: Actor): Sync {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(sync.status !== "外した", "外していないときだけ");
@@ -152,7 +166,11 @@ export function restart(sync: Sync, actor: Actor): Sync {
   return { ...sync, status: "待っている", nextRunAt: NOW };
 }
 
-/** 取り込む範囲が変わった（広げた）ので、カーソルを捨てて初めの取り込みからやり直す（新しい範囲の、前から開いているものを取り込むため。Account の「範囲を変える」からの反応） */
+/**
+ * 取り込む範囲が変わった
+ *
+ * 広げた）ので、カーソルを捨てて初めの取り込みからやり直す（新しい範囲の、前から開いているものを取り込むため。Account の「範囲を変える」からの反応
+ */
 export function rescope(sync: Sync, actor: Actor): Sync {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(sync.status === "待っている" || sync.status === "止めている", "待っている・止めているときだけ");
@@ -224,17 +242,17 @@ export const scenarios = {
   "一度に大量に消えたら、反映を止めてユーザーに確かめる": [
     { do: initial, by: "アプリ" },
     { do: start, by: "アプリ", input: "時刻を過ぎた" },
-    { do: succeed, by: "Source", input: "大量に消えた", expect: { status: "確かめている", cursor: null } },
+    { do: succeed, by: "Source", input: "大量に消えた", expect: { status: "ユーザー待ち", cursor: null } },
     { do: start, by: "アプリ", input: "時刻を過ぎた", denied: "待っているときだけ" },
     { do: confirmRemoval, by: "Source", denied: "ユーザーだけ" },
     { do: rejectRemoval, by: "アプリ", denied: "ユーザーだけ" },
     { do: rejectRemoval, by: "ユーザー", expect: { status: "止めている", lastError: "想定外の応答" } },
     { do: resume, by: "アプリ" },
-    { do: rejectRemoval, by: "ユーザー", denied: "確かめているときだけ" },
+    { do: rejectRemoval, by: "ユーザー", denied: "ユーザー待ちのときだけ" },
     { do: start, by: "アプリ", input: "時刻を過ぎた" },
     { do: succeed, by: "Source", input: "大量に消えた" },
     { do: confirmRemoval, by: "ユーザー", expect: { status: "待っている", lastError: null } },
-    { do: confirmRemoval, by: "ユーザー", denied: "確かめているときだけ" },
+    { do: confirmRemoval, by: "ユーザー", denied: "ユーザー待ちのときだけ" },
   ],
   "時刻が来たら取り込み、カーソルを進める": [
     { do: initial, by: "アプリ", expect: { status: "待っている", cursor: null } },

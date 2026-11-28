@@ -19,16 +19,16 @@ export const invariants = {
   "やり終えた（done）Task には、☑ が付いたまま書き込んでいない完了したときにすることがない（すべて書き込めた・外されてから終わる）": (task: Task, _items: ReadonlyArray<ActionItem>, effects: ReadonlyArray<CompletionEffect>) =>
     task.closure?.outcome !== "done" || effects.every((effect) => effect.delivery === "書き込んだ" || effect.delivery === "取りやめた" || !effect.checked),
   "完了条件を満たした Task では、完了条件の Action Item がすべて果たされている（まだ選んでいない分かれ道は、すべての枝で）": (task: Task, items: ReadonlyArray<ActionItem>) =>
-    task.completion !== "満たした" || items.filter((item) => item.definition.completes).every((item) => item.status === "done"),
+    task.completion !== "満たした" || items.filter((item) => item.definition.completes).every((item) => item.status === "済んだ"),
   "完了条件が決まった Task には、完了条件の Action Item が 1 つ以上ある": (task: Task, items: ReadonlyArray<ActionItem>) =>
     task.completion === "未定" || items.some((item) => item.definition.completes),
   "やらないことにした Task には、まだの Action Item がない": (task: Task, items: ReadonlyArray<ActionItem>) =>
-    task.closure?.outcome !== "dismissed" || items.every((item) => item.status !== "todo"),
+    task.closure?.outcome !== "dismissed" || items.every((item) => item.status !== "まだ"),
   "開いていない Task の優先度は、アプリが決めない（決めるのをやめたか、ユーザーが決めたものだけ）": (task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) =>
-    task.status === "needs_review" || task.status === "todo" || prioritizations.every((p) => p.status === "決めるのをやめた" || p.status === "ユーザーが決めた"),
+    task.status === "要確認" || task.status === "やること" || prioritizations.every((p) => p.status === "決めるのをやめた" || p.status === "ユーザーが決めた"),
   "仕分け中の Task には、優先度がない": (task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) =>
-    task.status !== "triaging" || prioritizations.length === 0,
+    task.status !== "仕分け中" || prioritizations.length === 0,
   "Task の優先度の決まり方は 1 つまで": (_task: Task, _items: ReadonlyArray<ActionItem>, _effects: ReadonlyArray<CompletionEffect>, prioritizations: ReadonlyArray<Prioritization>) => prioritizations.length <= 1,
   "完了条件が決まっていて、完了条件の Action Item がすべて果たされていれば、完了条件は満たした": (task: Task, items: ReadonlyArray<ActionItem>) =>
-    task.completion === "未定" || !items.some((item) => item.definition.completes) || items.filter((item) => item.definition.completes).some((item) => item.status !== "done") || task.completion === "満たした",
+    task.completion === "未定" || !items.some((item) => item.definition.completes) || items.filter((item) => item.definition.completes).some((item) => item.status !== "済んだ") || task.completion === "満たした",
 };

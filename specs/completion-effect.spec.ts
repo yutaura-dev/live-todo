@@ -2,7 +2,9 @@ import { ensure } from "@yutaura/live-spec";
 import type { Subject } from "./condition.value.ts";
 
 /**
- * 完了したときにすること（Task が完了したらしておきたい後片付け 1 つ。レビュー依頼のメールをアーカイブする・Slack の To-do を済ませる など）。Task の計画の中にあり、Task を通してだけ扱う。
+ * 完了したときにすること
+ *
+ * Task が完了したらしておきたい後片付け 1 つ。レビュー依頼のメールをアーカイブする・Slack の To-do を済ませる など）。Task の計画の中にあり、Task を通してだけ扱う。
  * Action Item は Task を進めるために要ること、完了したときにすることは Task の完了には要らないが、完了したらしておきたい後片付け。操作の種類ではなく意味で分ける（後片付けとしての merge もありうる）。
  * 番に入らず、完了条件にもならない。計画の木のどこに置いたかで効くかが決まる（根元ならいつでも、分かれ道の枝の下なら、その枝を選んだときだけ）。
  * 書き込む事実は、足すときに名指しする。完了のときに事実を探さないので、前もって画面で見て外せる。
@@ -87,7 +89,11 @@ export function check(effect: CompletionEffect, actor: Actor): CompletionEffect 
   return { ...effect, checked: true };
 }
 
-/** ☑ を外す（書き込まない。書き込めなかったものを、手で済ませて外すときも） */
+/**
+ * ☑ を外す
+ *
+ * 書き込まない。書き込めなかったものを、手で済ませて外すときも
+ */
 export function uncheck(effect: CompletionEffect, actor: Actor): CompletionEffect {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(effect.checked, "☑ が付いているときだけ");
@@ -114,14 +120,22 @@ export function written(effect: CompletionEffect, actor: Actor): CompletionEffec
   return { ...effect, delivery: "書き込んだ" };
 }
 
-/** 書き込めなかった（書き込みの結果を受け取る。書けたか分からないなら、外を確かめて決まるまで待つ） */
+/**
+ * 書き込めなかった
+ *
+ * 書き込みの結果を受け取る。書けたか分からないなら、外を確かめて決まるまで待つ
+ */
 export function failed(effect: CompletionEffect, actor: Actor): CompletionEffect {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(effect.delivery === "頼んだ", "頼んだときだけ");
   return { ...effect, delivery: "書き込めなかった" };
 }
 
-/** 書き込めなかったものを、もう一度頼む（完了待ちのレーンから。もう一度頼むボタンを押したことが承認） */
+/**
+ * 書き込めなかったものを、もう一度頼む
+ *
+ * 完了待ちのレーンから。もう一度頼むボタンを押したことが承認
+ */
 export function retry(effect: CompletionEffect, actor: Actor): CompletionEffect {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(effect.checked, "☑ が付いているときだけ");

@@ -1,7 +1,9 @@
 import { ensure } from "@yutaura/live-spec";
 
 /**
- * AI Settings（アプリが使う AI の設定。PC に 1 つ）。使い道ごとに 3 つを、独立して選ぶ（Decisions は OpenAI、Generation は Gemini、Agent は Claude Code、など）。
+ * AI Settings
+ *
+ * アプリが使う AI の設定。PC に 1 つ）。使い道ごとに 3 つを、独立して選ぶ（Decisions は OpenAI、Generation は Gemini、Agent は Claude Code、など）。
  * 3 つの違いは役割で、確かさの段ではない（Decisions で分からないことが、Generation に聞けば分かるわけではない）。どれを使うかは、Task が届いたものを受け取るところなど、使う側の判断表で決める（ADR-0022）。
  * - Decisions: 分類・確率付きの判定（安い）
  * - Generation: 文章を伴う Structured Output（Task の説明・計画を作る。Agent の成果物も入力にする）

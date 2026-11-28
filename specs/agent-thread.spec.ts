@@ -34,7 +34,11 @@ export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
 };
 
-/** 最初の作業で、会話を始める（会話の ID は先に決めて起動する。止めたあとも続けられるように。ADR-0016） */
+/**
+ * 最初の作業で、会話を始める
+ *
+ * 会話の ID は先に決めて起動する。止めたあとも続けられるように。ADR-0016
+ */
 export function initial(actor: Actor): AgentThread {
   ensure(actor.kind === "app", "アプリだけ");
   return { status: "続けられる", taskId: "t1", provider: "claude-code", sessionId: "s1", workspace: "~/live-todo/work/t1" };

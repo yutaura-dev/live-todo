@@ -3,7 +3,9 @@ import type { Level } from "./autonomy-policy.spec.ts";
 import type { Subject } from "./condition.value.ts";
 
 /**
- * Write（外への書き込み 1 回。PR を merge する・修正を push する・メールをアーカイブする・Slack の To-do を済ませる など）。
+ * Write
+ *
+ * 外への書き込み 1 回。PR を merge する・修正を push する・メールをアーカイブする・Slack の To-do を済ませる など）。
  * 承認がなければ書き込まない（charter）。承認のしかたは、何から頼まれたかで決まる。
  * - Action Item から頼まれた: ユーザーが中身を確かめて承認する。自動でやってよい範囲（Autonomy Policy）に入る書き込みは、ユーザーが範囲を決めたことを承認とみなし、アプリが確かめずに書き込む（ADR-0023）
  * - 完了したときにすることから頼まれた: ユーザーが完了待ちのチェックリストを確かめて、完了のボタン（書き込めなかったものは、もう一度頼むボタン）を押したことが承認になる
@@ -67,7 +69,7 @@ export type FailureKind = "権限が足りない" | "書き込み先のエラー
 
 export const Stage = {
   /** 書き込む中身を見せて、ユーザーの承認を待っている */
-  confirming: "確認中",
+  confirming: "承認待ち",
   /** 承認があり、書き込んでいる */
   writing: "書き込み中",
   /** 書き込んでいる間にアプリが止まり、書けたかが分からない。外を確かめて決める（やり直さない） */
@@ -99,7 +101,7 @@ type Request =
       /** 自動で書き込むとき、計画を立てた（Agent が調べた）ときの対象の版（Action Item の中身に持つ）が今も同じか。中身も Action Item の中身をそのまま写す */
       planVersion: "計画の版のまま" | "変わった";
       /** その Task の列（自動で書き込むのは todo のときだけ。要確認は AI の判定が割れたので、完了待ちはもう終えるので、自動では書き込まない） */
-      taskColumn: "todo" | "要確認・完了待ち";
+      taskColumn: "やること" | "要確認・完了待ち";
       /** その Action Item が、番が来たら自動でやるものか（ボタンで頼むものは、範囲に入っていても自動では書き込まない） */
       trigger: "auto" | "on_request";
       /** この Action Item から、もう自動で頼んだことがあるか（自動の承認で作った書き込みが前にあるか。自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む） */
@@ -138,7 +140,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
   ensure(ready === "書き込める", "書き込める状態のときだけ");
   if (request.way === "Action Item" && actor.kind === "app") {
     ensure(request.trigger === "auto", "自動で書き込むのは、番が来たら自動でやる Action Item だけ（ボタンで頼むものは、ユーザーが頼む）");
-    ensure(request.taskColumn === "todo", "自動で書き込むのは、Task が todo のときだけ（要確認・完了待ちでは、ユーザーが頼む）");
+    ensure(request.taskColumn === "やること", "自動で書き込むのは、Task がやることのときだけ（要確認・完了待ちでは、ユーザーが頼む）");
     ensure(request.planVersion === "計画の版のまま", "自動で書き込むのは、計画を立てたときの版が今も同じときだけ");
     ensure(!request.autoTried, "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）");
   }
@@ -153,7 +155,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
   }
   const byEffect = request.way === "完了したときにすること" || actor.kind === "app";
   return {
-    stage: byEffect ? "書き込み中" : "確認中",
+    stage: byEffect ? "書き込み中" : "承認待ち",
     approval: byEffect
       ? request.way === "完了したときにすること"
         ? { by: "完了のボタン", at: "2026-11-28T00:00:00Z", policy: null }
@@ -182,7 +184,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
  */
 export function approve(write: Write, actor: Actor, version: "見せた版のまま" | "変わった", ready: Ready): Write {
   ensure(actor.kind === "user", "ユーザーだけ");
-  ensure(write.stage === "確認中", "確認中のときだけ");
+  ensure(write.stage === "承認待ち", "確認中のときだけ");
   ensure(version === "見せた版のまま", "見せた版が今も同じときだけ");
   ensure(ready === "書き込める", "書き込める状態のときだけ");
   return { ...write, stage: "書き込み中", approval: { by: "ユーザーが確かめた", at: "2026-11-28T00:00:00Z", policy: null } };
@@ -191,14 +193,14 @@ export function approve(write: Write, actor: Actor, version: "見せた版のま
 /** 確認をやめる */
 export function cancel(write: Write, actor: Actor): Write {
   ensure(actor.kind === "user", "ユーザーだけ");
-  ensure(write.stage === "確認中", "確認中のときだけ");
+  ensure(write.stage === "承認待ち", "確認中のときだけ");
   return { ...write, stage: "取りやめた" };
 }
 
 /** 確認中に、書き込む意味がなくなったので取りやめる（対象が閉じた・消えた、Action Item をやらなくなった） */
 export function withdraw(write: Write, actor: Actor): Write {
   ensure(actor.kind === "app", "アプリだけ");
-  ensure(write.stage === "確認中", "確認中のときだけ");
+  ensure(write.stage === "承認待ち", "確認中のときだけ");
   return { ...write, stage: "取りやめた" };
 }
 
@@ -243,14 +245,18 @@ export function settle(write: Write, actor: Actor, result: "書けていた" | "
   return { ...write, stage: "失敗", failure: { kind: result === "確かめられない" ? "書けたか確かめられない" : "書けていなかった", message: "" }, finishedAt: "2026-11-28T00:05:00Z" };
 }
 
-/** アカウントを外したので、書き込み中・書けたか分からない書き込みを失敗にする（外を確かめられないので。理由: アカウントを外した） */
+/**
+ * アカウントを外したので、書き込み中・書けたか分からない書き込みを失敗にする
+ *
+ * 外を確かめられないので。理由: アカウントを外した
+ */
 export function abandon(write: Write, actor: Actor): Write {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(write.stage === "書き込み中" || write.stage === "書けたか分からない", "書き込み中・書けたか分からないときだけ");
   return { ...write, stage: "失敗", failure: { kind: "アカウントを外した", message: "" }, finishedAt: "2026-11-28T00:05:00Z" };
 }
 
-const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, policy: "ユーザーが頼む・承認する", taskColumn: "todo", trigger: "on_request", planVersion: "計画の版のまま", autoTried: false };
+const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, policy: "ユーザーが頼む・承認する", taskColumn: "やること", trigger: "on_request", planVersion: "計画の版のまま", autoTried: false };
 const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true, openWrite: false, version: "版を持たない" };
 
 export const inputs = {
@@ -328,7 +334,7 @@ export const scenarios = {
     { do: initial, by: "アプリ", input: "範囲に入るが、ボタンで頼む Action Item", denied: "自動で書き込むのは、番が来たら自動でやる Action Item だけ（ボタンで頼むものは、ユーザーが頼む）" },
   ],
   "要確認・完了待ちの Task では、自動で書き込まない": [
-    { do: initial, by: "アプリ", input: "自動だが、Task が要確認", denied: "自動で書き込むのは、Task が todo のときだけ（要確認・完了待ちでは、ユーザーが頼む）" },
+    { do: initial, by: "アプリ", input: "自動だが、Task が要確認", denied: "自動で書き込むのは、Task がやることのときだけ（要確認・完了待ちでは、ユーザーが頼む）" },
   ],
   "自動で頼むのは 1 回だけ。失敗したあとはユーザーが頼む": [
     { do: initial, by: "アプリ", input: "自動で一度頼んで失敗した", denied: "自動で頼むのは、Action Item ごとに 1 回だけ（失敗したあとはユーザーが頼む）" },
@@ -347,7 +353,7 @@ export const scenarios = {
     { do: initial, by: "アプリ", input: "ボタンを押していない", denied: "ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したときだけ" },
   ],
   "merge の中身を確かめて承認し、merge する": [
-    { do: initial, by: "ユーザー", input: "Action Item から", expect: { stage: "確認中", approval: null } },
+    { do: initial, by: "ユーザー", input: "Action Item から", expect: { stage: "承認待ち", approval: null } },
     { do: approve, by: "ユーザー", input: "見せたとおり", expect: { stage: "書き込み中" } },
     { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
   ],

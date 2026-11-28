@@ -73,7 +73,11 @@ const ITEMS: Record<ItemExample, WaitingItem> = {
 const inList = (reason: Reason) => reason === "関わっている" || reason === "両方";
 const sameItem = (a: WaitingItem, b: WaitingItem) => a.taskId === b.taskId && a.actionItemId === b.actionItemId;
 
-/** 見張りを始める（関わっている対象が一覧に初めて現れた・待つ条件の Action Item ができた。同じ対象の見張りがなければ作る） */
+/**
+ * 見張りを始める
+ *
+ * 関わっている対象が一覧に初めて現れた・待つ条件の Action Item ができた。同じ対象の見張りがなければ作る
+ */
 export function initial(actor: Actor, reason: "関わっている" | "待っている"): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
   return {
@@ -131,7 +135,11 @@ export function removeWaiter(target: WatchTarget, actor: Actor, item: ItemExampl
   return { ...target, reason, waitingItems: rest };
 }
 
-/** 一覧の更新を表す値が変わる（次に確かめる時刻をすぐに前倒しし、間隔を最初に戻す。一覧に載っている対象だけ） */
+/**
+ * 一覧の更新を表す値が変わる
+ *
+ * 次に確かめる時刻をすぐに前倒しし、間隔を最初に戻す。一覧に載っている対象だけ
+ */
 export function revisionChanged(target: WatchTarget, actor: Actor): WatchTarget {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(inList(target.reason), "一覧に載っている対象だけ");
@@ -194,7 +202,11 @@ export function pause(target: WatchTarget, actor: Actor): WatchTarget {
   return { ...target, paused: true };
 }
 
-/** アカウントをつないだので、続きから確かめる（すぐ確かめる。Account の「つなぐ」からの反応） */
+/**
+ * アカウントをつないだので、続きから確かめる
+ *
+ * すぐ確かめる。Account の「つなぐ」からの反応
+ */
 export function resume(target: WatchTarget, actor: Actor): WatchTarget {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(target.paused, "止めているときだけ");

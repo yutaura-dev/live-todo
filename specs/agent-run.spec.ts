@@ -113,7 +113,11 @@ export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "
   return { ...run, status: "やっている" };
 }
 
-/** やり遂げた（回答・報告・差分を残す。外への書き込みが要るなら、Write を頼む） */
+/**
+ * やり遂げた
+ *
+ * 回答・報告・差分を残す。外への書き込みが要るなら、Write を頼む
+ */
 export function succeed(run: AgentRun, actor: Actor): AgentRun {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(run.status === "やっている", "やっているときだけ");
@@ -166,7 +170,11 @@ export function withdraw(run: AgentRun, actor: Actor, reason: "やらなくな�
   return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった", stopReason: reason };
 }
 
-/** 待ち行列のうちに取り消す（追う項目が片付いた・ユーザーが取り消した。判断させずに取り消す。ADR-0016） */
+/**
+ * 待ち行列のうちに取り消す
+ *
+ * 追う項目が片付いた・ユーザーが取り消した。判断させずに取り消す。ADR-0016
+ */
 export function cancel(run: AgentRun, actor: Actor, reason: "ユーザーが取り消した" | "追う項目が片付いたので取り消した"): AgentRun {
   ensure(actor.kind === "app" || actor.kind === "user", "アプリかユーザーだけ");
   ensure(run.status === "待ち行列", "待ち行列のときだけ");

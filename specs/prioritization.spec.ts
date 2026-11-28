@@ -51,7 +51,11 @@ export function initial(actor: Actor): Prioritization {
 
 const canDecide = (p: Prioritization) => p.status === "未判定" || p.status === "ラベル未定";
 
-/** 規則で決まる（判断表「規則で決まる優先度」でラベルが出た。LLM は呼ばない） */
+/**
+ * 規則で決まる
+ *
+ * 判断表「規則で決まる優先度」でラベルが出た。LLM は呼ばない
+ */
 export function decideByRule(p: Prioritization, actor: Actor, rule: RuleResult): Prioritization {
   ensure(actor.kind === "sync", "同期だけ");
   ensure(canDecide(p), "未判定・ラベル未定のときだけ");
@@ -90,7 +94,11 @@ export function setByUser(p: Prioritization, actor: Actor): Prioritization {
   return { ...p, status: "ユーザーが決めた", priority: { level: "今日中", reason: "ユーザーが決めた" } };
 }
 
-/** ユーザーが決めたラベルを外す（アプリに決め直させる。決め直すまで、ユーザーが決めたラベルのまま並べる） */
+/**
+ * ユーザーが決めたラベルを外す
+ *
+ * アプリに決め直させる。決め直すまで、ユーザーが決めたラベルのまま並べる
+ */
 export function clearByUser(p: Prioritization, actor: Actor): Prioritization {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(p.status === "ユーザーが決めた", "ユーザーが決めたときだけ");

@@ -1,7 +1,9 @@
 import { ensure } from "@yutaura/live-spec";
 
 /**
- * 自動でやってよい範囲（Autonomy Policy。PC に 1 つ）。AI が、ユーザーに頼まれず・承認されずに、どこまで自動でやってよいかをユーザーが決める（ADR-0023）。
+ * 自動でやってよい範囲
+ *
+ * Autonomy Policy。PC に 1 つ）。AI が、ユーザーに頼まれず・承認されずに、どこまで自動でやってよいかをユーザーが決める（ADR-0023）。
  * 操作を 4 つの段に分ける。provider が、自分の操作がどの段かを決め、段の違う書き込みは別の操作に分ける（draft の PR を作る github.pull_request.draft と、ready にする github.pull_request.ready など）。
  * 1. 調べる: 書き込みを伴わない調査（コードを読む・CI のログを見る・メールを検索する）
  * 2. ローカルの書き込み: worktree 内のファイル変更（パッケージのインストールを含む。ADR-0012 の sandbox が、書ける場所を worktree とパッケージのキャッシュに閉じ込める）
@@ -41,13 +43,21 @@ export const actors: Record<string, Actor> = {
   アプリ: { kind: "app" },
 };
 
-/** 初めの範囲（どの操作の上限も決めていない。ローカルの書き込みまでを自動でやる） */
+/**
+ * 初めの範囲
+ *
+ * どの操作の上限も決めていない。ローカルの書き込みまでを自動でやる
+ */
 export function initial(actor: Actor): AutonomyPolicy {
   ensure(actor.kind === "app", "アプリだけ");
   return { limits: [] };
 }
 
-/** 操作ごとの上限を決める（issue へのコメントは本番まで、など。同じ操作の上限は置き換える） */
+/**
+ * 操作ごとの上限を決める
+ *
+ * issue へのコメントは本番まで、など。同じ操作の上限は置き換える
+ */
 export function setOperationLimit(policy: AutonomyPolicy, actor: Actor): AutonomyPolicy {
   ensure(actor.kind === "user", "ユーザーだけ");
   return { ...policy, limits: [{ operation: "github.issue_comment", limit: "外への書き込み（本番）" }] };

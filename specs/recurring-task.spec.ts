@@ -2,7 +2,9 @@ import { ensure } from "@yutaura/live-spec";
 import type { ActionDefinition } from "./action-definition.value.ts";
 
 /**
- * 定期の Task の決まり（毎月 1 日に請求書を送る・毎週月曜に週報を書く など。ADR-0011）。
+ * 定期の Task の決まり
+ *
+ * 毎月 1 日に請求書を送る・毎週月曜に週報を書く など。ADR-0011）。
  *
  * 決まりが持つのは 4 つだけ: 使っているか・何を作るか（タイトル・メモ・ひな形の計画・期日）・いつ作るか（決まり方）・最後に作った回。
  * 回は、決まり方から出る予定日で見分ける（毎月 1 日なら 12/1・1/1、毎週月曜なら 12/7・12/14）。決まり方に依らず、「何月分か」のような決まり方ごとの数え方はしない。
@@ -29,13 +31,13 @@ export type RecurringTask = {
   /** 作る Task の計画のひな形（Action Item の中身の並び） */
   template: ActionDefinition[];
   /** いつ作るか（決まり方・何日前倒しして作るか）と、作る Task の期日（予定日から何日後か。決めなければ期日なし） */
-  schedule: { rule: Rule; advanceDays: number; dueAfterDays: number | null };
+  schedule: { rule: Schedule; advanceDays: number; dueAfterDays: number | null };
   /** 最後に作った（または見送った）回の予定日（"YYYY-MM-DD"。まだなら null）。同じ回を二度作らないための記録 */
   lastOccurrence: string | null;
 };
 
 /** 決まり方（予定日の出し方） */
-export type Rule =
+export type Schedule =
   | { type: "毎日" }
   | { type: "毎週"; weekday: "月" | "火" | "水" | "木" | "金" | "土" | "日" }
   /** その月にない日（31 日の 2 月 など）は月末 */
@@ -90,7 +92,11 @@ export function create(task: RecurringTask, actor: Actor, due: Latest): Recurrin
   return { ...task, lastOccurrence: "2026-12-01" };
 }
 
-/** 予告から「今すぐ作る」（作る日を待たずに、次の回を作る。直近の回をまだ作っていなければ、先にそちらを作る） */
+/**
+ * 予告から「今すぐ作る」
+ *
+ * 作る日を待たずに、次の回を作る。直近の回をまだ作っていなければ、先にそちらを作る
+ */
 export function createNow(task: RecurringTask, actor: Actor, due: Latest, preview: "出す" | "出さない"): RecurringTask {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status === "使っている", "使っているときだけ");
@@ -118,7 +124,11 @@ export function pause(task: RecurringTask, actor: Actor): RecurringTask {
   return { ...task, status: "止めている" };
 }
 
-/** また使う（止めていた間の回は、まとめて作らない。直近の回の作る日をもう過ぎていたら、登録のときと同じく作るか見送るかを選ぶ） */
+/**
+ * また使う
+ *
+ * 止めていた間の回は、まとめて作らない。直近の回の作る日をもう過ぎていたら、登録のときと同じく作るか見送るかを選ぶ
+ */
 export function resume(task: RecurringTask, actor: Actor, latest: "作る" | "見送る"): RecurringTask {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(task.status === "止めている", "止めているときだけ");
@@ -152,7 +162,7 @@ function whetherToCreate(input: { 最後に作った回: string | null; 直近�
  *
  * 毎月・毎年は作る日の 7 日前から、毎週は前日だけ（7 日前からだと、いつも次の週の分が見える）、毎日は出さない（次の回がいつも明日で、出っぱなしになる）。
  */
-function whetherToPreview(input: { 決まり方: Rule["type"]; 次の回の作る日まで: number; 次の回をもう作った: boolean }): "出す" | "出さない" {
+function whetherToPreview(input: { 決まり方: Schedule["type"]; 次の回の作る日まで: number; 次の回をもう作った: boolean }): "出す" | "出さない" {
   if (input.決まり方 === "毎日" || input.次の回をもう作った) return "出さない";
   const window = input.決まり方 === "毎週" ? 1 : 7;
   return input.次の回の作る日まで >= 1 && input.次の回の作る日まで <= window ? "出す" : "出さない";
@@ -184,11 +194,11 @@ export const decisions = {
   },
 };
 
-const validRule = (rule: Rule) =>
+const validRule = (rule: Schedule) =>
   rule.type === "毎日" || rule.type === "毎週" || (rule.type === "毎月" ? rule.day >= 1 && rule.day <= 31 : rule.month >= 1 && rule.month <= 12 && rule.day >= 1 && rule.day <= 31);
 
 /** 前倒しの上限（回と回の間より短くしないと、どれが直近の回か決まらない） */
-const MAX_ADVANCE: Record<Rule["type"], number> = { 毎日: 0, 毎週: 6, 毎月: 27, 毎年: 364 };
+const MAX_ADVANCE: Record<Schedule["type"], number> = { 毎日: 0, 毎週: 6, 毎月: 27, 毎年: 364 };
 
 export const invariants = {
   "消した決まりは、もう変わらない": (before: RecurringTask, after: RecurringTask) => before.status !== "消した" || after.status === "消した",
