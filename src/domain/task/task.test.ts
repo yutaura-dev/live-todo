@@ -3,7 +3,7 @@ import { specOf } from "@yutaura/live-spec/testing";
 import { DateTime, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
-import { complete, create, defineCompletionByHand, dismiss, markOf, reopen, setDue, type Task, view } from "./task.js";
+import { complete, create, defineCompletionByHand, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
 const user = { kind: "user" } as const;
@@ -260,5 +260,25 @@ describe("更新マークと新着（spec の判断表）", () => {
       const byAi = yield* reopen(done, ai, "頼んだものはない");
       const byUser = yield* complete(byAi, user, "自分で完了にした", { effects: "完了したときにすることがない", added: "足した項目はすべて済んだ" });
       assert.strictEqual(markOf(byUser), "なし");
+    }));
+});
+
+describe(specOf(Spec.notePriority), () => {
+  it.effect("優先度の段階が変わったことを、前と後のラベルで出来事に残す", () =>
+    Effect.gen(function* () {
+      const task = yield* notePriority(yield* byHand(), app, "10 日以内", "今日中");
+      assert.deepStrictEqual(task.history.at(-1), { kind: "変わった", by: "アプリ", occurredAt: "2026-11-28T09:00:00.000Z", changes: [{ field: "優先度", before: "10 日以内", after: "今日中", target: null }], cause: null });
+    }));
+
+  it.effect("同じラベルに決め直したときは、出来事を残さない", () =>
+    Effect.gen(function* () {
+      const task = yield* byHand();
+      assert.strictEqual((yield* notePriority(task, app, "今日中", "今日中")).history.length, task.history.length);
+    }));
+
+  it.effect(specOf(Spec.notePriority, "やること のときだけ（終わった Task の優先度は判定しない）"), () =>
+    Effect.gen(function* () {
+      const gone = yield* dismiss(yield* byHand(), user, "自分で片付けた", "頼んだものはない");
+      assert.strictEqual(yield* denied(notePriority(gone, app, null, "今日中")), "やること のときだけ（終わった Task の優先度は判定しない）");
     }));
 });

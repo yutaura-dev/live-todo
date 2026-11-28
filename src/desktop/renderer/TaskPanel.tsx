@@ -1,12 +1,33 @@
 import { Button, Icon, Pill } from "../../design/components.js";
+import type { PriorityLevel } from "../../llm/shared/vocabulary.js";
+import type { DueDate } from "../../domain/values.js";
 import type { TaskView } from "../shared/api.js";
+import { LEVELS } from "./horizon-groups.js";
+
+export type PanelCommand =
+  | { _tag: "CompleteTask" | "DismissTask" | "ReopenTask" | "DefineCompletion" | "ClearPriority" }
+  | { _tag: "SetPriority"; level: PriorityLevel }
+  | { _tag: "SetDue"; due: DueDate | null };
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const localDateOf = (iso: string) => {
+  const date = new Date(iso);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+/** 日付だけを選ぶので、その日のうち（その地域の 0 時〜23 時 59 分）を期日にする */
+export function dueOfDate(value: string): DueDate | null {
+  if (value === "") return null;
+  const [y, m, d] = value.split("-").map(Number) as [number, number, number];
+  return { text: `${m} 月 ${d} 日まで`, earliest: new Date(y, m - 1, d, 0, 0, 0).toISOString(), latest: new Date(y, m - 1, d, 23, 59, 59).toISOString(), precision: "日" };
+}
 
 const CLOSURE_LABELS = { done: "やり終えた", dismissed: "やらないことにした", merged: "別の Task にまとめた" } as const;
 
 const timeOf = (iso: string) => new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
 /** Task の詳細。手で足した Task は計画を持たないので、完了条件と操作・履歴だけを見せる */
-export function TaskPanel(props: { task: TaskView; problem: string | null; onCommand: (tag: "CompleteTask" | "DismissTask" | "ReopenTask" | "DefineCompletion") => void; onClose: () => void }) {
+export function TaskPanel(props: { task: TaskView; problem: string | null; onCommand: (command: PanelCommand) => void; onClose: () => void }) {
   const { task } = props;
   const open = task.status === "やること";
   return (
@@ -21,19 +42,49 @@ export function TaskPanel(props: { task: TaskView; problem: string | null; onCom
         <h2 id="detail-title" className="ui-detail-title">
           {task.title}
         </h2>
-        {task.due && <p className="ui-due ui-sub">期日: {task.due.text}</p>}
+        {open && (
+          <div className="ui-priority">
+            <div className="ui-segmented" role="group" aria-label="いつまでに手を付けるか">
+              {LEVELS.map((level) => (
+                <button key={level} type="button" aria-pressed={task.priority.level === level} onClick={() => props.onCommand({ _tag: "SetPriority", level })}>
+                  {level}
+                </button>
+              ))}
+            </div>
+            <p className="ui-sub">
+              {task.priority.status === "ラベル未定"
+                ? "アプリでは決められませんでした。選んでください"
+                : task.priority.status === "未判定" && task.priority.level === null
+                  ? "アプリが優先度を決めています"
+                  : task.priority.reason}
+              {task.priority.status === "ユーザーが決めた" && (
+                <Button tone="quiet" size="sm" onClick={() => props.onCommand({ _tag: "ClearPriority" })}>
+                  アプリに任せる
+                </Button>
+              )}
+            </p>
+          </div>
+        )}
+        {open ? (
+          <label className="ui-field ui-due">
+            期日
+            <input type="date" className="ui-input" value={task.due ? localDateOf(task.due.earliest) : ""} onChange={(event) => props.onCommand({ _tag: "SetDue", due: dueOfDate(event.target.value) })} />
+          </label>
+        ) : (
+          task.due && <p className="ui-due ui-sub">期日: {task.due.text}</p>
+        )}
         <div className="ui-row">
           {open ? (
             <>
-              <Button tone="primary" size="sm" onClick={() => props.onCommand("CompleteTask")}>
+              <Button tone="primary" size="sm" onClick={() => props.onCommand({ _tag: "CompleteTask" })}>
                 完了にする
               </Button>
-              <Button tone="quiet" size="sm" onClick={() => props.onCommand("DismissTask")}>
+              <Button tone="quiet" size="sm" onClick={() => props.onCommand({ _tag: "DismissTask" })}>
                 やらないことにする
               </Button>
             </>
           ) : (
-            <Button size="sm" onClick={() => props.onCommand("ReopenTask")}>
+            <Button size="sm" onClick={() => props.onCommand({ _tag: "ReopenTask" })}>
               やり直す
             </Button>
           )}
@@ -62,7 +113,7 @@ export function TaskPanel(props: { task: TaskView; problem: string | null; onCom
           <div className="ui-stack-4">
             <p className="ui-sub">まだ決めていません</p>
             {open && (
-              <Button size="sm" tone="quiet" className="ui-self-start" onClick={() => props.onCommand("DefineCompletion")}>
+              <Button size="sm" tone="quiet" className="ui-self-start" onClick={() => props.onCommand({ _tag: "DefineCompletion" })}>
                 やり終えたら自分で確かめる
               </Button>
             )}

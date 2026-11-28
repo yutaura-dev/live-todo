@@ -36,3 +36,15 @@ export const taskActivities = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.taskId, table.seq] })],
 );
+
+/** 優先度の決まり方（Task 1 つに 1 つまで。spec の task.aggregate の不変条件） */
+export const prioritizations = sqliteTable("prioritizations", {
+  taskId: text("task_id")
+    .primaryKey()
+    .references(() => tasks.id),
+  status: text("status").notNull(),
+  /** いま見せるラベル（JSON。{ level, reason }） */
+  priority: text("priority"),
+  basisFingerprint: text("basis_fingerprint").notNull(),
+  drivenByItemId: text("driven_by_item_id"),
+});

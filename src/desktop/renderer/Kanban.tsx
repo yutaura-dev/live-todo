@@ -25,8 +25,8 @@ export function Kanban(props: { cards: ReadonlyArray<BoardCard>; selectedId: str
         {COLUMNS.map((column) => {
           const cards = props.cards.filter((card) => card.status === column.status);
           return (
-            <section key={column.name} className="ui-column" aria-labelledby={`col-${column.name}`}>
-              <h2 id={`col-${column.name}`} className="ui-column-head">
+            <section key={column.name} className="ui-column" aria-labelledby={`col-${column.status}`}>
+              <h2 id={`col-${column.status}`} className="ui-column-head">
                 {column.name}
                 <span className="ui-sub ui-num">{cards.length}</span>
               </h2>
@@ -41,7 +41,9 @@ export function Kanban(props: { cards: ReadonlyArray<BoardCard>; selectedId: str
                     <button type="button" className="ui-task-open ui-kcard-title" aria-current={props.selectedId === card.id ? "true" : undefined} onClick={() => props.onOpen(card.id)}>
                       {card.title}
                     </button>
-                    {card.due && <p className="ui-kcard-foot ui-sub">{card.due}</p>}
+                    {(card.due || card.priority.level) && (
+                      <p className="ui-kcard-foot ui-sub">{[card.due, column.status === "やること" ? card.priority.level : null].filter(Boolean).join("・")}</p>
+                    )}
                   </li>
                 ))}
               </ul>
