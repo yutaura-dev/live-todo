@@ -73,10 +73,13 @@ const decision: ActionDefinition = {
   completes: false,
   how: {
     type: "decision",
+    kind: "選ぶ",
+    howToCheck: null,
     question: "型エラーが出ている。直してから merge するか",
+    recommendation: null,
     options: [
-      { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", due: null, completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request", place: null } }] } } },
-      { label: "ひとまず調査する", then: { type: "planLater", direction: "型エラーの原因と影響範囲を調べる" } },
+      { label: "そのまま merge する", gains: [{ aspect: "期日", detail: "今日中にリリースできる" }], costs: [{ aspect: "確実さ", detail: "型エラーが本番で問題になるかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [{ title: "merge する", effort: "easy", due: null, completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge", params: { method: "squash" }, version: "abc1234", trigger: "on_request", place: null } }] } } },
+      { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [{ aspect: "期日", detail: "merge が 1 日ほど遅れる" }], unclear: [], then: { type: "planLater", direction: "型エラーの原因と影響範囲を調べる" } },
     ],
   },
 };

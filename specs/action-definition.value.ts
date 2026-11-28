@@ -33,22 +33,93 @@ export type How =
   /** ユーザーが選択肢から 1 つ選んで果たす。選ぶと、選んだ選択肢の先が計画に差し込まれる */
   | Decision;
 
-/** 分かれ道 */
+/**
+ * 分かれ道。人が決めないと先に進まない。決めるのに要る情報は、分かれ道の種類で違う。
+ * - 確かめる: 事実を確かめれば答えが決まる（そのログインは自分の操作か・PR がもう開いているか）。どう確かめるかを持ち、得るもの・失うもの・おすすめは持たない（好みで選ぶものではないので、比べる材料を作らない）
+ * - 選ぶ: 天秤にかけて決める（会員を続けるか・どの直し方にするか）。選択肢ごとの得るもの・失うものと、AI のおすすめを持つ
+ * 種類は、計画を立てるとき Generation が決める。
+ */
 export type Decision = {
   type: "decision";
+  /** 分かれ道の種類 */
+  kind: DecisionKind;
   /** 何を決めるか（決めるために読むもの・選択肢の比べ方など） */
   question: string;
+  /** どう確かめるか（何を見ればよいか）。確かめる分かれ道だけ持つ */
+  howToCheck: string | null;
   /** 選択肢 */
   options: Option[];
+  /**
+   * AI のおすすめ（なければ null）。選ぶ分かれ道だけ持つ。
+   * Decisions が選択肢から 1 つを選び、確率が閾値以上のときだけ持つ。理由は Generation が、得るもの・失うものを踏まえて書く。
+   * 閾値の間・断られた・形に合わないときは持たない（迷ったまま勧めない）。おすすめがあっても、選ぶのはユーザー。
+   */
+  recommendation: { label: string; reason: string } | null;
 };
 
-/** 分かれ道の選択肢 */
+export const DecisionKind = {
+  /** 事実を確かめれば答えが決まる */
+  check: "確かめる",
+  /** 天秤にかけて決める */
+  choose: "選ぶ",
+} as const;
+export type DecisionKind = (typeof DecisionKind)[keyof typeof DecisionKind];
+
+/**
+ * 分かれ道の選択肢。
+ * 選ぶ分かれ道では、選択肢ごとに「得るもの」と「失うもの」を持たせ、選ぶ人が比べられるようにする（確かめる分かれ道では、どちらも空）。
+ * 観点は決め打ちの一覧（Aspect）にし、選択肢どうしで同じ観点を天秤にかけられるようにする。
+ * 比べる相手はほかの選択肢。選択肢ごと・観点ごとに、Decisions が「ほかの選択肢より良い・差がない・悪い」を判定する（同じ入力に対する問いなので、1 回のリクエストにまとめる）。
+ * 「良い」の確率が閾値以上の観点を得るもの、「悪い」の確率が閾値以上の観点を失うものにする。多すぎると読めないので、それぞれ確率の高い順に 3 件までにする。具体的な中身（理由）は Generation が書く。
+ * どれの確率も閾値に届かない・断られた観点は、得るもの・失うもののどちらにも入れず、判断できなかった観点として見せる（迷ったら黙って決めない）。「差がない」と判定された観点は、どこにも出さない。
+ */
 export type Option = {
   /** 選択肢の名前（そのまま merge する・ひとまず調査する など） */
   label: string;
+  /** ほかの選択肢より良い観点と、その具体的な中身（確率の高い順に 3 件まで） */
+  gains: Point[];
+  /** ほかの選択肢より悪い観点と、その具体的な中身（確率の高い順に 3 件まで） */
+  costs: Point[];
+  /** Decisions が良くなるか悪くなるかを判断できなかった観点 */
+  unclear: Aspect[];
   /** 選んだら、どう進めるか */
   then: OptionThen;
 };
+
+/** 得るもの・失うもの 1 つ */
+export type Point = {
+  /** 何の観点か */
+  aspect: Aspect;
+  /** 具体的にどうなるか（「鍵が漏れても 1 時間で無効にできる」「数十分の作業が要る」など）。Generation が書く */
+  detail: string;
+};
+
+/** 比べる観点（決め打ち）。選ぶ分かれ道の選択肢を、この観点ごとに比べる。Decisions が迷わないよう、観点どうしが重ならないように定義する */
+export const Aspect = {
+  /** いつ終わるか・期日に間に合うか（暦の上の時間。自分の作業量は手間） */
+  deadline: "期日",
+  /** 今、自分が手を動かす量 */
+  effort: "手間",
+  /** あとで払う手間（保守・やり直し・手入れ） */
+  laterBurden: "あとの負担",
+  /** かかるお金・立て替え */
+  money: "お金",
+  /** うまくいく見込み（本番が壊れる・失敗するおそれも含む） */
+  certainty: "確実さ",
+  /** あとから元に戻せるか */
+  reversibility: "取り返し",
+  /** アカウント・個人情報・権限の守り */
+  security: "セキュリティ",
+  /** ほかの人を待たせる・頼む・負担をかける・相手との関係 */
+  others: "ほかの人",
+  /** 期限で失うもの・受け取れる特典や価値 */
+  opportunity: "機会",
+  /** 規程・契約・約束に沿うか */
+  rules: "決まり",
+  /** 仕上がりの質・受け手にとっての良さ */
+  quality: "出来",
+} as const;
+export type Aspect = (typeof Aspect)[keyof typeof Aspect];
 
 /** 選んだら、どう進めるか */
 export type OptionThen =
@@ -142,6 +213,36 @@ export const invariants = {
   "分かれ道には、名前の違う選択肢が 2 つ以上ある": (definition: ActionDefinition) =>
     definitions(definition).every((d) => d.how.type !== "decision" || (d.how.options.length >= 2 && new Set(d.how.options.map((o) => o.label)).size === d.how.options.length)),
   "選択肢の先の並びは空でない": (definition: ActionDefinition) => trees(definition).every((t) => t.items.length > 0),
+  "選ぶ分かれ道では、どれかの選択肢に得るものか失うものがある（比べる材料のない分かれ道を出さない）": (definition: ActionDefinition) =>
+    definitions(definition).every((d) => d.how.type !== "decision" || d.how.kind !== "選ぶ" || d.how.options.some((o) => o.gains.length + o.costs.length > 0)),
+  "確かめる分かれ道は、確かめ方を持ち、得るもの・失うもの・判断できなかった観点・おすすめを持たない": (definition: ActionDefinition) =>
+    definitions(definition).every(
+      (d) =>
+        d.how.type !== "decision" ||
+        d.how.kind !== "確かめる" ||
+        (d.how.howToCheck !== null && d.how.howToCheck.trim() !== "" && d.how.recommendation === null && d.how.options.every((o) => o.gains.length + o.costs.length + o.unclear.length === 0)),
+    ),
+  "選ぶ分かれ道は、確かめ方を持たない": (definition: ActionDefinition) =>
+    definitions(definition).every((d) => d.how.type !== "decision" || d.how.kind !== "選ぶ" || d.how.howToCheck === null),
+  "得るもの・失うものは、それぞれ 3 件まで（多すぎると読めない）": (definition: ActionDefinition) =>
+    definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => o.gains.length <= 3 && o.costs.length <= 3)),
+  "得るもの・失うものには、具体的な中身がある": (definition: ActionDefinition) =>
+    definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => [...o.gains, ...o.costs].every((p) => p.detail.trim() !== ""))),
+  "1 つの選択肢の中で、同じ観点は得るもの・失うもの・判断できなかった観点のどれか 1 か所にだけ出る": (definition: ActionDefinition) =>
+    definitions(definition).every(
+      (d) =>
+        d.how.type !== "decision" ||
+        d.how.options.every((o) => {
+          const aspects = [...o.gains.map((p) => p.aspect), ...o.costs.map((p) => p.aspect), ...o.unclear];
+          return new Set(aspects).size === aspects.length;
+        }),
+    ),
+  "おすすめは、選択肢のどれか": (definition: ActionDefinition) =>
+    definitions(definition).every((d) => {
+      if (d.how.type !== "decision" || d.how.recommendation === null) return true;
+      const label = d.how.recommendation.label;
+      return d.how.options.some((o) => o.label === label);
+    }),
   "選んでから考える選択肢には、方針がある": (definition: ActionDefinition) =>
     definitions(definition).every((d) => d.how.type !== "decision" || d.how.options.every((o) => o.then.type !== "planLater" || o.then.direction.trim() !== "")),
 };
@@ -157,10 +258,29 @@ export const examples = {
       completes: false,
       how: {
         type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
         question: "型エラーが出ている。直してから merge するか",
+        recommendation: { label: "ひとまず調査する", reason: "型エラーが本番に出ると取り返しがつかず、遅れは 1 日で済むため" },
         options: [
-          { label: "そのまま merge する", then: { type: "planned", plan: { type: "serial", items: [merge] } } },
-          { label: "ひとまず調査する", then: { type: "planLater", direction: "型エラーの原因と影響範囲を調べる" } },
+          { label: "そのまま merge する", gains: [{ aspect: "期日", detail: "今日中にリリースできる" }], costs: [{ aspect: "確実さ", detail: "型エラーが本番で問題になるかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [{ aspect: "期日", detail: "merge が 1 日ほど遅れる" }], unclear: [], then: { type: "planLater", direction: "型エラーの原因と影響範囲を調べる" } },
+        ],
+      },
+    },
+    "確かめる分かれ道": {
+      title: "心当たりのないログインがないか確かめる",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "確かめる",
+        howToCheck: "Google アカウントの「デバイス」で、11/22 の Mac のログイン 3 件の場所と端末を見る",
+        question: "11/22 の Mac のログイン 3 件は、すべて自分の操作か",
+        recommendation: null,
+        options: [
+          { label: "すべて自分の操作だった", gains: [], costs: [], unclear: [], then: { type: "planned", plan: { type: "serial", items: [{ title: "通知を閉じる", effort: "easy", due: null, completes: true, how: { type: "human", place: null } }] } } },
+          { label: "心当たりのないログインがある", gains: [], costs: [], unclear: [], then: { type: "planLater", direction: "パスワードを変えて、ほかのセッションを切る" } },
         ],
       },
     },
@@ -170,11 +290,17 @@ export const examples = {
       completes: false,
       how: {
         type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
         question: "このメルマガを読み続けるか",
+        recommendation: null,
         options: [
-          { label: "続ける", then: { type: "planned", plan: { type: "serial", items: [{ title: "フォルダに振り分ける", effort: "easy", due: null, completes: true, how: { type: "human", place: null } }] } } },
+          { label: "続ける", gains: [{ aspect: "出来", detail: "必要な告知を見落とさない" }], costs: [{ aspect: "手間", detail: "受信箱が週に 5 通ほど埋まる" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [{ title: "フォルダに振り分ける", effort: "easy", due: null, completes: true, how: { type: "human", place: null } }] } } },
           {
             label: "やめる",
+            gains: [{ aspect: "手間", detail: "受信箱が静かになる" }],
+            costs: [{ aspect: "出来", detail: "必要な告知も届かなくなる" }],
+            unclear: [],
             then: {
               type: "planned",
               plan: {
@@ -186,10 +312,13 @@ export const examples = {
                     completes: false,
                     how: {
                       type: "decision",
+                      kind: "選ぶ",
+                      howToCheck: null,
                       question: "どうやって配信を止めるか",
+                      recommendation: null,
                       options: [
-                        { label: "配信を解除する", then: { type: "planned", plan: { type: "serial", items: [{ title: "解除のページで解除する", effort: "easy", due: null, completes: true, how: { type: "human", place: null } }] } } },
-                        { label: "迷惑メールにする", then: { type: "planned", plan: { type: "serial", items: [{ title: "迷惑メールに振り分ける", effort: "easy", due: null, completes: true, how: { type: "human", place: null } }] } } },
+                        { label: "配信を解除する", gains: [{ aspect: "確実さ", detail: "送り元に届かなくなる" }], costs: [{ aspect: "手間", detail: "解除のページを探して数分かかる" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [{ title: "解除のページで解除する", effort: "easy", due: null, completes: true, how: { type: "human", place: null } }] } } },
+                        { label: "迷惑メールにする", gains: [{ aspect: "手間", detail: "ワンクリックで済む" }], costs: [{ aspect: "確実さ", detail: "正規の送り元を迷惑メールに数えてしまう" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [{ title: "迷惑メールに振り分ける", effort: "easy", due: null, completes: true, how: { type: "human", place: null } }] } } },
                       ],
                     },
                   },
@@ -208,10 +337,13 @@ export const examples = {
       completes: false,
       how: {
         type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
         question: "どうするか",
+        recommendation: null,
         options: [
-          { label: "merge する", then: { type: "planned", plan: { type: "serial", items: [{ title: "PR を読む", effort: "easy", due: null, completes: false, how: { type: "human", place: null } }] } } },
-          { label: "ひとまず調査する", then: { type: "planLater", direction: "調べる" } },
+          { label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [{ title: "PR を読む", effort: "easy", due: null, completes: false, how: { type: "human", place: null } }] } } },
+          { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [{ aspect: "期日", detail: "merge が 1 日ほど遅れる" }], unclear: [], then: { type: "planLater", direction: "調べる" } },
         ],
       },
     },
@@ -220,7 +352,7 @@ export const examples = {
       title: "決める",
       effort: "easy", due: null,
       completes: false,
-      how: { type: "decision", question: "どうするか", options: [{ label: "merge する", then: { type: "planned", plan: { type: "serial", items: [merge] } } }] },
+      how: { type: "decision", kind: "選ぶ", howToCheck: null, question: "どうするか", recommendation: null, options: [{ label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } }] },
     },
     "選択肢の名前が同じ": {
       title: "決める",
@@ -228,10 +360,13 @@ export const examples = {
       completes: false,
       how: {
         type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
         question: "どうするか",
+        recommendation: null,
         options: [
-          { label: "merge する", then: { type: "planned", plan: { type: "serial", items: [merge] } } },
-          { label: "merge する", then: { type: "planLater", direction: "調べる" } },
+          { label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planLater", direction: "調べる" } },
         ],
       },
     },
@@ -241,10 +376,136 @@ export const examples = {
       completes: false,
       how: {
         type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
         question: "どうするか",
+        recommendation: null,
         options: [
-          { label: "merge する", then: { type: "planned", plan: { type: "serial", items: [] } } },
-          { label: "閉じる", then: { type: "planLater", direction: "閉じる理由を書く" } },
+          { label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [] } } },
+          { label: "閉じる", gains: [{ aspect: "手間", detail: "手が空く" }], costs: [{ aspect: "取り返し", detail: "あとで必要になったら開き直す" }], unclear: [], then: { type: "planLater", direction: "閉じる理由を書く" } },
+        ],
+      },
+    },
+    "比べる材料のない選ぶ分かれ道": {
+      title: "決める",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
+        question: "どうするか",
+        recommendation: null,
+        options: [
+          { label: "merge する", gains: [], costs: [], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "ひとまず調査する", gains: [], costs: [], unclear: [], then: { type: "planLater", direction: "調べる" } },
+        ],
+      },
+    },
+    "中身のない得るもの": {
+      title: "決める",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
+        question: "どうするか",
+        recommendation: null,
+        options: [
+          { label: "merge する", gains: [{ aspect: "期日", detail: " " }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [{ aspect: "期日", detail: "1 日遅れる" }], unclear: [], then: { type: "planLater", direction: "調べる" } },
+        ],
+      },
+    },
+    "おすすめが選択肢にない": {
+      title: "決める",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
+        question: "どうするか",
+        recommendation: { label: "閉じる", reason: "手が空く" },
+        options: [
+          { label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [{ aspect: "期日", detail: "1 日遅れる" }], unclear: [], then: { type: "planLater", direction: "調べる" } },
+        ],
+      },
+    },
+    "同じ観点が得るものと失うものの両方にある": {
+      title: "決める",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
+        question: "どうするか",
+        recommendation: null,
+        options: [
+          { label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "期日", detail: "あとで直す時間がかかる" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [], unclear: ["期日"], then: { type: "planLater", direction: "調べる" } },
+        ],
+      },
+    },
+    "得るものが 4 件ある": {
+      title: "決める",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
+        question: "どうするか",
+        recommendation: null,
+        options: [
+          {
+            label: "merge する",
+            gains: [
+              { aspect: "期日", detail: "今日中に出せる" },
+              { aspect: "手間", detail: "押すだけで済む" },
+              { aspect: "ほかの人", detail: "レビュアーを待たせない" },
+              { aspect: "機会", detail: "今週のリリースに乗る" },
+            ],
+            costs: [],
+            unclear: [],
+            then: { type: "planned", plan: { type: "serial", items: [merge] } },
+          },
+          { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [], unclear: [], then: { type: "planLater", direction: "調べる" } },
+        ],
+      },
+    },
+    "確かめ方のない確かめる分かれ道": {
+      title: "確かめる",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "確かめる",
+        howToCheck: null,
+        question: "PR はもう開いているか",
+        recommendation: null,
+        options: [
+          { label: "開いている", gains: [], costs: [], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "まだない", gains: [], costs: [], unclear: [], then: { type: "planLater", direction: "実装する" } },
+        ],
+      },
+    },
+    "得るものを持つ確かめる分かれ道": {
+      title: "確かめる",
+      effort: "easy", due: null,
+      completes: false,
+      how: {
+        type: "decision",
+        kind: "確かめる",
+        howToCheck: "GitHub で PR の一覧を見る",
+        question: "PR はもう開いているか",
+        recommendation: null,
+        options: [
+          { label: "開いている", gains: [{ aspect: "期日", detail: "すぐ merge できる" }], costs: [], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "まだない", gains: [], costs: [], unclear: [], then: { type: "planLater", direction: "実装する" } },
         ],
       },
     },
@@ -254,10 +515,13 @@ export const examples = {
       completes: false,
       how: {
         type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
         question: "どうするか",
+        recommendation: null,
         options: [
-          { label: "merge する", then: { type: "planned", plan: { type: "serial", items: [merge] } } },
-          { label: "ひとまず調査する", then: { type: "planLater", direction: "" } },
+          { label: "merge する", gains: [{ aspect: "期日", detail: "早く進む" }], costs: [{ aspect: "確実さ", detail: "見落としが出るかもしれない" }], unclear: [], then: { type: "planned", plan: { type: "serial", items: [merge] } } },
+          { label: "ひとまず調査する", gains: [{ aspect: "確実さ", detail: "影響が分かってから決められる" }], costs: [{ aspect: "期日", detail: "merge が 1 日ほど遅れる" }], unclear: [], then: { type: "planLater", direction: "" } },
         ],
       },
     },
@@ -267,13 +531,19 @@ export const examples = {
       completes: false,
       how: {
         type: "decision",
+        kind: "選ぶ",
+        howToCheck: null,
         question: "どうするか",
+        recommendation: null,
         options: [
           {
             label: "やめる",
-            then: { type: "planned", plan: { type: "serial", items: [{ title: "方法を決める", effort: "easy", due: null, completes: false, how: { type: "decision", question: "どうやって", options: [{ label: "解除する", then: { type: "planLater", direction: "解除の方法を調べる" } }] } }] } },
+            gains: [{ aspect: "手間", detail: "受信箱が静かになる" }],
+            costs: [{ aspect: "出来", detail: "必要な告知も届かなくなる" }],
+            unclear: [],
+            then: { type: "planned", plan: { type: "serial", items: [{ title: "方法を決める", effort: "easy", due: null, completes: false, how: { type: "decision", kind: "選ぶ", howToCheck: null, question: "どうやって", recommendation: null, options: [{ label: "解除する", gains: [{ aspect: "確実さ", detail: "送り元に届かなくなる" }], costs: [{ aspect: "手間", detail: "解除の方法を探す手間がかかる" }], unclear: [], then: { type: "planLater", direction: "解除の方法を調べる" } }] } }] } },
           },
-          { label: "続ける", then: { type: "planLater", direction: "振り分けを考える" } },
+          { label: "続ける", gains: [{ aspect: "出来", detail: "告知を受け取り続けられる" }], costs: [{ aspect: "手間", detail: "受信箱が週に 5 通ほど埋まる" }], unclear: [], then: { type: "planLater", direction: "振り分けを考える" } },
         ],
       },
     },

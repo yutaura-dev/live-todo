@@ -1,0 +1,1400 @@
+/*
+ * ローファイ・ワイヤーフレームの見た目（yutaura-toolkit:wireframe の共通ルール）。
+ * 色はグレースケール。アクセント色は主要操作と選択状態だけ、エラー色は失敗・破壊的操作だけ、注釈色は注釈だけに使う。
+ * 文字は 12 / 14 / 18 / 24 の 4 段階、間隔は 8px グリッド。影・グラデーション・模様は使わない。
+ * 状態（AI が書いた・待っている）は色や模様ではなく、線の種類と文言で示す。
+ */
+.wf {
+  --wf-bg: #ffffff;
+  --wf-surface: #f4f4f6;
+  --wf-line-color: #c9c9d1;
+  --wf-sub: #62626b;
+  --wf-text: #26262e;
+  --wf-accent: #4338ca;
+  --wf-error: #b42318;
+  --wf-note: #dd3333;
+  --wf-line: 1px;
+
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 24px;
+  color: var(--wf-text);
+  background: var(--wf-bg);
+  accent-color: var(--wf-accent);
+}
+
+.wf *,
+.wf *::before,
+.wf *::after {
+  box-sizing: border-box;
+}
+
+.wf :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure) {
+  margin: 0;
+}
+
+.wf :where(ul, ol) {
+  padding: 0;
+  list-style: none;
+}
+
+.wf :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+.wf :focus-visible {
+  outline: 2px solid var(--wf-accent);
+  outline-offset: 2px;
+}
+
+.wf-sheet {
+  display: grid;
+  gap: 24px;
+  justify-items: start;
+  padding-block-end: 40px;
+  background: var(--wf-surface);
+}
+
+.wf-window {
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr);
+  border: var(--wf-line) solid var(--wf-line-color);
+  background: var(--wf-bg);
+  overflow: hidden;
+}
+
+.wf-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 12px;
+  border-block-end: var(--wf-line) solid var(--wf-line-color);
+  background: var(--wf-surface);
+  color: var(--wf-sub);
+  font-size: 12px;
+}
+
+.wf-titlebar-dot {
+  inline-size: 12px;
+  block-size: 12px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 50%;
+  background: var(--wf-bg);
+}
+
+.wf-window-body {
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+.wf-notes {
+  display: grid;
+  gap: 8px;
+  max-inline-size: 960px;
+  padding-inline: 24px;
+}
+
+.wf-notes h2 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.wf-notes li {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+}
+
+.wf-notes ul li::before {
+  content: "？";
+  color: var(--wf-note);
+  font-weight: 700;
+}
+
+/* 注釈の番号マーカー。要素の横に置き、文字や操作の上には重ねない */
+.wf-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  inline-size: 20px;
+  block-size: 20px;
+  border: var(--wf-line) dashed var(--wf-note);
+  border-radius: 50%;
+  color: var(--wf-note);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.wf-app {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  block-size: 100%;
+}
+
+.wf-app:has(> .wf-inspector) {
+  grid-template-columns: 200px minmax(0, 1fr) 480px;
+}
+
+.wf-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 8px;
+  border-inline-end: var(--wf-line) solid var(--wf-line-color);
+  background: var(--wf-surface);
+}
+
+.wf-wordmark {
+  padding: 0 8px 16px;
+  font-weight: 700;
+}
+
+.wf-rail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  inline-size: 100%;
+  min-block-size: 40px;
+  padding: 0 8px;
+  border: var(--wf-line) solid transparent;
+  border-radius: 4px;
+  background: none;
+  text-align: start;
+  cursor: pointer;
+}
+
+.wf-rail-item[aria-current="page"] {
+  border-color: var(--wf-accent);
+  background: var(--wf-bg);
+  color: var(--wf-accent);
+  font-weight: 700;
+}
+
+.wf-rail-item:disabled {
+  color: var(--wf-line-color);
+  cursor: not-allowed;
+}
+
+.wf-rail-count {
+  min-inline-size: 24px;
+  padding: 0 8px;
+  border: var(--wf-line) solid var(--wf-text);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.wf-rail-foot {
+  margin-block-start: auto;
+  display: grid;
+  gap: 8px;
+  padding-inline: 8px;
+  font-size: 12px;
+  color: var(--wf-sub);
+}
+
+.wf-main {
+  overflow: auto;
+  padding: 24px 32px 48px;
+}
+
+.wf-main-head {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-block-end: 24px;
+}
+
+.wf-title {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 32px;
+}
+
+.wf-subtitle {
+  color: var(--wf-sub);
+}
+
+.wf-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-inline-start: auto;
+}
+
+.wf-inspector {
+  container-type: inline-size;
+  overflow: auto;
+  padding: 24px;
+  border-inline-start: var(--wf-line) solid var(--wf-line-color);
+}
+
+.wf-box {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+  background: var(--wf-bg);
+}
+
+/* AI が書いたもの: 破線 + 「AI が書いた」の見出し */
+.wf-box--ai {
+  border-style: dashed;
+}
+
+/* 自分の手が要るもの: 太い線。色は付けない（主要操作のボタンだけがアクセント色を持つ） */
+.wf-box--mine {
+  border: 2px solid var(--wf-text);
+}
+
+/* 待っている・作業中: 面の色 + 破線 + 文言 */
+.wf-box--waiting {
+  border-style: dashed;
+  background: var(--wf-surface);
+}
+
+.wf-box--quiet {
+  background: var(--wf-surface);
+  border-color: transparent;
+}
+
+.wf-box--error {
+  border: 2px solid var(--wf-error);
+}
+
+.wf-box--error > .wf-box-label {
+  color: var(--wf-error);
+  font-weight: 700;
+}
+
+.wf-box-label {
+  color: var(--wf-sub);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.wf-placeholder-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.wf-placeholder-bars span {
+  display: block;
+  block-size: 8px;
+  background: var(--wf-line-color);
+}
+
+.wf-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-block-size: 40px;
+  padding: 0 16px;
+  border: var(--wf-line) solid var(--wf-text);
+  border-radius: 4px;
+  background: var(--wf-bg);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.wf-button:disabled {
+  border-color: var(--wf-line-color);
+  color: var(--wf-line-color);
+  cursor: not-allowed;
+}
+
+.wf-button--primary {
+  border-color: var(--wf-accent);
+  background: var(--wf-accent);
+  color: #ffffff;
+}
+
+.wf-button--quiet {
+  border-color: transparent;
+  background: transparent;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.wf-button--danger {
+  border-color: var(--wf-error);
+  color: var(--wf-error);
+}
+
+.wf-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: var(--wf-line) solid var(--wf-sub);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.wf-pill--mine {
+  border-color: var(--wf-text);
+  background: var(--wf-text);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.wf-pill--waiting,
+.wf-pill--ai {
+  border-style: dashed;
+}
+
+.wf-pill--quiet {
+  border-color: var(--wf-line-color);
+  color: var(--wf-sub);
+}
+
+.wf-sources {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.wf-source {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+  color: var(--wf-sub);
+  font-size: 12px;
+}
+
+.wf-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.wf-section {
+  display: grid;
+  gap: 8px;
+}
+
+.wf-section-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.wf-sub,
+.wf-task-reason {
+  color: var(--wf-sub);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.wf-error-text {
+  color: var(--wf-error);
+}
+
+.wf-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-block-end: 24px;
+}
+
+.wf-banner .wf-button-row {
+  margin-inline-start: auto;
+}
+
+.wf-approval-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-block-end: 24px;
+}
+
+.wf-approval-bar .wf-button-row {
+  margin-inline-start: auto;
+}
+
+.wf-horizon {
+  display: grid;
+  gap: 8px;
+  margin-block-end: 24px;
+}
+
+.wf-horizon-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-horizon-name {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 24px;
+}
+
+.wf-horizon--line .wf-horizon-name {
+  font-size: 14px;
+}
+
+.wf-horizon-count {
+  color: var(--wf-sub);
+  font-size: 12px;
+}
+
+.wf-horizon-empty {
+  padding: 16px;
+  border: var(--wf-line) dashed var(--wf-line-color);
+  border-radius: 4px;
+  color: var(--wf-sub);
+}
+
+.wf-horizon--undecided {
+  padding: 16px;
+  border: 2px solid var(--wf-text);
+  border-radius: 4px;
+}
+
+.wf-task {
+  display: grid;
+  gap: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+  background: var(--wf-bg);
+}
+
+.wf-task[aria-current="true"] {
+  border: 2px solid var(--wf-accent);
+}
+
+.wf-task--full {
+  padding: 16px;
+}
+
+.wf-task--row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 8px 16px;
+}
+
+.wf-task--line {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 4px 16px;
+}
+
+.wf-task--working {
+  border-style: dashed;
+}
+
+.wf-task-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wf-task-title {
+  font-weight: 700;
+}
+
+.wf-task--full .wf-task-title {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.wf-task--line .wf-task-title {
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-task-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: start;
+  cursor: pointer;
+}
+
+.wf-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wf-next-label {
+  color: var(--wf-sub);
+  font-size: 12px;
+}
+
+.wf-more {
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-more > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 40px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.wf-more-body {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+}
+
+.wf-split {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.wf-queue {
+  display: grid;
+  gap: 4px;
+}
+
+.wf-queue-item,
+.wf-approval-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  inline-size: 100%;
+  min-block-size: 40px;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+  background: var(--wf-bg);
+  text-align: start;
+  cursor: pointer;
+}
+
+.wf-approval-item {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.wf-queue-item[aria-current="true"],
+.wf-approval-item[aria-current="true"] {
+  border: 2px solid var(--wf-accent);
+}
+
+.wf-queue-item > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-approval-item small {
+  color: var(--wf-sub);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.wf-focus-card {
+  gap: 16px;
+  padding: 24px;
+}
+
+.wf-focus-card .wf-task-title {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.wf-meter {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+/* meter はネイティブのまま使い、色だけ落とす（作り直さずに、意味と振る舞いを残すため） */
+.wf-meter meter {
+  inline-size: 100%;
+  block-size: 16px;
+  filter: grayscale(1);
+}
+
+.wf-big-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wf-facts {
+  display: grid;
+  grid-template-columns: 8em minmax(0, 1fr);
+  gap: 8px 16px;
+}
+
+.wf-facts dt {
+  color: var(--wf-sub);
+}
+
+.wf-diff {
+  display: grid;
+  gap: 4px;
+  padding: 8px 16px;
+  background: var(--wf-surface);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.wf-quote {
+  padding: 8px 16px;
+  border-inline-start: 2px solid var(--wf-line-color);
+  color: var(--wf-sub);
+}
+
+.wf-detail {
+  display: grid;
+  gap: 24px;
+}
+
+.wf-detail-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 24px;
+}
+
+.wf-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.wf-check {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-check input {
+  inline-size: 16px;
+  block-size: 16px;
+  margin-block-start: 4px;
+}
+
+.wf-check--failed {
+  border: 2px solid var(--wf-error);
+}
+
+.wf-fact {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+@container (inline-size < 520px) {
+  .wf-fact {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .wf-fact > .wf-button-row {
+    grid-column: 2;
+  }
+}
+
+.wf-ask {
+  display: grid;
+  gap: 8px;
+}
+
+.wf-ask textarea {
+  field-sizing: content;
+  min-block-size: 3lh;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-ask-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-history {
+  display: grid;
+  gap: 4px;
+}
+
+.wf-history li {
+  display: grid;
+  grid-template-columns: 4em 4em minmax(0, 1fr);
+  gap: 8px;
+  color: var(--wf-sub);
+  font-size: 12px;
+}
+
+.wf-inline-input {
+  min-block-size: 32px;
+  padding: 0 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-plan {
+  display: grid;
+  gap: 16px;
+}
+
+.wf-plan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wf-track {
+  display: grid;
+}
+
+/* 縦の線: 済んだところまでは実線、まだ先は破線（「ここから先はまだ」を線の種類で見せる） */
+.wf-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+  padding-block-end: 16px;
+}
+
+.wf-node::before {
+  content: "";
+  position: absolute;
+  inset-block: 16px 0;
+  inset-inline-start: 15px;
+  border-inline-start: 2px dashed var(--wf-line-color);
+}
+
+.wf-node--done::before,
+.wf-node--skipped::before {
+  border-inline-start-style: solid;
+}
+
+.wf-node:last-child::before {
+  display: none;
+}
+
+.wf-marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  inline-size: 32px;
+  block-size: 32px;
+  border: 2px dashed var(--wf-line-color);
+  border-radius: 50%;
+  background: var(--wf-bg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wf-node--now > .wf-marker {
+  border: 2px solid var(--wf-text);
+  background: var(--wf-text);
+  color: #ffffff;
+}
+
+.wf-node--done > .wf-marker {
+  border: 2px solid var(--wf-line-color);
+  background: var(--wf-surface);
+  color: var(--wf-sub);
+}
+
+.wf-node--skipped > .wf-marker {
+  border-style: dotted;
+  color: var(--wf-sub);
+}
+
+/* 分かれ道はひし形、並列は四角、完了したときにすることは小さな点線の丸 */
+.wf-marker--decision {
+  inline-size: 24px;
+  block-size: 24px;
+  margin: 4px;
+  border-radius: 2px;
+  rotate: 45deg;
+}
+
+.wf-marker--decision > span {
+  rotate: -45deg;
+}
+
+.wf-marker--parallel {
+  border-radius: 4px;
+}
+
+.wf-marker--effect {
+  inline-size: 24px;
+  block-size: 24px;
+  margin: 4px;
+  border-style: dotted;
+}
+
+.wf-node-body {
+  min-inline-size: 0;
+}
+
+.wf-node-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-block-size: 32px;
+}
+
+.wf-node-done {
+  color: var(--wf-sub);
+  text-decoration: line-through;
+}
+
+.wf-node-done-plain {
+  color: var(--wf-sub);
+}
+
+.wf-node-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px 16px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+  background: var(--wf-bg);
+}
+
+.wf-node-card--now {
+  border: 2px solid var(--wf-text);
+}
+
+.wf-node-card--busy {
+  border-style: dashed;
+  background: var(--wf-surface);
+}
+
+/* 番待ち: 淡い破線。何を待っているかだけははっきり読めるようにする */
+.wf-node-card--waiting {
+  border: var(--wf-line) dashed var(--wf-line-color);
+  color: var(--wf-sub);
+}
+
+.wf-node-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wf-node-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.wf-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wf-waiting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.wf-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: var(--wf-line) solid var(--wf-sub);
+  border-radius: 4px;
+  color: var(--wf-text);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.wf-chip--solid {
+  margin-inline-start: 8px;
+  border-color: var(--wf-text);
+  background: var(--wf-text);
+  color: #ffffff;
+}
+
+.wf-parallel {
+  display: grid;
+  gap: 8px;
+  padding: 8px 16px 16px;
+  border: 2px solid var(--wf-text);
+  border-radius: 4px;
+}
+
+.wf-parallel--waiting {
+  border: var(--wf-line) dashed var(--wf-line-color);
+}
+
+.wf-parallel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.wf-parallel-lanes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  gap: 8px;
+}
+
+.wf-track--lane .wf-node {
+  padding-block-end: 0;
+}
+
+.wf-decision {
+  display: grid;
+  gap: 8px;
+}
+
+.wf-decision--now {
+  padding: 8px 16px 16px;
+  border: 2px solid var(--wf-text);
+  border-radius: 4px;
+}
+
+.wf-decision--waiting {
+  padding: 8px 16px 16px;
+  border: var(--wf-line) dashed var(--wf-line-color);
+  border-radius: 4px;
+  color: var(--wf-sub);
+}
+
+/* 選択肢は、得るもの・失うものを読み比べるので、狭い欄では 1 列に積む */
+.wf-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.wf-option {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-option-preview {
+  display: grid;
+  gap: 4px;
+  padding-inline-start: 8px;
+  border-inline-start: 2px dashed var(--wf-line-color);
+  color: var(--wf-sub);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* 枝: 字下げして左に太い線を引き、どの分かれ道から伸びたかを見せる */
+.wf-branch {
+  display: grid;
+  gap: 8px;
+  padding-inline-start: 16px;
+  border-inline-start: 4px solid var(--wf-text);
+}
+
+.wf-branch--abandoned {
+  border-inline-start: 4px dotted var(--wf-line-color);
+  color: var(--wf-sub);
+}
+
+.wf-branch-label {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wf-abandoned > summary {
+  cursor: pointer;
+  color: var(--wf-sub);
+  font-size: 12px;
+}
+
+.wf-abandoned[open] {
+  display: grid;
+  gap: 8px;
+}
+
+.wf-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.wf-column {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  background: var(--wf-surface);
+}
+
+.wf-column-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0 8px;
+}
+
+.wf-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+  background: var(--wf-bg);
+}
+
+.wf-card--working,
+.wf-card--preview {
+  border-style: dashed;
+}
+
+.wf-settings {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.wf-settings-nav {
+  position: sticky;
+  inset-block-start: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.wf-settings-nav a {
+  padding: 4px 8px;
+  color: inherit;
+}
+
+.wf-roles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.wf-role {
+  align-content: start;
+}
+
+.wf-role h3 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.wf-placeholder-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: 40px;
+  padding: 0 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-policy {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.wf-policy :is(th, td) {
+  padding: 8px;
+  border-block-end: var(--wf-line) solid var(--wf-line-color);
+  text-align: start;
+}
+
+.wf-policy thead th {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wf-policy thead th:not(:first-child),
+.wf-policy td {
+  text-align: center;
+}
+
+.wf-thumbs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.wf-thumb {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.wf-thumb-canvas {
+  display: grid;
+  gap: 4px;
+  block-size: 240px;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  background: var(--wf-bg);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.wf-thumb--recommended .wf-thumb-canvas {
+  border: 2px solid var(--wf-accent);
+}
+
+.wf-breadboard {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.wf-place {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 16px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-place h2 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.wf-place li {
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.wf-dialog {
+  inline-size: min(480px, 92vw);
+  padding: 24px;
+  border: var(--wf-line) solid var(--wf-text);
+  border-radius: 4px;
+  background: var(--wf-bg);
+  color: var(--wf-text);
+}
+
+.wf-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+.wf-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.wf-dialog form {
+  display: grid;
+  gap: 16px;
+}
+
+.wf-dialog h1 {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.wf-field {
+  display: grid;
+  gap: 4px;
+}
+
+.wf-field input,
+.wf-field textarea {
+  min-block-size: 40px;
+  padding: 8px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+}
+
+.wf-toasts {
+  position: fixed;
+  inset-block-end: 24px;
+  inset-inline-start: 50%;
+  translate: -50% 0;
+}
+
+.wf-toast {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 8px 8px 16px;
+  border: var(--wf-line) solid var(--wf-text);
+  border-radius: 4px;
+  background: var(--wf-bg);
+}
+
+.wf-toast[popover] {
+  position: fixed;
+  inset: auto auto 24px 50%;
+  translate: -50% 0;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wf-toast[popover] {
+    transition:
+      opacity 0.2s ease-out,
+      display 0.2s,
+      overlay 0.2s;
+    transition-behavior: allow-discrete;
+  }
+
+  @starting-style {
+    .wf-toast[popover]:popover-open {
+      opacity: 0;
+    }
+  }
+}
+
+/* 今できること（並列なら複数）。1 行に 1 つ、右に操作 */
+.wf-now-list {
+  display: grid;
+  border-block-start: var(--wf-line) solid var(--wf-line-color);
+}
+
+.wf-now-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  min-block-size: 48px;
+  border-block-end: var(--wf-line) solid var(--wf-line-color);
+}
+
+.wf-now-list li:last-child {
+  border-block-end: 0;
+}
+
+/* 「…」のメニュー。頻度の低い操作を、押したときだけ出す */
+.wf-menu {
+  position: relative;
+}
+
+.wf-menu > summary {
+  display: grid;
+  place-items: center;
+  inline-size: 40px;
+  block-size: 40px;
+  border: var(--wf-line) solid var(--wf-line-color);
+  border-radius: 4px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.wf-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wf-menu > ul {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: 44px;
+  z-index: 2;
+  display: grid;
+  min-inline-size: 200px;
+  padding: 4px;
+  border: var(--wf-line) solid var(--wf-text);
+  border-radius: 4px;
+  background: var(--wf-bg);
+}
+
+.wf-menu button {
+  inline-size: 100%;
+  padding: 8px;
+  border: 0;
+  background: none;
+  text-align: start;
+  cursor: pointer;
+}
+
+.wf-menu .wf-sub {
+  padding: 4px 8px;
+}
+
+/* 並列の中の枝（1 本ずつ）。横に並んでも縦に積まれても、どこまでが 1 本かが分かるように左に線を引く */
+.wf-parallel-lanes > li {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--wf-line-color);
+}
+
+/* 得るもの（＋）と失うもの（−）。色ではなく記号で見分ける */
+.wf-tradeoff {
+  display: grid;
+  gap: 4px;
+}
+
+/* 記号・観点・中身の 3 列。観点の列をそろえて、選択肢どうしを読み比べやすくする */
+.wf-tradeoff li {
+  display: grid;
+  grid-template-columns: 16px 5em minmax(0, 1fr);
+  gap: 4px;
+}
+
+.wf-tradeoff--gain::before {
+  content: "＋";
+  font-weight: 700;
+}
+
+.wf-tradeoff--cost::before {
+  content: "−";
+  font-weight: 700;
+}
+
+/* キーの手がかり。ボタンの文言の横に小さく出す */
+.wf-kbd {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 20px;
+  padding: 0 4px;
+  border: var(--wf-line) solid currentColor;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  opacity: 0.8;
+}
