@@ -18,12 +18,12 @@
 |------|------|
 | **Source Item** | Source から取ってきた 1 件（PR、スレッド、メール、予定）。外の世界の写し |
 | **Activity** | Source Item に起きた出来事（appeared / changed / resolved / reopened / removed） |
-| **Link** | Task と Source Item のつながり。役割は **tracks**（この Item の完了が Task の完了を決める）と **context**（関連情報） |
+| **Link** | Task と Source Item のつながり（その Item が Task の事実になる）。つながりに役割の区別は持たない |
 | **Task** | 自分がやること。Source の言葉ではなく、自分にとっての意味（何をするか、今の状況と次の一手）で書く |
 
 - **1 つの Source Item が属せる Task は 1 つまで**。同じ Item が 2 つの Task にまたがると、Item の完了でどちらを done にするかがあいまいになるため
 - **更新マークは Task Change にだけ付ける**。Activity はそのままでは更新マークにならず、「その出来事が Task にとって何を意味するか」を解釈して Task の項目が実際に変わったときだけ Task Change を記録する
-- Task の status は tracks の Item の状態から導く。どれかが open なら開いた状態、open がなく解決済みがあれば done、すべて消えていれば archived。ユーザーが選んだ in_progress や dismissed は上書きしない
+- Task が終わるかは、つながった Item の状態から直接は導かず、計画の完了条件（Action Item）で決める（specs/task.spec.ts）。つながりに「完了を決める（tracks）」「関連情報（context）」の役割を持たせる案は、どの事実で終わるかを Task の計画が決めるようになったので外した
 - Source Item は Task を作らなかったもの（対象外）も保存する。判定のやり直しや、あとからの紐づけに使う
 
 段階的に作る。
@@ -35,7 +35,7 @@
 ## Alternatives Considered
 
 - **Source Item = Task のまま、Task に複数の URL を持たせる**: Source ごとの状態（PR はマージ済み、スレッドは未解決）を持てず、完了の判定ができない
-- **1 つの Source Item を複数の Task に属せるようにする**: Item の完了でどの Task を done にするかがあいまいになる。必要になったら context の Link だけ複数を許す形で拡張する
+- **1 つの Source Item を複数の Task に属せるようにする**: Item の変化をどの Task が受け取るかがあいまいになる。必要になったら見直す
 - **Source の変化（fingerprint）で更新マークを付ける**: 画面に出ない値の変化で更新マークが付き、Task の項目が変わっていないのに目印だけが出る
 
 ## Consequences
