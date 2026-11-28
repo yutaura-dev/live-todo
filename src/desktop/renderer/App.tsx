@@ -108,7 +108,13 @@ export function App({ api }: { api: LiveTodoApi }) {
       onNavigate={setView}
       inspector={selected && <TaskPanel task={selected} problem={problem} onCommand={(command) => void run(command)} onRequestWrite={(itemId) => void requestWrite(itemId)}
             onEffect={(effectId, action) => void sendForTask({ _tag: "EffectAction", taskId: selected.id, effectId, action })}
-            onConfirmCompletion={() => void sendForTask({ _tag: "ConfirmCompletion", taskId: selected.id })}
+            onConfirmCompletion={() =>
+              void sendForTask({
+                _tag: "ConfirmCompletion",
+                taskId: selected.id,
+                shown: selected.effects.filter((e) => e.delivery === "まだ" || e.delivery === "書き込めなかった").map(({ id, checked, target, operation }) => ({ id, checked, target, operation })),
+              })
+            }
             onClose={() => setSelected(null)} />}
     >
       {ai === null ? null : locked || view === "設定" ? (

@@ -94,7 +94,7 @@ const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<
   priority: priorityOf(p),
   facts: facts.map(factViewOf),
   plan: task.plan === null ? null : planRowsOf(task.plan),
-  effects: task.plan === null ? [] : effectsOf(task.plan).map((effect) => ({ id: effect.id, title: effect.title, checked: effect.checked, delivery: effect.delivery })),
+  effects: task.plan === null ? [] : effectsOf(task.plan).map((effect) => ({ id: effect.id, title: effect.title, target: effect.subject.uri, operation: effect.operation, checked: effect.checked, delivery: effect.delivery })),
   history: task.history,
   createdAt: task.createdAt,
 });

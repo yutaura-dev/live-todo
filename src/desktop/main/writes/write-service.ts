@@ -20,6 +20,17 @@ import { TaskIds } from "../task-service.js";
 import { WriteProvider } from "./write-provider.js";
 
 export const writes = documentsOf("write", Write);
+
+export type ShownEffect = { readonly id: string; readonly checked: boolean; readonly target: string; readonly operation: string };
+/** チェックリストに出すもの（まだ頼んでいない・書き込めなかったもの） */
+export const checklistOf = (effects: ReadonlyArray<CompletionEffect>): ShownEffect[] =>
+  effects.filter((e) => e.delivery === "まだ" || e.delivery === "書き込めなかった").map((e) => ({ id: e.id, checked: e.checked, target: e.subject.uri, operation: e.operation }));
+const keyOf = (e: ShownEffect) => JSON.stringify([e.id, e.checked, e.target, e.operation]);
+const sameChecklist = (current: ReadonlyArray<ShownEffect>, shown: ReadonlyArray<ShownEffect>) => {
+  const a = current.map(keyOf).sort();
+  const b = shown.map(keyOf).sort();
+  return a.length === b.length && a.every((key, i) => key === b[i]);
+};
 const user = { kind: "user" } as const;
 const app = { kind: "app" } as const;
 const OPEN_STAGES = new Set(["承認待ち", "書き込み中", "書けたか分からない"]);
@@ -33,7 +44,7 @@ export class WriteService extends Context.Service<
     approve(writeId: string): Effect.Effect<Reply<WriteView>, StoreCorrupted>;
     cancel(writeId: string): Effect.Effect<Reply<WriteView>, StoreCorrupted>;
     /** 完了待ちのチェックリストを確かめて完了のボタンを押した。☑ が付いているものを書き込む（押したことが承認） */
-    confirmCompletion(taskId: string): Effect.Effect<Reply<null>, StoreCorrupted>;
+    confirmCompletion(taskId: string, shown: ReadonlyArray<ShownEffect>): Effect.Effect<Reply<null>, StoreCorrupted>;
     /** チェックリストの ☑ を付ける・外す、書き込めなかったものをもう一度頼む（押したことが承認） */
     effectAction(taskId: string, effectId: string, action: "check" | "uncheck" | "retry"): Effect.Effect<Reply<null>, StoreCorrupted>;
     /** 起動したとき、書き込み中のまま残っていた書き込みを、やり直さずに「書けたか分からない」から確かめる */
@@ -200,11 +211,12 @@ export class WriteService extends Context.Service<
           yield* tasks.save(next);
         });
 
-      const confirmCompletionOf = (taskId: string) =>
+      const confirmCompletionOf = (taskId: string, shown: ReadonlyArray<ShownEffect>) =>
         Effect.gen(function* () {
           const found = yield* tasks.find(taskId);
           if (Option.isNone(found)) return { ok: false, reason: "Task が見つかりません" } as const;
-          const confirmed = yield* confirmCompletion(found.value, user, "見せたとおり").pipe(Effect.result);
+          const current = found.value.plan === null ? [] : checklistOf(effectsOf(found.value.plan));
+          const confirmed = yield* confirmCompletion(found.value, user, sameChecklist(current, shown) ? "見せたとおり" : "変わった").pipe(Effect.result);
           if (confirmed._tag === "Failure") return { ok: false, reason: confirmed.failure.reason } as const;
           let plan = found.value.plan!;
           const problems: string[] = [];
@@ -261,7 +273,7 @@ export class WriteService extends Context.Service<
         approve: (id) => withDocs(approveOne(id)),
         cancel: (id) => withDocs(cancelOne(id)),
         recover: () => withDocs(recover()),
-        confirmCompletion: (taskId) => withDocs(confirmCompletionOf(taskId)),
+        confirmCompletion: (taskId, shown) => withDocs(confirmCompletionOf(taskId, shown)),
         effectAction: (taskId, effectId, action) => withDocs(effectActionOf(taskId, effectId, action)),
       });
     }),

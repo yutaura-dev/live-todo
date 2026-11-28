@@ -30,7 +30,12 @@ export function CompletionChecklist(props: {
                 disabled={!movable(effect)}
                 onChange={() => props.onAction(effect.id, effect.checked ? "uncheck" : "check")}
               />
-              <span>{effect.title}</span>
+              <span className="ui-stack-4">
+                <span>{effect.title}</span>
+                <span className="ui-sub">
+                  {effect.operation}: {effect.target}
+                </span>
+              </span>
             </label>
             {DELIVERY_LABELS[effect.delivery] && <span className={effect.delivery === "書き込めなかった" ? "ui-problem" : "ui-sub"}>{DELIVERY_LABELS[effect.delivery]}</span>}
             {effect.delivery === "書き込めなかった" && effect.checked && (

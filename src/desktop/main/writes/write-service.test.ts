@@ -14,7 +14,8 @@ import { Planner } from "../plan/planner.js";
 import { Calendar, Prioritizer } from "../prioritizer.js";
 import { sequentialIds } from "../task-service.js";
 import { type Inspection, WriteProvider, type WriteOutcome } from "./write-provider.js";
-import { WriteService, writes } from "./write-service.js";
+import { checklistOf, WriteService, writes } from "./write-service.js";
+import { effectsOf } from "../../../domain/plan/plan.js";
 
 function layerWith(opts: { inspect?: () => Inspection; outcome?: WriteOutcome; outcomeOf?: () => WriteOutcome } = {}) {
   const executed: string[] = [];
@@ -43,6 +44,9 @@ const seed = Effect.gen(function* () {
   );
   const task = yield* revisePlan(yield* create({ id: "t1", title: "PR を merge する", actor: { kind: "user" }, origin: "手で足した" }), { kind: "agent" }, plan);
   yield* (yield* TaskStore).save(task);
+});
+const shownNow = Effect.gen(function* () {
+  return checklistOf(effectsOf(Option.getOrThrow(yield* (yield* TaskStore).find("t1")).plan!));
 });
 const taskOf = Effect.gen(function* () {
   return Option.getOrThrow(yield* (yield* TaskStore).find("t1"));
@@ -157,10 +161,22 @@ describe("WriteService（承認がなければ書き込まない）", () => {
         yield* seedWaiting;
         const service = yield* WriteService;
         yield* service.effectAction("t1", "n3", "uncheck");
-        assert.deepStrictEqual(yield* service.confirmCompletion("t1"), { ok: true, value: null });
+        assert.deepStrictEqual(yield* service.confirmCompletion("t1", yield* shownNow), { ok: true, value: null });
         assert.deepStrictEqual(executed, ["github://me@github.com/acme/app/pull/42"]);
         const task = yield* taskOf;
         assert.deepStrictEqual({ status: task.status, closure: task.closure }, { status: "終わった", closure: { outcome: "done", reason: "自分で完了にした" } });
+      }).pipe(Effect.provide(layer));
+    });
+
+    it.effect("見せたあとにチェックリストが変わっていたら、書き込まずに断る（見せ直す）", () => {
+      const { executed, layer } = layerWith();
+      return Effect.gen(function* () {
+        yield* seedWaiting;
+        const service = yield* WriteService;
+        const shown = yield* shownNow;
+        yield* service.effectAction("t1", "n3", "uncheck");
+        assert.deepStrictEqual(yield* service.confirmCompletion("t1", shown), { ok: false, reason: "見せたチェックリストが今も同じときだけ（見せたあとに足された・取りやめたものがあれば、見せ直す）" });
+        assert.deepStrictEqual(executed, []);
       }).pipe(Effect.provide(layer));
     });
 
@@ -171,7 +187,7 @@ describe("WriteService（承認がなければ書き込まない）", () => {
         yield* seedWaiting;
         const service = yield* WriteService;
         yield* service.effectAction("t1", "n3", "uncheck");
-        yield* service.confirmCompletion("t1");
+        yield* service.confirmCompletion("t1", yield* shownNow);
         assert.strictEqual((yield* taskOf).status, "完了待ち");
         ok = true;
         yield* service.effectAction("t1", "n2", "retry");

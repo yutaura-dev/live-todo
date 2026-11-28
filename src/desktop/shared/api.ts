@@ -54,6 +54,9 @@ export type BoardCard = typeof BoardCard.Type;
 export const EffectView = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
+  /** 実際に書き込む先と操作（題名だけで承認しないよう、チェックリストに並べて見せる） */
+  target: Schema.String,
+  operation: Schema.String,
   checked: Schema.Boolean,
   delivery: Schema.Literals(["まだ", "頼んだ", "書き込んだ", "書き込めなかった", "取りやめた"]),
 });
@@ -156,7 +159,8 @@ export const InboxCommand = Schema.Union([
   Schema.TaggedStruct("RequestWrite", { taskId: Id, itemId: Id }),
   Schema.TaggedStruct("ApproveWrite", { id: Id }),
   Schema.TaggedStruct("CancelWrite", { id: Id }),
-  Schema.TaggedStruct("ConfirmCompletion", { taskId: Id }),
+  /** shown: 押したときに画面が見せていたチェックリスト（見せたあとに変わっていたら、書き込まずに見せ直す） */
+  Schema.TaggedStruct("ConfirmCompletion", { taskId: Id, shown: Schema.Array(Schema.Struct({ id: Id, checked: Schema.Boolean, target: Schema.String, operation: Schema.String })) }),
   Schema.TaggedStruct("EffectAction", { taskId: Id, effectId: Id, action: Schema.Literals(["check", "uncheck", "retry"]) }),
 ]);
 export type InboxCommand = typeof InboxCommand.Type;

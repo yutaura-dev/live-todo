@@ -75,6 +75,27 @@ function treeOf(draft: PlanDraft, effortOf: (title: string) => Effort): DraftTre
   };
 }
 
+/**
+ * 完了したときにすることは、その Task が追っている事実に書き込むものだけを残す。
+ * 初めから ☑ なので、読んだ内容に仕込まれた指示でほかの対象を指されると、題名を見ただけで承認しかねないため（ADR-0023 の「事実そのもの」と同じ線）。
+ */
+export function keepOwnEffects(tree: DraftTree, own: ReadonlySet<string>): DraftTree {
+  return {
+    ...tree,
+    items: tree.items.flatMap((entry): DraftTree["items"][number][] => {
+      if ("items" in entry) return [keepOwnEffects(entry, own)];
+      if ("kind" in entry) return own.has(entry.subjectUri) ? [entry] : [];
+      if (entry.how.type !== "decision") return [entry];
+      return [
+        {
+          ...entry,
+          how: { ...entry.how, options: entry.how.options.map((option) => (option.then.type === "planned" ? { ...option, then: { ...option.then, plan: keepOwnEffects(option.then.plan, own) } } : option)) },
+        },
+      ];
+    }),
+  };
+}
+
 /** 手間を聞く Action Item（分かれ道は手間を数えないので聞かない。選択肢の先の計画の中も聞く） */
 function itemsToRate(draft: PlanDraft): ItemDraft[] {
   return draft.items.flatMap((entry) => {
@@ -130,7 +151,7 @@ export class Planner extends Context.Service<
             // 決まらなければ重いほうに倒す（すぐ済むと扱うと、優先度を低く見積もる）
             efforts.set(item.title, effort === "判断できなかった" ? "hard" : effort);
           }
-          return treeOf(plan, (title) => efforts.get(title) ?? "easy");
+          return keepOwnEffects(treeOf(plan, (title) => efforts.get(title) ?? "easy"), new Set(facts.map((fact) => fact.uri)));
         });
 
       const saveAndPrioritize = (task: Task) =>
