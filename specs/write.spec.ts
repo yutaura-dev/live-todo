@@ -20,9 +20,9 @@ export type Write = {
   id: string;
   /** 何に書き込むか。作る操作（draft の PR を作る・返信の下書きを作る など）では、作る元の事実（issue #12 を直す PR なら issue #12、返信の下書きならそのスレッド）。下書きは同期で戻ってこないので、元の事実への書き込みのまま扱う */
   subject: Subject;
-  /** 作る操作で、作る場所（PR を作るリポジトリ・下書きを置くスレッド）。作らない操作では null。自動で書き込めるのは、作る元の事実と同じ場所（同じリポジトリ・同じスレッド）のときだけ */
+  /** 作る操作で、作る場所（PR を作るリポジトリ・下書きを置くスレッド）。作らない操作では null。自動で書き込めるのは、作る元の事実と同じ場所（同じリポジトリ・同じスレッド）のときだけ（判断表「自動でやってよいか」の書き込む先で「元の事実と違う場所に作る」になり、ユーザーの承認に回る） */
   place: Subject | null;
-  /** 作る操作で書き込めたとき、書き込み先が返した作ったもの（PR・issue など、同期で戻ってくるもの）。同期で届いたとき、これと URI が一致すれば、この Write の Task に振り分ける */
+  /** 作る操作で書き込めたとき、書き込み先が返した作ったもの（PR・issue など、同期で戻ってくるもの）。書き込み先が返した URI が作る場所の中にあるときだけ持つ（外なら持たず、ふつうの振り分けに任せる）。同期で届いたとき、これと URI が一致すれば、この Write の Task に振り分ける */
   created: Subject | null;
   /** どの操作か。provider が決めた名前（github.merge・github.push・gmail.archive・slack.complete_todo など） */
   operation: string;
@@ -268,6 +268,8 @@ const FINISHED: Stage[] = ["書き込んだ", "失敗", "取りやめた"];
 
 export const invariants = {
   "書き込むのは、承認があるときだけ": (write: Write) => APPROVED.includes(write.stage) === (write.approval !== null),
+  "作ったものを持つのは、作る場所がある書き込みで、書き込んだときだけ": (write: Write) => write.created === null || (write.place !== null && write.stage === "書き込んだ"),
+  "作る場所は、作ったあと変わらない": (before: Write, after: Write) => before.place?.uri === after.place?.uri,
   "自動でやってよい範囲による承認にだけ、そのときの操作と上限がある": (write: Write) =>
     write.approval === null || (write.approval.by === "自動でやってよい範囲") === (write.approval.policy !== null),
   "終わった書き込みは、もう変わらない": (before: Write, after: Write) => !FINISHED.includes(before.stage) || before.stage === after.stage,

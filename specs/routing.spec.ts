@@ -50,7 +50,7 @@ export function initial(actor: Actor): Routing {
  *
  * 同期は識別子で決まるものだけを決めるので、迷わない。迷うのは、候補から選ぶ AI だけ。
  *
- * アプリが作る操作で作ったもの（Write が持つ作ったものの URI と一致する Source Item）は、Decisions を通さず、その Write の Task に振り分ける。
+ * アプリが作る操作で作ったもの（Write が持つ作ったものの URI と一致し、その URI が Write の作る場所の中にある Source Item）は、Decisions を通さず、その Write の Task に振り分ける。どちらかが成り立たなければ、ふつうの振り分けに任せる。
  */
 export function route(routing: Routing, actor: Actor, outcome: Outcome): Routing {
   ensure(actor.kind === "sync" || actor.kind === "agent", "同期か AI だけ");
