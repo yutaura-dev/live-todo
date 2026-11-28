@@ -32,7 +32,7 @@ export type Progress =
   /** 進み具合を持たない（人・書き込みで果たされる） */
   | { type: "none" }
   /** Claude Code にやらせた進み具合 */
-  | { type: "claude"; agentRunId: string | null; report: string | null }
+  | { type: "claude"; agentRunId: string | null }
   /** 待つ条件を確かめた結果と、待ち始めた時刻 */
   | { type: "condition"; observed: "まだ" | "成り立った" | "達成できない"; waitingSince: string }
   /** 分かれ道で選んだか（何を選んだか・選び直した履歴は、Task の計画の枝に残る） */
@@ -54,7 +54,7 @@ export const actors: Record<string, Actor> = {
 };
 
 function progressFor(definition: ActionDefinition): Progress {
-  if (definition.how.type === "claude") return { type: "claude", agentRunId: null, report: null };
+  if (definition.how.type === "claude") return { type: "claude", agentRunId: null };
   if (definition.how.type === "decision") return { type: "decision", chosen: "まだ" };
   if (definition.how.type === "condition") return { type: "condition", observed: "まだ", waitingSince: "2026-11-28T00:00:00Z" };
   return { type: "none" };
@@ -87,8 +87,8 @@ const decision: ActionDefinition = {
 export const inputs = {
   initial: {
     人がやる: [{ title: "年末調整の書類を出す", effort: "normal", completes: false, how: { type: "human", place: null } }],
-    頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null } }],
-    自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null } }],
+    頼めばやる: [{ title: "型エラーを直して push する", effort: "normal", completes: false, how: { type: "claude", trigger: "on_request", workspace: null, tools: "読むだけ" } }],
+    自動でやる: [{ title: "変更点を読んでまとめる", effort: "easy", completes: false, how: { type: "claude", trigger: "auto", workspace: null, tools: "読むだけ" } }],
     条件で果たす: [{ title: "PR が merge されるのを待つ", effort: "easy", completes: true, how: { type: "condition", condition: { subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, name: "github.merged", afterStart: false, label: "PR #42 が merge される" } } }],
     書き込みで果たす: [{ title: "merge する", effort: "easy", completes: false, how: { type: "write", subject: { uri: "github://yutaura@github.com/acme/app/pull/42" }, operation: "github.merge" } }],
     分かれ道: [decision],
@@ -158,7 +158,7 @@ export function completeByWrite(item: ActionItem, actor: Actor, turn: Turn): Act
 /**
  * Claude Code に頼む（ボタンで）
  *
- * Agent Thread に作業（Agent Run）を頼み、その ID を持つ。作業がやっているか・止まったかは Agent Run が持ち、Action Item は持たない（同じことを 2 か所で持たないため）。
+ * Agent Thread に作業（Agent Run）を頼み、その ID を持つ。作業がやっているか・止まったか・成果は Agent Run が持ち、Action Item は持たない（同じことを 2 か所で持たないため）。渡す道具（読むだけ・直す）は、Action Item の中身が決める。
  */
 export function request(item: ActionItem, actor: Actor, running: "動いている作業はない" | "動いている作業がある"): ActionItem {
   ensure(actor.kind === "user", "ユーザーだけ");
@@ -184,7 +184,7 @@ export function succeed(item: ActionItem, actor: Actor): ActionItem {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(item.status === "todo", "まだのときだけ");
   ensure(item.progress.type === "claude" && item.progress.agentRunId !== null, "Claude Code に頼んだ Action Item だけ");
-  return { ...item, status: "done", progress: { ...item.progress, report: "調べた結果" } };
+  return { ...item, status: "done" };
 }
 
 /**
@@ -268,7 +268,7 @@ export const links = [
   { from: reopen, to: "task", action: "reopen", label: "やり終えた Task なら、やり直す" },
   { from: choose, to: "task", action: "addPendingCriteria", label: "先の計画が決まっていれば、差し込む（その中の完了条件が、まだの完了条件になる）" },
   { from: choose, to: "task", action: "makeUndetermined", label: "選んでから考える選択肢なら、先の計画ができるまで完了条件は未定" },
-  { from: choose, to: "task", action: "startWork", label: "選んでから考える選択肢なら、AI に先の計画を考えさせる" },
+  { from: choose, to: "task", action: "revisePlan", label: "選んでから考える選択肢なら、Generation が先の計画を考える（AI の作業にはしない）" },
   { from: rechoose, to: "action-item", action: "skip", label: "前に選んだ枝の、まだの Action Item をやらなくする" },
   { from: rechoose, to: "task", action: "addPendingCriteria", label: "新しく選んだ選択肢の先を差し込む" },
   { from: request, to: "agent-thread", label: "Claude Code に、この Action Item をやる作業を頼む（作業を始めたら、Task が AI の作業中になる）" },

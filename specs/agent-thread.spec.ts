@@ -57,7 +57,7 @@ export function renew(thread: AgentThread, actor: Actor): AgentThread {
 
 export const inputs = { lose: { 動いていない: ["動いている作業がない"], 動いている: ["動いている作業がある"] } };
 
-export const links = [{ from: lose, to: "agent-run", action: "fail", label: "動いている作業があったなら、先に止まったことにしてから続けられなくする" }];
+export const links = [{ from: lose, to: "agent-run", action: "fail", label: "動いている作業があったなら、先に止まった（作業場所が消えた）ことにしてから続けられなくする" }];
 
 export const scenarios = {
   "作業場所が消えたら、次の作業で新しい会話を始める": [
