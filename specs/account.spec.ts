@@ -4,6 +4,8 @@ import { ensure } from "@yutaura/live-spec";
  * Account（Source のアカウント 1 つ。会社の GitHub・私用の Gmail・会社の Slack のワークスペース など）。
  * Source Item・見張る対象・書き込みは、どのアカウントのものかを accountId で指す。
  * つながっているかだけを持つ。どの AI に送るかは AI Settings（PC に 1 つ）が決め、アカウントごとには持たない（ADR-0022）。
+ * 外しても、取り込んだ Source Item は消さない（そのまま残り、もう新しくは取り込まない）。それを持つ Task もそのまま。
+ * ID は使い回さない（足し直したら新しい ID）。前の Source Item・見張りの記録と混ざらないように。
  */
 export type Account = {
   /** つながっているか */
@@ -43,7 +45,7 @@ export const actors: Record<string, Actor> = {
   アプリ: { kind: "app" },
 };
 
-/** アカウントを足す */
+/** アカウントを足す（会社の Slack は、管理者に確かめてから使うよう、足す画面で注意を出す。ADR-0010。確かめたかは条件にしない） */
 export function initial(actor: Actor): Account {
   ensure(actor.kind === "user", "ユーザーだけ");
   return { status: "つないでいない", id: "github-work", source: "github", label: "会社の GitHub", scope: null, problem: null };
@@ -76,7 +78,7 @@ export function changeScope(account: Account, actor: Actor, permission: "権限�
   return permission === "権限が増える" && account.status === "つないでいる" ? { ...scoped, status: "つなぎ直しが要る", problem: "権限を増やした" } : scoped;
 }
 
-/** 外す（同期・見張りをやめ、確認中の書き込みを取りやめ、このアカウントのトークン・セッションを消す） */
+/** 外す（同期・見張りをやめ、確認中の書き込みを取りやめ、このアカウントのトークン・セッションを消す。取り込んだ Source Item は消さない） */
 export function remove(account: Account, actor: Actor): Account {
   ensure(actor.kind === "user", "ユーザーだけ");
   ensure(account.status !== "外した", "外していないときだけ");
@@ -101,7 +103,7 @@ export const links = [
   { from: changeScope, to: "source-item", action: "remove", label: "範囲から外れた Source Item は、範囲の外になったとして消す" },
   { from: remove, to: "write", action: "withdraw", label: "このアカウントへの、確認中の書き込みを取りやめる" },
   { from: remove, to: "write", label: "このアカウントへの、書き込み中・書けたか分からない書き込みは、外を確かめられないので失敗にする（理由: アカウントを外した）" },
-  { from: reject, to: "write", action: "withdraw", label: "このアカウントへの、確認中の書き込みを取りやめる（つなぎ直してから頼み直す）" },
+  { from: reject, to: "write", label: "このアカウントへの、確認中の書き込みは残す。つなぎ直すまで承認だけできない（書き込める状態でないので）。つなぎ直したら、見せた版のままなら承認できる" },
 ];
 
 export const scenarios = {
@@ -153,19 +155,7 @@ export const reviewed = {
 
 export const questions = [
   {
-    ask: "会社の Slack を足すとき、管理者に確かめてから使う（ADR-0010）ことを、足す条件にするか？",
+    ask: "外したアカウントと同じ外の世界での名前（メールアドレス・ログイン名・ワークスペース）で足そうとしたら、前のアカウントに戻して（前の ID のまま）、前の Source Item・Task・見張りの記録を引き継ぐか？ 今つないでいるアカウントと同じ名前は足せないようにするか？",
     about: initial,
-  },
-  {
-    ask: "トークンが切れたとき、確認中の書き込みを取りやめるか（今の spec）、残してつなぎ直すまで承認だけ止めるか？",
-    about: reject,
-  },
-  {
-    ask: "外したアカウントの ID を、足し直すときに使い回してよいか？ 使い回すと、前の Source Item・見張りの記録と混ざる。案: 使い回さない（足し直すと新しい ID）",
-    about: remove,
-  },
-  {
-    ask: "アカウントを外したら、そのアカウントの Source Item と、それだけを持つ Task をどうするか？ 案: Source Item は消えた（範囲の外になった）にし、それだけを持つ Task は振り分けで「もう要らなくなった」として片付ける。データ（ローカル DB）は消さずに残す",
-    about: remove,
   },
 ];
