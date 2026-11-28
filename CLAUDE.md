@@ -19,10 +19,10 @@
 | Source Adapter | Source ごとの取得・正規化・差分検知を担う実装。共通インターフェースを持つ |
 | Source Item | Source から取得した 1 件（PR、スレッド、メール、予定など）。外の世界の写しで、Task とは別の概念（[ADR-0007](docs/decisions/0007-separate-source-items-from-tasks.md)） |
 | Activity | Source Item に起きた出来事（appeared / changed / resolved / reopened / removed）。そのままでは更新マークにならない |
-| Link | Task と Source Item のつながり（その Item が Task の事実になる）。役割の区別は持たない。1 つの Item は複数の Task の事実になれるが、AI が振り分けるのは 1 つ目だけ（2 つ目以降は識別子で決まるときかユーザーが足したときだけ） |
-| Task | 自分がやること。Source の言葉ではなく自分にとっての意味（title: 何をするか、brief: 今の状況と次の一手）で持つ。手動追加の Task もある |
+| Link | Task と Source Item のつながり（その Item が Task の事実になる）。役割の区別は持たない。1 つの Item は複数の Task の事実になれ、AI も緩めにいくつでも自動で紐づける（間違えたら外す・移すで直す。[ADR-0025](docs/decisions/0025-grow-plans-and-propose-tasks.md)） |
+| Task | 自分がやること。Source の言葉ではなく自分にとっての意味（title: 何をするか、brief: 今の状況と次の一手）で持つ。やると決まったものだけを Task にする（確信が高く自動で作った・提案を受け入れた・手で足した・定期の Task から作った・切り出した） |
 | Task Activity | Task に起きた出来事（項目が変わった・AI が作業をやめた・書き込めなかった など）。Task が起きた順に足すだけで持つ。Source Item の Activity（Source の出来事）とは別 |
-| triage | Source Item の仕分け状態（pending: 未判定 / linked: Task に紐づけ済み / ignored: 対象外） |
+| 振り分け | 届いた Source Item 1 件を、どの Task の事実にし、何を生むかを決める処理（未振り分け / 振り分けた / 対象外 / ユーザー待ち）。既存の Task の計画に足す方に倒し、迷ったら提案にする（[ADR-0025](docs/decisions/0025-grow-plans-and-propose-tasks.md)） |
 | Label / Priority | Label は AI や規則で Task に付く分類。Priority は「いつまでに手を付けるとよいか」（今すぐ・今日中・3 日以内・10 日以内・30 日以内・それより先でよい）。期日から手間を引いて規則で決め、決まらなければ Decisions が判定する |
 | Sync | ポーリングで Source の状態変化を取得し、Task に反映する処理 |
 | Agent Thread | Task ごとの AI Agent との会話履歴 |
@@ -34,7 +34,7 @@
 | 未分類 | どの Epic にも入っていない Task |
 | 更新マーク | ユーザーが最後に Task を見たあとに、ユーザー以外が起こした Task Activity がある Task に付く目印。Source 側の変化ではなく、Task の出来事から導く。まだ一度も見ていない Task は「新着」で見せる |
 | Decisions provider | 確率付きの判定 API（OpenAI Decisions / Azure OpenAI Decisions / Microsoft-Decision / Jev / Gemini Decisions） |
-| 要確認 | 判定の確率が閾値の中間、または refusal だった Task の置き場 |
+| 提案 | AI が「この事実から、こういう Task をやるとよい／この Task の計画に足すとよい」と差し出すもの（Task ではない）。判定の確率が中間のときにでき、ユーザーが受け入れる・見送る。確信が上がれば自動で受け入れる |
 | SnapshotDiffer | 全件取得の結果を前回の fingerprint と比べて SourceChange に変換する共通処理 |
 | Watcher | 見張りの共通部分。WatchProvider（見張る対象の一覧）と Condition（困った状態か）から Condition Item を作る（[ADR-0008](docs/decisions/0008-watchers.md)） |
 | Condition Item | 条件が成り立っている間は open、解消したら resolved になる Source Item。source 名は `<source>:watch` |

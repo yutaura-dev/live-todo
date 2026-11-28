@@ -168,7 +168,7 @@ export function request(item: ActionItem, actor: Actor, running: "終わって�
   ensure(item.status === "まだ", "まだのときだけ");
   ensure(item.definition.how.type === "claude", "Claude Code が果たす Action Item だけ");
   ensure(running === "終わっていない作業はない", "この Action Item の作業が終わっているときだけ（待ち行列も含む）");
-  ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ちの Task では頼まない）");
+  ensure(task === "開いている", "Task がやること のときだけ（完了待ちの Task では頼まない）");
   return item.progress.type === "claude" ? { ...item, progress: { ...item.progress, agentRunId: "ar1" } } : item;
 }
 
@@ -184,7 +184,7 @@ export function autoStart(item: ActionItem, actor: Actor, turn: Turn, policy: "�
   ensure(item.definition.how.type === "claude" && item.definition.how.trigger === "auto", "自動でやる Action Item だけ");
   ensure(item.progress.type === "claude" && item.progress.agentRunId === null, "一度も頼んでいないときだけ");
   ensure(policy === "範囲に入る", "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）");
-  ensure(task === "やること", "Task がやること のときだけ（要確認・完了待ちでは、自動で頼まない）");
+  ensure(task === "やること", "Task がやること のときだけ（完了待ちでは、自動で頼まない）");
   return { ...item, progress: { ...item.progress, agentRunId: "ar1" } };
 }
 
@@ -357,8 +357,8 @@ export const scenarios = {
   ],
   "完了待ちの Task では、Claude Code に頼まない": [
     { do: initial, by: "AI", input: "自動でやる" },
-    { do: autoStart, by: "アプリ", input: "完了待ち", denied: "Task がやること のときだけ（要確認・完了待ちでは、自動で頼まない）" },
-    { do: request, by: "ユーザー", input: "完了待ち", denied: "Task が要確認か todo のときだけ（完了待ちの Task では頼まない）" },
+    { do: autoStart, by: "アプリ", input: "完了待ち", denied: "Task がやること のときだけ（完了待ちでは、自動で頼まない）" },
+    { do: request, by: "ユーザー", input: "完了待ち", denied: "Task がやること のときだけ（完了待ちの Task では頼まない）" },
   ],
   "番が来る前に Claude Code に頼める。やり遂げても、番が来るまでは果たさない": [
     { do: initial, by: "AI", input: "頼めばやる" },
