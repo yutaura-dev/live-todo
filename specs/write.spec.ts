@@ -4,7 +4,7 @@ import type { Subject } from "./condition.value.ts";
 /**
  * Write（外への書き込み 1 回。PR を merge する・修正を push する・メールをアーカイブする・Slack の To-do を済ませる など）。
  * 承認がなければ書き込まない（charter）。承認のしかたは、何から頼まれたかで決まる。
- * - Action Item から頼まれた: ユーザーが中身を確かめて承認する
+ * - Action Item から頼まれた: ユーザーが中身を確かめて承認する。自動でやってよい範囲（Autonomy Policy）に入る書き込みは、ユーザーが範囲を決めたことを承認とみなし、アプリが確かめずに書き込む（ADR-0023）
  * - 完了したときにすることから頼まれた: ユーザーが完了待ちのチェックリストを確かめて、完了のボタン（書き込めなかったものは、もう一度頼むボタン）を押したことが承認になる
  * ルールでの書き込み（ルールを決めたことを承認とみなす）は、Rule を捉え直すときに決め直す。
  * 何を書き込めるか・どう書き込むかは、Source ごとの provider（Adapter）が決めて実装する。
@@ -89,6 +89,8 @@ type Request =
       sameAsDefinition: boolean;
       /** その Action Item に、終わっていない書き込みがもうあるか */
       openWrite: boolean;
+      /** 自動でやってよい範囲（Autonomy Policy）に入るか（入るなら、アプリが確かめずに書き込める） */
+      withinPolicy: boolean;
     }
   | {
       way: "完了したときにすること";
@@ -116,7 +118,10 @@ export const actors: Record<string, Actor> = {
  * Action Item から頼むもの（merge のボタンなど）は、ユーザーが頼み、中身を見せて確認中になる。完了したときにすることから頼むものは、ユーザーが完了待ちのチェックリストを確かめて完了のボタンを押したことが承認なので、すぐ書き込む。
  */
 export function initial(actor: Actor, request: Request, ready: Ready): Write {
-  ensure(request.way === "Action Item" ? actor.kind === "user" : actor.kind === "app", "Action Item からはユーザー、完了したときにすることからはアプリだけ");
+  ensure(
+    request.way === "Action Item" ? actor.kind === "user" || (actor.kind === "app" && request.withinPolicy) : actor.kind === "app",
+    "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ",
+  );
   ensure(ready === "書き込める", "書き込める状態のときだけ");
   if (request.way === "Action Item") {
     ensure(request.item === "番が来ていて、まだ", "Action Item に番が来ていて、まだ済んでいないときだけ");
@@ -127,7 +132,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
     ensure(!request.openWrite, "その完了したときにすることに、終わっていない書き込みがないときだけ");
     ensure(request.version !== "変わった", "版を持つ操作なら、見せたときの版が今も同じときだけ");
   }
-  const byEffect = request.way === "完了したときにすること";
+  const byEffect = request.way === "完了したときにすること" || actor.kind === "app";
   return {
     stage: byEffect ? "書き込み中" : "確認中",
     approval: byEffect ? { at: "2026-11-28T00:00:00Z" } : null,
@@ -210,12 +215,13 @@ export function settle(write: Write, actor: Actor, result: "書けていた" | "
     : { ...write, stage: "失敗", failure: { kind: "書けていなかった", message: "" }, finishedAt: "2026-11-28T00:05:00Z" };
 }
 
-const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false };
+const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false, withinPolicy: false };
 const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true, openWrite: false, version: "版を持たない" };
 
 export const inputs = {
   initial: {
     "Action Item から": [FROM_ITEM, "書き込める"],
+    自動でやってよい範囲: [{ ...FROM_ITEM, withinPolicy: true }, "書き込める"],
     書き込めない: [FROM_ITEM, "書き込めない"],
     番待ち: [{ ...FROM_ITEM, item: "番待ち" }, "書き込める"],
     済んだ: [{ ...FROM_ITEM, item: "済んでいる" }, "書き込める"],
@@ -255,6 +261,10 @@ export const links = [
 ];
 
 export const scenarios = {
+  "自動でやってよい範囲の書き込みは、アプリが確かめずに書き込む（draft の PR を作る など）": [
+    { do: initial, by: "アプリ", input: "自動でやってよい範囲", expect: { stage: "書き込み中", requestedBy: { type: "actionItem" } } },
+    { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
+  ],
   "完了のボタンを押したら、完了したときにすることを確かめずに書き込む": [
     { do: initial, by: "アプリ", input: "完了したときにすること", expect: { stage: "書き込み中", requestedBy: { type: "completionEffect" } } },
   ],
@@ -311,8 +321,8 @@ export const scenarios = {
     { do: approve, by: "ユーザー", input: "見せたとおり", denied: "確認中のときだけ" },
     { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
   ],
-  "Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー、完了したときにすることからはアプリだけ" }],
-  "完了したときにすることからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "完了したときにすること", denied: "Action Item からはユーザー、完了したときにすることからはアプリだけ" }],
+  "Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ" }],
+  "完了したときにすることからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "完了したときにすること", denied: "Action Item からはユーザー（自動でやってよい範囲ならアプリも）、完了したときにすることからはアプリだけ" }],
   "書き込みは決まった人と段階でだけ進む": [
     { do: initial, by: "ユーザー", input: "Action Item から" },
     { do: succeed, by: "書き込み先", denied: "書き込み中のときだけ" },

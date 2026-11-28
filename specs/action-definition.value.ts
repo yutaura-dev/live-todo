@@ -88,7 +88,7 @@ export type Arrangement = (typeof Arrangement)[keyof typeof Arrangement];
 export const Trigger = {
   /** ボタンを押すとやる */
   on_request: "on_request",
-  /** 番が来たら一度だけ自動でやる。ボタンで頼むこともできる */
+  /** 番が来たら一度だけ自動でやる。ボタンで頼むこともできる。自動で始めるのは、その作業が自動でやってよい範囲（Autonomy Policy）に入るときだけで、入らなければボタンで頼むまで待つ */
   auto: "auto",
 } as const;
 export type Trigger = (typeof Trigger)[keyof typeof Trigger];
