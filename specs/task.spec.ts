@@ -201,10 +201,11 @@ export function finishCompletion(task: Task, actor: Actor, effects: "すべて�
   return { ...task, status: "closed", closure: { outcome: "done", reason } };
 }
 
-/** やらないことにする */
-export function dismiss(task: Task, actor: Actor, reason: DismissReason): Task {
+/** やらないことにする（完了待ちからもできる。まだ頼んでいない・書き込めなかった完了したときにすることは取りやめる） */
+export function dismiss(task: Task, actor: Actor, reason: DismissReason, inFlight: "頼んだものはない" | "頼んだものがある"): Task {
   ensure(reason === "自分で片付けた" ? actor.kind === "user" : reason === "絞り込みの外になった" ? actor.kind === "sync" : actor.kind === "agent", "自分で片付けるのはユーザー、絞り込みの外は同期、もう要らないと判定するのは AI だけ");
-  ensure(isOpen(task), "要確認か todo のときだけ");
+  ensure(isOpen(task) || task.status === "完了待ち", "要確認・todo・完了待ちのときだけ");
+  ensure(inFlight === "頼んだものはない", "書き込みを頼んで結果を待っている完了したときにすることがないときだけ（宙に浮かないように）");
   ensure(task.work === "なし", "AI が作業中でないときだけ");
   return { ...task, status: "closed", closure: { outcome: "dismissed", reason } };
 }
@@ -344,7 +345,12 @@ export const inputs = {
   finishCompletion: { 済んだ: ["すべて済んだ", "完了条件を満たした"], 自分で完了にして済んだ: ["すべて済んだ", "自分で完了にした"], まだ: ["まだ・書き込めなかったものがある", "完了条件を満たした"] },
   reopen: { 頼んだものはない: ["頼んだものはない"], 頼んだものがある: ["頼んだものがある"] },
   confirmCompletion: { 見せたとおり: ["見せたとおり"], 変わった: ["変わった"] },
-  dismiss: { 自分で: ["自分で片付けた"], 絞り込みの外: ["絞り込みの外になった"], もう要らない: ["もう要らなくなった"] },
+  dismiss: {
+    自分で: ["自分で片付けた", "頼んだものはない"],
+    絞り込みの外: ["絞り込みの外になった", "頼んだものはない"],
+    もう要らない: ["もう要らなくなった", "頼んだものはない"],
+    頼んだものがある: ["自分で片付けた", "頼んだものがある"],
+  },
 };
 
 export const invariants = {
@@ -370,6 +376,12 @@ export const scenarios = {
     { do: finishCompletion, by: "アプリ", input: "まだ", denied: "完了したときにすることが、すべて書き込めた・外されたときだけ" },
     { do: finishCompletion, by: "アプリ", input: "済んだ", expect: { status: "closed", closure: { outcome: "done", reason: "完了条件を満たした" } } },
     { do: confirmCompletion, by: "ユーザー", input: "見せたとおり", denied: "完了待ちのときだけ" },
+  ],
+  "完了待ちから、やらないことにする": [
+    { do: triage, by: "ユーザー", input: "todo" },
+    { do: complete, by: "ユーザー", input: "自分で完了にした・完了したときにすることがある" },
+    { do: dismiss, by: "ユーザー", input: "頼んだものがある", denied: "書き込みを頼んで結果を待っている完了したときにすることがないときだけ（宙に浮かないように）" },
+    { do: dismiss, by: "ユーザー", input: "自分で", expect: { status: "closed", closure: { outcome: "dismissed" } } },
   ],
   "完了待ちから、やり直す": [
     { do: triage, by: "ユーザー", input: "todo" },
@@ -453,7 +465,7 @@ export const scenarios = {
   "操作はそれぞれ決まった人だけが起こし、仕分け中は仕分けしかできない": [
     { do: move, by: "ユーザー", input: "todoへ", denied: "要確認か todo のときだけ" },
     { do: complete, by: "ユーザー", input: "自分で", denied: "要確認か todo のときだけ" },
-    { do: dismiss, by: "ユーザー", input: "自分で", denied: "要確認か todo のときだけ" },
+    { do: dismiss, by: "ユーザー", input: "自分で", denied: "要確認・todo・完了待ちのときだけ" },
     { do: reopen, by: "ユーザー", input: "頼んだものはない", denied: "終わった・完了待ちのときだけ" },
     { do: startWork, by: "ユーザー", denied: "要確認か todo のときだけ" },
     { do: finishWork, by: "AI", denied: "AI が作業中のときだけ" },

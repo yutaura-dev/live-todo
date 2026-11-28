@@ -5,7 +5,8 @@ import type { Subject } from "./condition.value.ts";
  * Write（外への書き込み 1 回。PR を merge する・修正を push する・メールをアーカイブする・Slack の To-do を済ませる など）。
  * 承認がなければ書き込まない（charter）。承認のしかたは、何から頼まれたかで決まる。
  * - Action Item から頼まれた: ユーザーが中身を確かめて承認する
- * - ルールから頼まれた: ユーザーがルールを決めた（組み込みのルールなら、有効にした）ことを、そのルールの範囲の書き込みの承認とみなす。組み込みのルールは、初めは止めてある
+ * - 完了したときにすることから頼まれた: ユーザーが完了待ちのチェックリストを確かめて、完了のボタン（書き込めなかったものは、もう一度頼むボタン）を押したことが承認になる
+ * ルールでの書き込み（ルールを決めたことを承認とみなす）は、Rule を捉え直すときに決め直す。
  * 何を書き込めるか・どう書き込むかは、Source ごとの provider（Adapter）が決めて実装する。
  * 書き込んだ結果、外の世界が変わると、その変化は同期で Source Item に戻ってくる。同じ事実を持つ Task は、それぞれ事実の変化として受け取る。
  */
@@ -43,8 +44,6 @@ export type RequestedBy =
       taskId: string;
       actionItemId: string;
     }
-  /** ルール（ユーザーが作ったルールか、ユーザーが有効にした組み込みのルール）。ルールを決めたことが承認になる */
-  | { type: "rule"; ruleId: string }
   /** 完了したときにすること。ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したことが承認になる */
   | {
       type: "completionEffect";
@@ -80,7 +79,7 @@ export type Stage = (typeof Stage)[keyof typeof Stage];
 /** 書き込める状態か（provider が決める。merge なら CI がすべて通っていて conflict がない など） */
 type Ready = "書き込める" | "書き込めない";
 
-/** 頼むときに確かめること。Action Item・ルール・Task の状態は、それぞれの集約が持つ */
+/** 頼むときに確かめること。Action Item・Task の状態は、それぞれの集約が持つ */
 type Request =
   | {
       way: "Action Item";
@@ -92,25 +91,18 @@ type Request =
       openWrite: boolean;
     }
   | {
-      way: "ルール";
-      /** ルールが有効か（組み込みのルールは、ユーザーが有効にしたときだけ） */
-      rule: "有効" | "止めてある";
-      /** ルールの範囲の操作か（ラベル・既読・アーカイブ など） */
-      inScope: boolean;
-      /** 同じものに、同じルールでもう書き込んだか */
-      alreadyWritten: boolean;
-    }
-  | {
       way: "完了したときにすること";
       /** 完了待ちで、ユーザーが完了のボタン（書き込めなかったものは、もう一度頼むボタン）を押したか */
       confirmed: boolean;
       /** その完了したときにすることに、終わっていない書き込みがもうあるか */
       openWrite: boolean;
+      /** 版を持つ操作（merge など）なら、見せたときの版が今も同じか */
+      version: "版を持たない" | "見せた版のまま" | "変わった";
     };
 
 type Actor = { kind: "user" } | { kind: "app" } | { kind: "sync" } | { kind: "target" };
 
-/** アプリ: ルールを当てる・起動したときに確かめるなど、アプリが自分で起こす処理。同期: Source から外の状態を取り込む処理 */
+/** アプリ: 完了したときにすることを頼む・起動したときに確かめるなど、アプリが自分で起こす処理。同期: Source から外の状態を取り込む処理 */
 export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
   アプリ: { kind: "app" },
@@ -121,10 +113,10 @@ export const actors: Record<string, Actor> = {
 /**
  * 書き込みを頼む
  *
- * Action Item から頼むもの（merge のボタンなど）は、ユーザーが頼み、中身を見せて確認中になる。ルールから頼むものは、ルールに当てはまったことが承認なので、すぐ書き込む。完了したときにすることから頼むものは、ユーザーが足した・☑ を付けたことが承認なので、すぐ書き込む。
+ * Action Item から頼むもの（merge のボタンなど）は、ユーザーが頼み、中身を見せて確認中になる。完了したときにすることから頼むものは、ユーザーが完了待ちのチェックリストを確かめて完了のボタンを押したことが承認なので、すぐ書き込む。
  */
 export function initial(actor: Actor, request: Request, ready: Ready): Write {
-  ensure(request.way === "Action Item" ? actor.kind === "user" : actor.kind === "app", "Action Item からはユーザー、ルール・完了したときにすることからはアプリだけ");
+  ensure(request.way === "Action Item" ? actor.kind === "user" : actor.kind === "app", "Action Item からはユーザー、完了したときにすることからはアプリだけ");
   ensure(ready === "書き込める", "書き込める状態のときだけ");
   if (request.way === "Action Item") {
     ensure(request.item === "番が来ていて、まだ", "Action Item に番が来ていて、まだ済んでいないときだけ");
@@ -133,15 +125,12 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
   } else if (request.way === "完了したときにすること") {
     ensure(request.confirmed, "ユーザーが完了待ちのチェックリストを確かめて、完了のボタンを押したときだけ");
     ensure(!request.openWrite, "その完了したときにすることに、終わっていない書き込みがないときだけ");
-  } else {
-    ensure(request.rule === "有効", "有効なルールだけ（組み込みのルールは、ユーザーが有効にしたものだけ）");
-    ensure(request.inScope, "ルールの範囲の操作だけ");
-    ensure(!request.alreadyWritten, "同じものに同じルールで書き込むのは一度だけ");
+    ensure(request.version !== "変わった", "版を持つ操作なら、見せたときの版が今も同じときだけ");
   }
-  const byRule = request.way !== "Action Item";
+  const byEffect = request.way === "完了したときにすること";
   return {
-    stage: byRule ? "書き込み中" : "確認中",
-    approval: byRule ? { at: "2026-11-28T00:00:00Z" } : null,
+    stage: byEffect ? "書き込み中" : "確認中",
+    approval: byEffect ? { at: "2026-11-28T00:00:00Z" } : null,
     id: "w1",
     subject: { accountId: "github-work", uri: "github:acme/app/pull/42" },
     operation: "github.merge",
@@ -149,11 +138,7 @@ export function initial(actor: Actor, request: Request, ready: Ready): Write {
     version: "abc1234",
     summary: "squash で merge する",
     requestedBy:
-      request.way === "ルール"
-        ? { type: "rule", ruleId: "r1" }
-        : request.way === "完了したときにすること"
-          ? { type: "completionEffect", taskId: "t1", effectId: "ce1" }
-          : { type: "actionItem", taskId: "t1", actionItemId: "a3" },
+      request.way === "完了したときにすること" ? { type: "completionEffect", taskId: "t1", effectId: "ce1" } : { type: "actionItem", taskId: "t1", actionItemId: "a3" },
     failure: null,
     finishedAt: null,
   };
@@ -226,24 +211,21 @@ export function settle(write: Write, actor: Actor, result: "書けていた" | "
 }
 
 const FROM_ITEM: Request = { way: "Action Item", item: "番が来ていて、まだ", sameAsDefinition: true, openWrite: false };
-const FROM_RULE: Request = { way: "ルール", rule: "有効", inScope: true, alreadyWritten: false };
-const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true, openWrite: false };
+const FROM_EFFECT: Request = { way: "完了したときにすること", confirmed: true, openWrite: false, version: "版を持たない" };
 
 export const inputs = {
   initial: {
     "Action Item から": [FROM_ITEM, "書き込める"],
-    ルールから: [FROM_RULE, "書き込める"],
     書き込めない: [FROM_ITEM, "書き込めない"],
     番待ち: [{ ...FROM_ITEM, item: "番待ち" }, "書き込める"],
     済んだ: [{ ...FROM_ITEM, item: "済んでいる" }, "書き込める"],
     定義と違う: [{ ...FROM_ITEM, sameAsDefinition: false }, "書き込める"],
     書き込みがもうある: [{ ...FROM_ITEM, openWrite: true }, "書き込める"],
-    止めたルール: [{ ...FROM_RULE, rule: "止めてある" }, "書き込める"],
-    範囲の外: [{ ...FROM_RULE, inScope: false }, "書き込める"],
-    書き込み済み: [{ ...FROM_RULE, alreadyWritten: true }, "書き込める"],
     完了したときにすること: [FROM_EFFECT, "書き込める"],
     ボタンを押していない: [{ ...FROM_EFFECT, confirmed: false }, "書き込める"],
     完了したときにすることに書き込みがもうある: [{ ...FROM_EFFECT, openWrite: true }, "書き込める"],
+    "後片付けの merge": [{ ...FROM_EFFECT, version: "見せた版のまま" }, "書き込める"],
+    "後片付けの merge の版が変わった": [{ ...FROM_EFFECT, version: "変わった" }, "書き込める"],
   },
   approve: { 見せたとおり: ["見せた版のまま", "書き込める"], 版が変わった: ["変わった", "書き込める"], "CI が落ちた": ["見せた版のまま", "書き込めない"] },
   fail: { 権限: ["権限が足りない"], 書き込み先: ["書き込み先のエラー"] },
@@ -270,7 +252,7 @@ export const links = [
   { from: settle, to: "task", label: "完了したときにすることから頼まれたなら、書けていたら書き込んだ、書けていなかったら書き込めなかったにする" },
   { from: succeed, to: "task", label: "Action Item から頼まれたなら、その Action Item を果たす（書き込みで果たされる）" },
   { from: settle, to: "task", label: "書けていたなら、Action Item から頼まれたものは、その Action Item を果たす" },
-  { from: fail, to: "task", label: "Action Item から頼まれたなら、その Task に、書き込めなかったことと理由を知らせる（ルールからなら、アプリが通知する）" },
+  { from: fail, to: "task", label: "Action Item から頼まれたなら、その Task に、書き込めなかったことと理由を知らせる" },
 ];
 
 export const scenarios = {
@@ -318,20 +300,20 @@ export const scenarios = {
     { do: settle, by: "同期", input: "書けていた", expect: { stage: "書き込んだ" } },
   ],
   "確かめて書けていなかったら、失敗にする": [
-    { do: initial, by: "アプリ", input: "ルールから" },
+    { do: initial, by: "アプリ", input: "完了したときにすること" },
     { do: interrupt, by: "アプリ" },
     { do: settle, by: "同期", input: "書けていなかった", expect: { stage: "失敗", failure: { kind: "書けていなかった" } } },
   ],
-  "Task を完了にしたら、有効にした組み込みのルールでメールをアーカイブする": [
-    { do: initial, by: "アプリ", input: "ルールから", expect: { stage: "書き込み中", requestedBy: { type: "rule" } } },
+  "後片付けの merge は、見せたときの版が変わっていたら書き込まない": [
+    { do: initial, by: "アプリ", input: "後片付けの merge の版が変わった", denied: "版を持つ操作なら、見せたときの版が今も同じときだけ" },
+  ],
+  "後片付けの merge は、見せた版のままなら書き込む": [
+    { do: initial, by: "アプリ", input: "後片付けの merge", expect: { stage: "書き込み中" } },
     { do: approve, by: "ユーザー", input: "見せたとおり", denied: "確認中のときだけ" },
     { do: succeed, by: "書き込み先", expect: { stage: "書き込んだ" } },
   ],
-  "止めたルール（初めの組み込みのルール）では書き込まない": [{ do: initial, by: "アプリ", input: "止めたルール", denied: "有効なルールだけ（組み込みのルールは、ユーザーが有効にしたものだけ）" }],
-  "ルールの範囲の外の操作は、ルールでは書き込まない": [{ do: initial, by: "アプリ", input: "範囲の外", denied: "ルールの範囲の操作だけ" }],
-  "同じものに同じルールで二度は書き込まない": [{ do: initial, by: "アプリ", input: "書き込み済み", denied: "同じものに同じルールで書き込むのは一度だけ" }],
-  "Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー、ルール・完了したときにすることからはアプリだけ" }],
-  "ルールからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "ルールから", denied: "Action Item からはユーザー、ルール・完了したときにすることからはアプリだけ" }],
+  "Action Item からの書き込みは、アプリが頼めない": [{ do: initial, by: "アプリ", input: "Action Item から", denied: "Action Item からはユーザー、完了したときにすることからはアプリだけ" }],
+  "完了したときにすることからの書き込みは、ユーザーが頼めない": [{ do: initial, by: "ユーザー", input: "完了したときにすること", denied: "Action Item からはユーザー、完了したときにすることからはアプリだけ" }],
   "書き込みは決まった人と段階でだけ進む": [
     { do: initial, by: "ユーザー", input: "Action Item から" },
     { do: succeed, by: "書き込み先", denied: "書き込み中のときだけ" },
