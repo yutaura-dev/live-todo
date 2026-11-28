@@ -1,5 +1,4 @@
 import type { ActionItem } from "./action-item.spec.ts";
-import type { CompletionEffect } from "./completion-effect.spec.ts";
 import type { Task } from "./task.spec.ts";
 
 /**
@@ -13,8 +12,6 @@ export const entities = ["action-item", "completion-effect"];
 const isRunning = (item: ActionItem) => item.progress.type === "claude" && item.progress.run === "やっている";
 
 export const invariants = {
-  "完了したときにすることを書き込むのは、Task が完了した（done）ときだけ": (task: Task, _items: ReadonlyArray<ActionItem>, effects: ReadonlyArray<CompletionEffect> = []) =>
-    task.closure?.outcome === "done" || effects.every((effect) => effect.status !== "書き込んだ" && effect.status !== "書き込めなかった"),
   "Claude Code がやっている Action Item があれば、Task は AI が作業中": (task: Task, items: ReadonlyArray<ActionItem>) => !items.some(isRunning) || task.work === "作業中",
   "完了条件を満たした Task では、完了条件の Action Item がすべて果たされている（まだ選んでいない分かれ道は、すべての枝で）": (task: Task, items: ReadonlyArray<ActionItem>) =>
     task.completion !== "満たした" || items.filter((item) => item.definition.completes).every((item) => item.status === "done"),

@@ -131,6 +131,11 @@ export const initial: Task = {
   updatedAt: "2026-11-28T00:00:00Z",
 };
 
+export const links = [
+  { from: complete, to: "completion-effect", action: "fire", label: "完了したら、☑ が付いている完了したときにすることの書き込みを頼む" },
+  { from: receiveFact, to: "completion-effect", label: "完了したときにすることの書き込みの結果（書き込めた・書き込めなかった）を受け取る" },
+];
+
 export const actors: Record<string, Actor> = {
   ユーザー: { kind: "user" },
   同期: { kind: "sync" },
