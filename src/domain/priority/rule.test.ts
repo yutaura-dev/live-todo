@@ -3,17 +3,9 @@ import { decisions } from "../../../specs/priority.value.ts";
 import { daysUntil, effortDays, ruleLevel, tightestDeadline } from "./rule.js";
 
 // spec の判断表の cases を、実装の関数にそのまま当てる（spec を変えたら、ここが落ちて気づける）
-// spec の判断表のこの例は、同じ spec の関数（余裕 1 日 → 3 日以内）と食い違っている。どちらに直すかを決めるまで保留にする
-const DISPUTED = JSON.stringify({ 期日まで: 5, 手間: 1, 待ち: 3, 他の人を止めている: false });
-
 describe("規則で決まる優先度（spec の判断表）", () => {
   for (const { input, expect } of decisions["規則で決まる優先度"].cases) {
-    const name = `${JSON.stringify(input)} → ${expect}`;
-    if (JSON.stringify(input) === DISPUTED) {
-      it.skip(name, () => {});
-      continue;
-    }
-    it(name, () => {
+    it(`${JSON.stringify(input)} → ${expect}`, () => {
       assert.strictEqual(ruleLevel(input as Parameters<typeof ruleLevel>[0]), expect);
     });
   }
