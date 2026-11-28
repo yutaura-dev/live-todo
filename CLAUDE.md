@@ -58,6 +58,7 @@
 
 - `.env.local` — API キー・トークンの置き場所。読まない、出力しない
 - `drizzle/` — drizzle-kit が生成するマイグレーション。手で編集せず、`src/core/db/schema.ts` を直して `pnpm db:generate` で作り直す
+- `drizzle-store/` — 作り直しのアプリ（`src/store/`）のマイグレーション。手で編集せず、`src/store/schema.ts` を直して `pnpm db:generate:store` で作り直す
 - ローカル DB ファイル（場所は実装時に追記）— 実データが入っているため直接編集しない
 
 ## 仕様（live-spec）

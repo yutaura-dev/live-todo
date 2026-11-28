@@ -12,16 +12,7 @@ export type Effort = typeof Effort.Type;
 export const Aspect = Schema.Literals(["期日", "手間", "あとの負担", "お金", "確実さ", "取り返し", "セキュリティ", "ほかの人", "機会", "決まり", "出来"]);
 export type Aspect = typeof Aspect.Type;
 
-export const DueDate = Schema.Struct({
-  /** 元の書き方（「12 月中旬」「金曜までに」） */
-  text: Schema.String,
-  /** いちばん早い日時（ISO 8601） */
-  earliest: Schema.String,
-  /** いちばん遅い日時（ISO 8601） */
-  latest: Schema.String,
-  precision: Schema.Literals(["時刻", "日", "週", "旬", "月"]),
-});
-export type DueDate = typeof DueDate.Type;
+export { DueDate } from "../../domain/values.js";
 
 export const WaitEstimate = Schema.Struct({
   /** 元の書き方（「2〜3 営業日」） */

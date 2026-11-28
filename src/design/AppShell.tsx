@@ -75,7 +75,7 @@ export function AppShell(props: {
               取り込めていません
             </p>
           ) : (
-            <p className="ui-rail-status ui-num">9:02 に取り込みました</p>
+            <p className="ui-rail-status ui-num">{props.sync?.text ?? "9:02 に取り込みました"}</p>
           )}
         </div>
       </nav>

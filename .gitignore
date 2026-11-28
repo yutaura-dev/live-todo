@@ -25,6 +25,7 @@ node_modules/
 .env
 .env*.local
 /release/
+/out-desktop/
 
 # Storybook のビルド出力
 /storybook-static/
