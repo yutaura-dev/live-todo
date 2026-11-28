@@ -34,6 +34,11 @@ export type Task = {
   blocksOthers: boolean;
   /** この Task についての事実（Source Item）。事実とのつながりの持ち主は Task（振り分けが決めて、Task に持たせる）。1 つの事実を、いくつの Task が持ってもよい。事実が変わっても Task は直接は動かず、変化を受け取って Task の言葉に置き換える */
   sourceItemIds: string[];
+  /** 定期の Task から作ったなら、どの決まりの何回目の分か（作っていなければ null）。同じ決まりの同じ回の分は、Task が 1 つまで */
+  /** @ref recurring-task */
+  recurrence: { recurringTaskId: string; period: string } | null;
+  /** AI が「定期の Task にしませんか」と置いた下書き（なければ null）。決まりを作るのは、ユーザーが承認してから */
+  recurringDraft: { title: string; schedule: string } | null;
   /** Task に起きた出来事（起きた順、足すだけ）。Task の項目を変える操作のたびに、出来事を 1 つ足す。ユーザーに見せる記録で、ほかの集約はこれを読んで反応しない（反応は links で書く） */
   history: TaskActivity[];
   /** ユーザーが最後に Task を見た時刻（まだ一度も見ていなければ null で、新着の印を出す）。更新マーク・新着・最近片付いたものは、保存せず、履歴とこの時刻から導いて見せる（判断表「更新マークと新着」）。見ても、最後に変えた日時は変えない */
@@ -149,6 +154,8 @@ export const initial: Task = {
   due: null,
   blocksOthers: false,
   sourceItemIds: [],
+  recurrence: null,
+  recurringDraft: null,
   history: [{ kind: "できた", by: "同期", occurredAt: "2026-11-28T00:00:00Z", changes: [], cause: null }],
   lastSeenAt: null,
   createdAt: "2026-11-28T00:00:00Z",
@@ -156,6 +163,7 @@ export const initial: Task = {
 };
 
 export const links = [
+  { from: proposeRecurring, to: "recurring-task", label: "ユーザーが下書きを承認したら、定期の Task の決まりを作る（承認しなければ作らない）" },
   { from: triage, to: "prioritization", label: "要確認か todo に仕分けたら、優先度を決め始める（仕分け中の Task は判定しない）" },
   { from: complete, to: "prioritization", action: "stop", label: "終わった・完了待ちの Task は、優先度を判定しない" },
   { from: dismiss, to: "prioritization", action: "stop", label: "やらないことにした Task は、優先度を判定しない" },
@@ -218,6 +226,13 @@ export function complete(task: Task, actor: Actor, reason: CompleteReason, effec
     { field: "列", before: task.status, after: "closed", target: null },
     { field: "どう終わったか", before: null, after: reason, target: null },
   ]);
+}
+
+/** AI が「定期の Task にしませんか」と下書きを置く（Generation が書き、決まった形で返らなければ置かない。決まりを作るのは、ユーザーが承認してから） */
+export function proposeRecurring(task: Task, actor: Actor): Task {
+  ensure(actor.kind === "agent", "AI だけ");
+  ensure(isOpen(task) || task.status === "closed", "仕分けたあとの Task だけ");
+  return { ...task, recurringDraft: { title: "請求書を送る", schedule: "毎月 1 日" } };
 }
 
 /** 期日を直す（ユーザーが。事実から読み取った期日が違っていたとき） */
@@ -498,6 +513,12 @@ export const decisions = {
 };
 
 export const scenarios = {
+  "定期の Task にする下書きを置くのは AI だけ": [
+    { do: proposeRecurring, by: "AI", denied: "仕分けたあとの Task だけ" },
+    { do: triage, by: "同期", input: "todo" },
+    { do: proposeRecurring, by: "ユーザー", denied: "AI だけ" },
+    { do: proposeRecurring, by: "AI" },
+  ],
   "期日を直せるのは、開いている Task でユーザーだけ": [
     { do: setDue, by: "ユーザー", denied: "要確認か todo のときだけ" },
     { do: triage, by: "同期", input: "要確認" },
