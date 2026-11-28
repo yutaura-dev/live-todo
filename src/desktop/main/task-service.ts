@@ -1,6 +1,7 @@
+import { withdraw as withdrawEffect } from "../../domain/completion-effect/completion-effect.js";
 import { randomUUID } from "node:crypto";
 import { Context, Effect, Layer, Option } from "effect";
-import { complete, defineCompletionByHand, dismiss, markOf, reopen, setDue, type Task, create, view } from "../../domain/task/task.js";
+import { complete, defineCompletionByHand, dismiss, markOf, reopen, setDue, type Task, create, view, noteEffects } from "../../domain/task/task.js";
 import type { Prioritization } from "../../domain/priority/prioritization.js";
 import { PrioritizationStore } from "../../store/prioritization-store.js";
 import { SourceItemStore } from "../../store/source-item-store.js";
@@ -10,7 +11,7 @@ import { factViewOf, sourceOf } from "./materials.js";
 import type { BoardCard, Command, PriorityView, Reply, TaskView } from "../shared/api.js";
 import { Prioritizer } from "./prioritizer.js";
 import { Planner } from "./plan/planner.js";
-import { type PlanGroup, turnsOf } from "../../domain/plan/plan.js";
+import { type PlanGroup, turnsOf, effectsOf, replaceEffect } from "../../domain/plan/plan.js";
 import type { PlanRow } from "../shared/api.js";
 
 export class TaskIds extends Context.Service<TaskIds, { readonly next: Effect.Effect<string> }>()("live-todo/desktop/TaskIds") {
@@ -25,6 +26,23 @@ export const sequentialIds = (prefix: string) =>
   });
 
 const user = { kind: "user" } as const;
+
+/** 完了したときにすることがまだあれば、完了にすると完了待ちになる */
+export const effectsFact = (task: Task) =>
+  task.plan !== null && effectsOf(task.plan).some((effect) => effect.delivery === "まだ") ? ("完了したときにすることがある" as const) : ("完了したときにすることがない" as const);
+/** 書き込みを頼んで結果を待っているものがあれば、やらない・やり直すはできない（宙に浮かないように） */
+export const inFlightOf = (task: Task) => (task.plan !== null && effectsOf(task.plan).some((effect) => effect.delivery === "頼んだ") ? ("頼んだものがある" as const) : ("頼んだものはない" as const));
+/** やらないことにしたら、まだ頼んでいない・書き込めなかった完了したときにすることを取りやめる */
+export const withdrawEffects = (task: Task) =>
+  Effect.gen(function* () {
+    if (task.plan === null) return task;
+    let plan = task.plan;
+    for (const effect of effectsOf(plan)) {
+      const withdrawn = yield* withdrawEffect(effect, { kind: "app" }).pipe(Effect.option);
+      if (Option.isSome(withdrawn)) plan = replaceEffect(plan, withdrawn.value);
+    }
+    return plan === task.plan ? task : yield* noteEffects(task, { kind: "app" }, plan, "取りやめた");
+  });
 const NOT_FOUND = "Task が見つかりません";
 
 const priorityOf = (p: Prioritization | undefined): PriorityView =>
@@ -42,7 +60,7 @@ export function planRowsOf(plan: PlanGroup): PlanRow[] {
       } else if (node.type === "branch") {
         rows.push({ kind: "branch", id: `branch-${node.decisionId}`, title: `「${node.option}」を選んだ${node.plan === null ? "（AI が先の計画を考えています）" : ""}`, depth, turn: null, completes: false, how: null, options: [], chosen: null, added: false });
         if (node.plan !== null && node.state === "進めている") walk(node.plan, depth + 1);
-      } else {
+      } else if (node.type === "item") {
         const { item } = node;
         const how = item.definition.how;
         rows.push({
@@ -76,6 +94,7 @@ const toView = (task: Task, p: Prioritization | undefined, facts: ReadonlyArray<
   priority: priorityOf(p),
   facts: facts.map(factViewOf),
   plan: task.plan === null ? null : planRowsOf(task.plan),
+  effects: task.plan === null ? [] : effectsOf(task.plan).map((effect) => ({ id: effect.id, title: effect.title, target: effect.subject.uri, operation: effect.operation, checked: effect.checked, delivery: effect.delivery })),
   history: task.history,
   createdAt: task.createdAt,
 });
@@ -172,7 +191,7 @@ export class TaskService extends Context.Service<
           return { ok: true, value: yield* viewOf(found.value) } as Reply<TaskView>;
         });
 
-      const nothingPending = { effects: "完了したときにすることがない", added: "足した項目はすべて済んだ" } as const;
+      const completionFacts = (task: Task) => ({ effects: effectsFact(task), added: "足した項目はすべて済んだ" }) as const;
 
       const command = (input: Command): Effect.Effect<Reply<TaskView>> =>
         Effect.gen(function* () {
@@ -185,11 +204,11 @@ export class TaskService extends Context.Service<
               );
             }
             case "CompleteTask":
-              return yield* apply(input.id, (task) => complete(task, user, "自分で完了にした", nothingPending));
+              return yield* apply(input.id, (task) => complete(task, user, "自分で完了にした", completionFacts(task)));
             case "DismissTask":
-              return yield* apply(input.id, (task) => dismiss(task, user, "自分で片付けた", "頼んだものはない"));
+              return yield* apply(input.id, (task) => Effect.flatMap(dismiss(task, user, "自分で片付けた", inFlightOf(task)), withdrawEffects));
             case "ReopenTask": {
-              const reply = yield* apply(input.id, (task) => reopen(task, user, "頼んだものはない"));
+              const reply = yield* apply(input.id, (task) => reopen(task, user, inFlightOf(task)));
               // やり直したら、計画を立て直す（前の Action Item は済んだまま残るので、そのままでは二度と自動で終わらないため。task.spec）
               if (!reply.ok) return reply;
               const reopened = yield* store.find(input.id);

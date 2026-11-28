@@ -4,7 +4,7 @@ import { DateTime, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import * as Spec from "../../../specs/task.spec.ts";
 import { fromDrafts } from "../plan/plan.js";
-import { attachFact, complete, create, noteProgress, receive, revisePlan, defineCompletionByHand, detachFact, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
+import { attachFact, complete, confirmCompletion, create, finishCompletion, noteProgress, receive, revisePlan, defineCompletionByHand, detachFact, dismiss, markOf, notePriority, reopen, setDue, type Task, view } from "./task.js";
 
 const at = (iso: string) => TestClock.setTime(DateTime.makeUnsafe(iso).epochMilliseconds);
 const user = { kind: "user" } as const;
@@ -383,5 +383,32 @@ describe(specOf(Spec.receive), () => {
     Effect.gen(function* () {
       assert.strictEqual(yield* denied(receive(yield* byHand(), app, "事実", { brief: "a" }, "c")), "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ");
       assert.strictEqual(yield* denied(receive(yield* byHand(), ai, "書き込めなかった", { brief: "a" }, "c")), "事実と AI の作業の成果は AI、書き込めなかったはアプリだけ");
+    }));
+});
+
+const waiting = Effect.gen(function* () {
+  return yield* complete(yield* byHand(), user, "自分で完了にした", { effects: "完了したときにすることがある", added: "足した項目はすべて済んだ" });
+});
+
+describe(specOf(Spec.confirmCompletion), () => {
+  it.effect(specOf(Spec.confirmCompletion, "ユーザーだけ"), () => Effect.gen(function* () { assert.strictEqual(yield* denied(confirmCompletion(yield* waiting, ai, "見せたとおり")), "ユーザーだけ"); }));
+  it.effect(specOf(Spec.confirmCompletion, "完了待ちのときだけ"), () => Effect.gen(function* () { assert.strictEqual(yield* denied(confirmCompletion(yield* byHand(), user, "見せたとおり")), "完了待ちのときだけ"); }));
+  it.effect(specOf(Spec.confirmCompletion, "見せたチェックリストが今も同じときだけ（見せたあとに足された・取りやめたものがあれば、見せ直す）"), () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* denied(confirmCompletion(yield* waiting, user, "変わった")), "見せたチェックリストが今も同じときだけ（見せたあとに足された・取りやめたものがあれば、見せ直す）");
+    }));
+});
+
+describe(specOf(Spec.finishCompletion), () => {
+  it.effect("完了待ちに入ったときの理由のまま終える", () =>
+    Effect.gen(function* () {
+      const done = yield* finishCompletion(yield* waiting, app, "すべて済んだ");
+      assert.deepStrictEqual({ status: done.status, closure: done.closure, pendingReason: done.pendingReason }, { status: "終わった", closure: { outcome: "done", reason: "自分で完了にした" }, pendingReason: null });
+    }));
+  it.effect(specOf(Spec.finishCompletion, "アプリだけ"), () => Effect.gen(function* () { assert.strictEqual(yield* denied(finishCompletion(yield* waiting, user, "すべて済んだ")), "アプリだけ"); }));
+  it.effect(specOf(Spec.finishCompletion, "完了待ちのときだけ"), () => Effect.gen(function* () { assert.strictEqual(yield* denied(finishCompletion(yield* byHand(), app, "すべて済んだ")), "完了待ちのときだけ"); }));
+  it.effect(specOf(Spec.finishCompletion, "完了したときにすることが、すべて書き込めた・外されたときだけ"), () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* denied(finishCompletion(yield* waiting, app, "まだ・書き込めなかったものがある")), "完了したときにすることが、すべて書き込めた・外されたときだけ");
     }));
 });

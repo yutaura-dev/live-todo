@@ -96,7 +96,11 @@ export const handleInbox = (raw: unknown) =>
                       ? yield* writes.approve(command.id)
                       : command._tag === "CancelWrite"
                         ? yield* writes.cancel(command.id)
-                        : { ok: true, value: yield* syncOnce };
+                        : command._tag === "ConfirmCompletion"
+                          ? yield* writes.confirmCompletion(command.taskId, command.shown).pipe(Effect.map((reply) => (reply.ok ? { ok: true as const, value: { taskId: command.taskId } } : reply)))
+                          : command._tag === "EffectAction"
+                            ? yield* writes.effectAction(command.taskId, command.effectId, command.action).pipe(Effect.map((reply) => (reply.ok ? { ok: true as const, value: { taskId: command.taskId } } : reply)))
+                            : { ok: true, value: yield* syncOnce };
       if (!result.ok) return result as Reply<InboxView>;
       const value = result.value as { taskId?: string | null } | null;
       if (value !== null && typeof value === "object" && "taskId" in value && typeof value.taskId === "string") yield* tasks.notify(value.taskId);

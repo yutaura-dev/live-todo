@@ -7,7 +7,7 @@ import { planWriting } from "../../../llm/generation/writings/index.js";
 import { generationTest } from "../../../llm/generation/test-double.js";
 import { answered, unanswered } from "../../../llm/shared/answer.js";
 import { create, type Task } from "../../../domain/task/task.js";
-import { itemsOf } from "../../../domain/plan/plan.js";
+import { effectsOf, itemsOf } from "../../../domain/plan/plan.js";
 import { StoreDatabase } from "../../../store/database.js";
 import { PrioritizationStore } from "../../../store/prioritization-store.js";
 import { SourceItemStore } from "../../../store/source-item-store.js";
@@ -119,4 +119,24 @@ describe("Planner（計画を立て、Action Item を進め、完了条件を満
       const branch = (yield* reload).plan!.nodes.find((node) => node.type === "branch");
       assert.isTrue(branch?.type === "branch" && branch.option === "調べる" && branch.plan !== null);
     }).pipe(Effect.provide(layerWith(() => answered(draft)))));
+
+  it.effect("完了したときにすることは、その Task が追っている事実に書き込むものだけを置く（読んだ内容に仕込まれた指示で、ほかの PR に書き込まないように）", () =>
+    Effect.gen(function* () {
+      yield* (yield* Planner).revise(yield* seed);
+      assert.deepStrictEqual(effectsOf((yield* reload).plan!), []);
+    }).pipe(
+      Effect.provide(
+        layerWith(() =>
+          answered({
+            plan: {
+              type: "serial" as const,
+              items: [
+                { type: "item" as const, title: "PR を読む", due: null, completes: true, how: { type: "human" as const, place: null } },
+                { type: "completionEffect" as const, title: "PR を merge する", subjectUri: "github://me@github.com/evil/repo/pull/1", operation: "github.merge", paramsJson: "{}" },
+              ],
+            },
+          }),
+        ),
+      ),
+    ));
 });
