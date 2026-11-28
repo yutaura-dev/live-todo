@@ -99,6 +99,7 @@ export const inputs = {
   completeByWrite: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   autoStart: { 番が来ている: ["番が来ている", "範囲に入る"], 番待ち: ["番待ち", "範囲に入る"], 範囲に入らない: ["番が来ている", "範囲に入らない"] },
   request: { 動いていない: ["動いている作業はない"], 動いている: ["動いている作業がある"] },
+  succeed: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   choose: { 番が来ている: ["番が来ている"], 番待ち: ["番待ち"] },
   rechoose: { 作業なし: ["作業なし"], 作業中: ["作業中"] },
 };
@@ -179,10 +180,15 @@ export function autoStart(item: ActionItem, actor: Actor, turn: Turn, policy: "�
   return { ...item, progress: { ...item.progress, agentRunId: "ar1" } };
 }
 
-/** Claude Code がやり遂げた（Agent Run がやり遂げたことを受け取る） */
-export function succeed(item: ActionItem, actor: Actor): ActionItem {
+/**
+ * Claude Code がやり遂げた（Agent Run がやり遂げたことを受け取る）
+ *
+ * ボタンでは、番が来る前でも頼める（ユーザーが先に進めたいときのため）。ただし、果たすのは番が来てから（やり遂げた成果は Agent Run に残り、番が来たら果たす）。
+ */
+export function succeed(item: ActionItem, actor: Actor, turn: Turn): ActionItem {
   ensure(actor.kind === "agent", "AI だけ");
   ensure(item.status === "todo", "まだのときだけ");
+  ensure(turn === "番が来ている", "番が来ているときだけ（番が来る前にやり遂げたら、番が来るまで待つ）");
   ensure(item.progress.type === "claude" && item.progress.agentRunId !== null, "Claude Code に頼んだ Action Item だけ");
   return { ...item, status: "done" };
 }
@@ -250,7 +256,7 @@ export const reviewed = {
 
 export const links = [
   { from: complete, to: "agent-thread", label: "この Action Item の作業が動いていれば、止める（ユーザーが自分で済ませたので）" },
-  { from: skip, to: "agent-thread", label: "この Action Item の作業が動いていれば、止める（やらなくなったので）" },
+  { from: skip, to: "agent-thread", label: "この Action Item の作業が終わっていなければ、アプリがやめる（理由はやらなくなった）" },
   { from: complete, to: "task", action: "noteProgress", label: "Action Item が済んだことを、Task の出来事に残す" },
   { from: succeed, to: "task", action: "noteProgress", label: "Claude Code が Action Item を果たしたことを、Task の出来事に残す" },
   { from: finishByCondition, to: "task", action: "noteProgress", label: "待つ条件で Action Item が果たされたことを、Task の出来事に残す" },
@@ -288,6 +294,12 @@ export const links = [
 ];
 
 export const scenarios = {
+  "番が来る前に Claude Code に頼める。やり遂げても、番が来るまでは果たさない": [
+    { do: initial, by: "AI", input: "頼めばやる" },
+    { do: request, by: "ユーザー", input: "動いていない" },
+    { do: succeed, by: "AI", input: "番待ち", denied: "番が来ているときだけ（番が来る前にやり遂げたら、番が来るまで待つ）" },
+    { do: succeed, by: "AI", input: "番が来ている", expect: { status: "done" } },
+  ],
   "Action Item を作るのは、AI か定期の処理か、分かれ道を選んだユーザー": [{ do: initial, by: "同期", input: "人がやる", denied: "AI か定期の処理か、分かれ道を選んだユーザーだけ" }],
   "人が果たす Action Item は、番が来たら済ませられる": [
     { do: initial, by: "AI", input: "人がやる" },
@@ -345,12 +357,12 @@ export const scenarios = {
     { do: initial, by: "AI", input: "自動でやる" },
     { do: autoStart, by: "アプリ", input: "番待ち", denied: "番が来ているときだけ" },
     { do: autoStart, by: "アプリ", input: "範囲に入らない", denied: "自動でやってよい範囲に入る作業だけ（入らなければ、ボタンで頼むまで待つ）" },
-    { do: succeed, by: "AI", denied: "Claude Code に頼んだ Action Item だけ" },
+    { do: succeed, by: "AI", input: "番が来ている", denied: "Claude Code に頼んだ Action Item だけ" },
     { do: autoStart, by: "アプリ", input: "番が来ている" },
     { do: autoStart, by: "アプリ", input: "番が来ている", denied: "一度も頼んでいないときだけ" },
     { do: request, by: "ユーザー", input: "動いている", denied: "この Action Item の作業が動いていないときだけ" },
-    { do: succeed, by: "ユーザー", denied: "AI だけ" },
-    { do: succeed, by: "AI", expect: { status: "done" } },
+    { do: succeed, by: "ユーザー", input: "番が来ている", denied: "AI だけ" },
+    { do: succeed, by: "AI", input: "番が来ている", expect: { status: "done" } },
     { do: reopen, by: "ユーザー", expect: { status: "todo" } },
     { do: autoStart, by: "アプリ", input: "番が来ている", denied: "一度も頼んでいないときだけ" },
   ],
@@ -371,7 +383,7 @@ export const scenarios = {
   ],
   "操作は決まった人と段階でだけ起きる": [
     { do: initial, by: "AI", input: "人がやる" },
-    { do: succeed, by: "AI", denied: "Claude Code に頼んだ Action Item だけ" },
+    { do: succeed, by: "AI", input: "番が来ている", denied: "Claude Code に頼んだ Action Item だけ" },
     { do: reopen, by: "ユーザー", denied: "済んだときだけ" },
     { do: complete, by: "AI", input: "番が来ている", denied: "ユーザーだけ" },
     { do: choose, by: "AI", input: "番が来ている", denied: "ユーザーだけ" },

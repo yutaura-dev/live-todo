@@ -47,7 +47,8 @@ export type StopReason =
   | "決まった形の答えが返らない"
   | "作業場所が消えた"
   | "ユーザーが取り消した"
-  | "追う項目が片付いたので取り消した";
+  | "追う項目が片付いたので取り消した"
+  | "やらなくなった";
 
 export const Status = {
   /** 作業の順番を待っている */
@@ -150,6 +151,17 @@ export function decide(run: AgentRun, actor: Actor, answer: "やめる" | "続�
   return { ...run, status: "止まった", stopReason: answer === "やめる" ? "追う項目が片付いたのでやめた" : "決まった形の答えが返らない" };
 }
 
+/**
+ * Action Item をやらなくなったので、作業をやめる（計画を立て直して外れた・分かれ道を選び直した・Task をやらないことにした）
+ *
+ * アプリがやめる。ユーザーが止めたのか、やらなくなって止まったのかを、理由で分ける。待ち行列なら取り消す。
+ */
+export function withdraw(run: AgentRun, actor: Actor): AgentRun {
+  ensure(actor.kind === "app", "アプリだけ");
+  ensure(run.status === "待ち行列" || run.status === "やっている" || run.status === "判断中", "終わっていないときだけ");
+  return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった", stopReason: "やらなくなった" };
+}
+
 /** 待ち行列のうちに取り消す（追う項目が片付いた・ユーザーが取り消した。判断させずに取り消す。ADR-0016） */
 export function cancel(run: AgentRun, actor: Actor, reason: "ユーザーが取り消した" | "追う項目が片付いたので取り消した"): AgentRun {
   ensure(actor.kind === "app" || actor.kind === "user", "アプリかユーザーだけ");
@@ -187,11 +199,23 @@ export const links = [
   { from: succeed, to: "task", action: "receive", label: "成果が「AI の作業の成果」として届き、Generation が Task の言葉にする（外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足す。push の版はこの作業の元の項目）" },
   { from: fail, to: "task", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
   { from: stop, to: "task", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
+  { from: withdraw, to: "task", label: "AI の作業が終わったことにする（やらなくなったので、Action Item は果たさない）" },
   { from: decide, to: "task", label: "やめたなら、片付いた追う項目を事実の変化として受け取り、やめた理由を変化として残す。答えが返らないなら、AI の作業が終わったことにする" },
   { from: cancel, to: "task", label: "AI の作業を始めないまま終わる。追う項目が片付いたので取り消したなら、事実の変化として受け取る" },
 ];
 
 export const scenarios = {
+  "やらなくなった Action Item の作業は、アプリがやめる（理由はやらなくなった）": [
+    { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
+    { do: start, by: "アプリ", input: "続けられる" },
+    { do: withdraw, by: "ユーザー", denied: "アプリだけ" },
+    { do: withdraw, by: "アプリ", expect: { status: "止まった", stopReason: "やらなくなった" } },
+    { do: withdraw, by: "アプリ", denied: "終わっていないときだけ" },
+  ],
+  "待ち行列のうちにやらなくなったら、取り消す": [
+    { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
+    { do: withdraw, by: "アプリ", expect: { status: "取り消した", stopReason: "やらなくなった" } },
+  ],
   "質問を頼み、Claude Code が調べて答える": [
     { do: initial, by: "ユーザー", input: "質問", expect: { status: "待ち行列", tools: "読むだけ", trigger: "ユーザーが頼んだ" } },
     { do: start, by: "アプリ", input: "続けられる", expect: { status: "やっている" } },
