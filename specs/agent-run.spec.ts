@@ -48,7 +48,8 @@ export type StopReason =
   | "作業場所が消えた"
   | "ユーザーが取り消した"
   | "追う項目が片付いたので取り消した"
-  | "やらなくなった";
+  | "やらなくなった"
+  | "ユーザーが済ませた";
 
 export const Status = {
   /** 作業の順番を待っている */
@@ -81,7 +82,7 @@ export const actors: Record<string, Actor> = {
 /**
  * 作業を頼む・Action Item から始める
  *
- * 直す道具（Edit・Write・Bash）を渡すのは、PR を直す・コンフリクトを直すときだけ。それ以外は読むだけ。
+ * 直す道具（Edit・Write・Bash）を渡すのは、PR を直す・コンフリクトを直す・直す Action Item をやるときだけ。それ以外は読むだけ。
  */
 export function initial(actor: Actor, kind: Kind): AgentRun {
   ensure(actor.kind === "user" || actor.kind === "app", "ユーザーか、Action Item から始めるアプリだけ");
@@ -102,10 +103,11 @@ export function initial(actor: Actor, kind: Kind): AgentRun {
 }
 
 /** 順番が来たので、Claude Code を起動する */
-export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "続けられない"): AgentRun {
+export function start(run: AgentRun, actor: Actor, thread: "続けられる" | "続けられない", task: "開いている" | "開いていない"): AgentRun {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(run.status === "待ち行列", "待ち行列のときだけ");
   ensure(thread === "続けられる", "会話を続けられるときだけ（続けられないなら、先に新しい会話を始める）");
+  ensure(task === "開いている", "Task が要確認か todo のときだけ（完了待ち・終わった Task では始めない）");
   return { ...run, status: "やっている" };
 }
 
@@ -152,14 +154,14 @@ export function decide(run: AgentRun, actor: Actor, answer: "やめる" | "続�
 }
 
 /**
- * Action Item をやらなくなったので、作業をやめる（計画を立て直して外れた・分かれ道を選び直した・Task をやらないことにした）
+ * もう要らなくなった作業をやめる（Action Item をやらなくなった・ユーザーが自分で済ませた・Task をやらないことにした）
  *
  * アプリがやめる。ユーザーが止めたのか、やらなくなって止まったのかを、理由で分ける。待ち行列なら取り消す。
  */
-export function withdraw(run: AgentRun, actor: Actor): AgentRun {
+export function withdraw(run: AgentRun, actor: Actor, reason: "やらなくなった" | "ユーザーが済ませた"): AgentRun {
   ensure(actor.kind === "app", "アプリだけ");
   ensure(run.status === "待ち行列" || run.status === "やっている" || run.status === "判断中", "終わっていないときだけ");
-  return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった", stopReason: "やらなくなった" };
+  return { ...run, status: run.status === "待ち行列" ? "取り消した" : "止まった", stopReason: reason };
 }
 
 /** 待ち行列のうちに取り消す（追う項目が片付いた・ユーザーが取り消した。判断させずに取り消す。ADR-0016） */
@@ -179,7 +181,8 @@ export const inputs = {
     依存の更新: ["依存の更新を調べる"],
   },
   fail: { うまくいかなかった: ["うまくいかなかった"], アプリを閉じた: ["アプリを閉じた"], 作業場所が消えた: ["作業場所が消えた"] },
-  start: { 続けられる: ["続けられる"], 続けられない: ["続けられない"] },
+  start: { 続けられる: ["続けられる", "開いている"], 続けられない: ["続けられない", "開いている"], "Task が閉じた": ["続けられる", "開いていない"] },
+  withdraw: { やらなくなった: ["やらなくなった"], 済ませた: ["ユーザーが済ませた"] },
   cancel: { ユーザー: ["ユーザーが取り消した"], 片付いた: ["追う項目が片付いたので取り消した"] },
   decide: { やめる: ["やめる"], 続ける: ["続ける"], 答えが返らない: ["答えが返らない"] },
 };
@@ -195,26 +198,27 @@ export const invariants = {
 
 export const links = [
   { from: start, to: "task", action: "startWork", label: "Task を AI が作業中にする（待ち行列のあいだは作業中にしない）" },
-  { from: succeed, to: "task", action: "finishWork", label: "AI の作業が終わる。Action Item をやる作業なら、その Action Item を果たす" },
+  { from: succeed, to: "task", action: "finishWork", label: "AI の作業が終わる。Action Item をやる作業なら、番が来ていればその Action Item を果たす（番が来る前なら、番が来たときに果たす）" },
   { from: succeed, to: "task", action: "receive", label: "成果が「AI の作業の成果」として届き、Generation が Task の言葉にする（外への書き込みが要るなら、Generation が計画に書き込みで果たされる Action Item を足す。push の版はこの作業の元の項目）" },
-  { from: fail, to: "task", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
-  { from: stop, to: "task", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
-  { from: withdraw, to: "task", label: "AI の作業が終わったことにする（やらなくなったので、Action Item は果たさない）" },
-  { from: decide, to: "task", label: "やめたなら、片付いた追う項目を事実の変化として受け取り、やめた理由を変化として残す。答えが返らないなら、AI の作業が終わったことにする" },
+  { from: fail, to: "task", action: "stopWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
+  { from: stop, to: "task", action: "stopWork", label: "AI の作業が終わったことにする。Action Item をやる作業なら、報告だけ残して済ませない" },
+  { from: withdraw, to: "task", action: "stopWork", label: "AI の作業が終わったことにする（やらなくなったので、Action Item は果たさない）" },
+  { from: decide, to: "task", action: "stopWork", label: "やめたなら、片付いた追う項目を事実の変化として受け取り、やめた理由を変化として残す。答えが返らないなら、AI の作業が終わったことにする" },
   { from: cancel, to: "task", label: "AI の作業を始めないまま終わる。追う項目が片付いたので取り消したなら、事実の変化として受け取る" },
+  { from: fail, to: "agent-thread", action: "lose", label: "作業場所が消えたなら、会話を続けられなくする" },
 ];
 
 export const scenarios = {
   "やらなくなった Action Item の作業は、アプリがやめる（理由はやらなくなった）": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
     { do: start, by: "アプリ", input: "続けられる" },
-    { do: withdraw, by: "ユーザー", denied: "アプリだけ" },
-    { do: withdraw, by: "アプリ", expect: { status: "止まった", stopReason: "やらなくなった" } },
-    { do: withdraw, by: "アプリ", denied: "終わっていないときだけ" },
+    { do: withdraw, by: "ユーザー", input: "やらなくなった", denied: "アプリだけ" },
+    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "止まった", stopReason: "やらなくなった" } },
+    { do: withdraw, by: "アプリ", input: "やらなくなった", denied: "終わっていないときだけ" },
   ],
   "待ち行列のうちにやらなくなったら、取り消す": [
     { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
-    { do: withdraw, by: "アプリ", expect: { status: "取り消した", stopReason: "やらなくなった" } },
+    { do: withdraw, by: "アプリ", input: "やらなくなった", expect: { status: "取り消した", stopReason: "やらなくなった" } },
   ],
   "質問を頼み、Claude Code が調べて答える": [
     { do: initial, by: "ユーザー", input: "質問", expect: { status: "待ち行列", tools: "読むだけ", trigger: "ユーザーが頼んだ" } },
@@ -222,10 +226,19 @@ export const scenarios = {
     { do: succeed, by: "AI", expect: { status: "終わった" } },
     { do: stop, by: "ユーザー", denied: "やっている・判断中のときだけ" },
   ],
-  "PR を直すときだけ、直す道具を渡す": [{ do: initial, by: "ユーザー", input: "PR を直す", expect: { tools: "直す" } }],
+  "PR を直すときは、直す道具を渡す": [{ do: initial, by: "ユーザー", input: "PR を直す", expect: { tools: "直す" } }],
   "コンフリクトを直すときも、直す道具を渡す": [{ do: initial, by: "ユーザー", input: "コンフリクト", expect: { tools: "直す" } }],
   "Action Item から始める（番が来たら自動で・ボタンで）": [{ do: initial, by: "アプリ", input: "Action Item（読むだけ）", expect: { trigger: "Action Item から", tools: "読むだけ" } }],
   "直す Action Item には、直す道具を渡す": [{ do: initial, by: "アプリ", input: "Action Item（直す）", expect: { tools: "直す" } }],
+  "Task が終わったあとは、作業を始めない": [
+    { do: initial, by: "ユーザー", input: "質問" },
+    { do: start, by: "アプリ", input: "Task が閉じた", denied: "Task が要確認か todo のときだけ（完了待ち・終わった Task では始めない）" },
+  ],
+  "ユーザーが自分で済ませたら、アプリが作業をやめる": [
+    { do: initial, by: "アプリ", input: "Action Item（読むだけ）" },
+    { do: start, by: "アプリ", input: "続けられる" },
+    { do: withdraw, by: "アプリ", input: "済ませた", expect: { status: "止まった", stopReason: "ユーザーが済ませた" } },
+  ],
   "続けられない会話では、作業を始めない": [
     { do: initial, by: "ユーザー", input: "質問" },
     { do: start, by: "アプリ", input: "続けられない", denied: "会話を続けられるときだけ（続けられないなら、先に新しい会話を始める）" },

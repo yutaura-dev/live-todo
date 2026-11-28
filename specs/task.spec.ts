@@ -149,8 +149,9 @@ export const initial: Task = {
 };
 
 export const links = [
-  { from: complete, to: "agent-thread", label: "この Task の、待ち行列の作業（Agent Run）を取り消す（もう要らないので）" },
-  { from: dismiss, to: "agent-thread", label: "この Task の、待ち行列の作業（Agent Run）を取り消す（もう要らないので）" },
+  { from: complete, to: "agent-thread", label: "この Task の終わっていない作業（Agent Run）を、アプリがやめる（理由はやらなくなった。待ち行列なら取り消す）" },
+  { from: dismiss, to: "action-item", action: "skip", label: "まだの Action Item をすべてやらなくする（その作業は、Action Item の側からやめる）" },
+  { from: dismiss, to: "agent-thread", label: "Action Item から始めたのではない作業（質問に答える など）が終わっていなければ、アプリがやめる（理由はやらなくなった）" },
   { from: confirmCompletion, to: "completion-effect", action: "fire", label: "☑ が付いている完了したときにすることの書き込みを頼む" },
   { from: dismiss, to: "completion-effect", action: "withdraw", label: "やらないことにしたら、まだ頼んでいない完了したときにすることを取りやめる" },
   { from: detachFact, to: "completion-effect", action: "withdraw", label: "外した事実に書き込む完了したときにすることは、Decisions を通さずに取りやめる（完了待ちでは計画を直せないので、先に外す）" },
@@ -481,9 +482,7 @@ export const scenarios = {
   ],
   "完了したときにすることがあれば、完了待ちでチェックリストを確かめてから終わる": [
     { do: triage, by: "同期", input: "todo" },
-    { do: startWork, by: "アプリ" },
     { do: revisePlan, by: "AI" },
-    { do: finishWork, by: "アプリ" },
     { do: satisfyCompletion, by: "同期" },
     { do: complete, by: "AI", input: "完了したときにすることがある", expect: { status: "完了待ち", closure: null } },
     { do: confirmCompletion, by: "AI", input: "見せたとおり", denied: "ユーザーだけ" },
@@ -516,9 +515,7 @@ export const scenarios = {
   "完了条件を満たして、todo の Task はやり終え、事実の変化でやり直す": [
     { do: triage, by: "同期", input: "todo", expect: { status: "todo", completion: "未定" } },
     { do: complete, by: "AI", input: "完了条件を満たした", denied: "完了条件で終えるのは、todo で完了条件をすべて満たしたときだけ" },
-    { do: startWork, by: "アプリ" },
     { do: revisePlan, by: "AI", expect: { completion: "まだ" } },
-    { do: finishWork, by: "アプリ" },
     { do: satisfyCompletion, by: "同期", expect: { completion: "満たした" } },
     { do: satisfyCompletion, by: "同期", denied: "完了条件が決まっていて、まだのときだけ" },
     { do: complete, by: "AI", input: "完了条件を満たした", expect: { status: "closed", closure: { outcome: "done", reason: "完了条件を満たした" } } },
@@ -532,18 +529,14 @@ export const scenarios = {
     { do: makeUndetermined, by: "ユーザー", expect: { completion: "未定" } },
     { do: satisfyCompletion, by: "AI", denied: "完了条件が決まっていて、まだのときだけ" },
     { do: addPendingCriteria, by: "ユーザー", denied: "完了条件が決まっているときだけ" },
-    { do: startWork, by: "アプリ" },
     { do: revisePlan, by: "AI", expect: { completion: "まだ" } },
-    { do: finishWork, by: "アプリ" },
     { do: satisfyCompletion, by: "ユーザー" },
     { do: addPendingCriteria, by: "ユーザー", expect: { completion: "まだ" } },
     { do: complete, by: "ユーザー", input: "自分で", expect: { status: "closed" } },
   ],
   "要確認の Task は、完了条件を満たしても、自分で確かめるまで終えない": [
     { do: triage, by: "同期", input: "要確認" },
-    { do: startWork, by: "アプリ" },
     { do: revisePlan, by: "AI" },
-    { do: finishWork, by: "アプリ" },
     { do: satisfyCompletion, by: "同期" },
     { do: complete, by: "AI", input: "完了条件を満たした", denied: "完了条件で終えるのは、todo で完了条件をすべて満たしたときだけ" },
     { do: complete, by: "AI", input: "自分で", denied: "自分で完了にするのはユーザーだけ" },
